@@ -1,10 +1,24 @@
 # Portfolio AI SaaS Platform
 
+## Current Status
+
+**GATE 0: Project Initiation** ⏳  
+**Phase:** Charter + Context Documentation Complete  
+**Next Gate:** GATE 1 (Planning) — Awaiting approval to proceed to design & requirements  
+
+---
+
 ## Project Overview
 
 This is a production-grade, multi-tenant AI SaaS platform built on your personal infrastructure (2x A4500 GPUs + 300 Mbps fiber). The platform serves as both your professional portfolio showcase and a revenue-generating SaaS product.
 
-**Status**: Scaffolding Phase Complete. Ready for implementation and deployment.
+Following the **5-Gate Workflow** (psplan framework):
+- **GATE 0** ✅ Initiation (Charter, Vision, Red-lines, Invariants)
+- **GATE 1** ⏳ Planning (PRD, Architecture, Test Plan, .cursorrules)
+- **GATE 2** 🔲 Development (Code + Tests)
+- **GATE 3** 🔲 Review & Testing (QA + Code Review)
+- **GATE 4** 🔲 Release (Deployment + Handoff)
+- **GATE 5** 🔲 Production Validation (Monitoring + Closure)
 
 ## Core Architecture
 
