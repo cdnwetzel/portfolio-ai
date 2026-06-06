@@ -9,64 +9,71 @@
 
 ## System Overview
 
+**Architecture Philosophy:** Minimal display layer (cwetzel.com) + powerhouse compute core (T5810)
+
 ```
 ┌─────────────────────────────────────────────────────┐
-│         User Browser (cwetzel.com)                  │
-│  ┌───────────────────────────────────────────────┐  │
-│  │  Landing Page + Chat Interface (React)        │  │
-│  │  - Simple form input                          │  │
-│  │  - Stream responses in real-time              │  │
-│  │  - Mobile/tablet/desktop responsive           │  │
-│  └───────────────────────────────────────────────┘  │
+│         User Browser                                │
 └──────────────────────────┬──────────────────────────┘
                           │ HTTPS
                           ↓
-        ┌─────────────────────────────────────┐
-        │  Cloud Ubuntu VPS ($5/mo)           │
-        │  ┌─────────────────────────────────┤
-        │  │ Nginx (reverse proxy, SSL)       │
-        │  │ - Terminates HTTPS               │
-        │  │ - Static file serving            │
-        │  │ - WebSocket passthrough          │
-        │  └────────────┬────────────────────┤
-        │               │                     │
-        │  ┌────────────↓─────────────────────┤
-        │  │ FastAPI (port 8000)              │
-        │  │ - GET  /              (landing)  │
-        │  │ - GET  /chat          (UI)       │
-        │  │ - WS   /ws/chat       (stream)   │
-        │  │ - GET  /health        (monitor)  │
-        │  └────────────┬─────────────────────┤
-        │               │                     │
-        │  ┌────────────↓──────────────────────┤
-        │  │ Redis (rate limiting, cache)     │
-        │  │ - Session storage (optional)      │
-        │  │ - Rate limit counters             │
-        │  └─────────────────────────────────┘
-        └─────────────────────┬────────────────┘
-                              │ WireGuard Tunnel
-                              │ (10.0.0.0/24)
-                              ↓
-        ┌─────────────────────────────────────┐
-        │  Home Gentoo (Your Hardware)         │
-        │  ┌─────────────────────────────────┤
-        │  │ vLLM (2x A4500 NVLink)           │
-        │  │ - Model: Llama 2 70B (bfloat16)  │
-        │  │ - Tensor Parallel: 2 GPUs        │
-        │  │ - Batch Size: 4–8 (adaptive)     │
-        │  │ - Throughput: 50+ tok/sec        │
-        │  └────────────┬────────────────────┤
-        │               │                     │
-        │  ┌────────────↓─────────────────────┤
-        │  │ Qdrant Vector DB (in-memory)     │
-        │  │ - Chris's knowledge base         │
-        │  │ - ~200 documents (resume, case   │
-        │  │   studies, experience)           │
-        │  │ - Embedding: BAAI/bge-small      │
-        │  │ - Top-k: 5 documents per query   │
-        │  └─────────────────────────────────┘
-        └─────────────────────────────────────┘
+     ┌──────────────────────────────────────────┐
+     │  DISPLAY LAYER: cwetzel.com              │
+     │  (1 core, 1GB RAM, 25GB SSD)             │
+     │                                           │
+     │  ┌──────────────────────────────────────┤
+     │  │ Nginx (port 80/443)                  │
+     │  │ - Reverse proxy                      │
+     │  │ - SSL termination                    │
+     │  │ - Static file serving                │
+     │  └────────────┬─────────────────────────┤
+     │               │                          │
+     │  ┌────────────↓──────────────────────────┤
+     │  │ FastAPI (port 8000)                  │
+     │  │ - Landing page (GET /)               │
+     │  │ - Chat UI (GET /chat)                │
+     │  │ - WebSocket proxy (WS /ws/chat)      │
+     │  │ - Health check (GET /health)         │
+     │  │ - JUST a bridge to T5810             │
+     │  └────────────┬─────────────────────────┤
+     │               │                          │
+     └───────────────┼──────────────────────────┘
+                     │ WireGuard Tunnel
+                     │ 10.0.0.2 → 10.0.0.1
+                     │ Encrypted, <50ms latency
+                     ↓
+     ┌──────────────────────────────────────────┐
+     │  COMPUTE CORE: T5810 / 98.110.86.95      │
+     │  (2x Xeon, 2x A4500, 64GB+ RAM)          │
+     │  ← WHERE ALL THE POWER IS ←              │
+     │                                           │
+     │  ┌──────────────────────────────────────┤
+     │  │ vLLM (port 8001)                     │
+     │  │ - Model: Llama 2 70B (bfloat16)      │
+     │  │ - Tensor Parallel: 2 GPUs (NVLink)   │
+     │  │ - Throughput: 50+ tok/sec            │
+     │  │ - Inference work → GPU does it       │
+     │  └─────────────────────────────────────┤
+     │                                          │
+     │  ┌──────────────────────────────────────┤
+     │  │ Qdrant (port 6333)                   │
+     │  │ - Vector search for Chris's KB       │
+     │  │ - ~200 documents (resume, cases)     │
+     │  │ - Embedding: BAAI/bge-small          │
+     │  │ - Top-5 retrieval per query          │
+     │  └──────────────────────────────────────┤
+     │                                          │
+     │  ┌──────────────────────────────────────┤
+     │  │ Knowledge Base (on disk)             │
+     │  │ - Resume, case studies, experience   │
+     │  │ - Indexed at startup                 │
+     │  └──────────────────────────────────────┤
+     └──────────────────────────────────────────┘
 ```
+
+**Resource allocation:**
+- **cwetzel.com:** HTML serving, request routing, WebSocket proxying (lightweight)
+- **T5810:** All inference, vector search, knowledge base (GPU-accelerated)
 
 ---
 
@@ -82,9 +89,8 @@
 | **Model** | Llama 2 70B (bfloat16) | LLM inference | Open license, 70B quality, fits on 2x A4500 |
 | **Vector DB** | Qdrant (in-memory) | Semantic search for RAG | Simple, fast, no external deps |
 | **Embedding** | BAAI/bge-small-en-v1.5 | Doc→vector conversion | Lightweight, good quality |
-| **Cache/Rate Limit** | Redis | Session cache, rate limiting | Fast, simple to manage |
-| **Database** | PostgreSQL | Optional chat history storage | Not required day 30; added day 60+ |
-| **Networking** | WireGuard | Encrypted tunnel (home↔cloud) | Lightweight, high-performance VPN |
+| **Session Storage** | Browser localStorage | Chat history per session | Cleared on refresh (minimal MVP) |
+| **Networking** | WireGuard | Encrypted tunnel (cwetzel.com↔T5810) | Lightweight, high-performance VPN |
 | **Container** | Docker | Reproducible deployment | Standard for cloud deployment |
 | **Orchestration** | Docker Compose | Local dev + cloud | Simple, sufficient for MVP |
 
@@ -324,48 +330,55 @@ Latency feels fast even if total time is 5 seconds.
 
 ## Deployment Topology
 
-### Cloud Ubuntu ($5/mo VPS)
+### cwetzel.com (Minimal Display Server)
 
 ```
 ┌──────────────────────────────────────┐
-│ Ubuntu 24.04 LTS                     │
+│ Ubuntu 22.04 LTS (minimal specs)     │
+│ 1 core, 1GB RAM, 25GB SSD            │
 ├──────────────────────────────────────┤
 │ Nginx (port 80, 443)                 │
-│  - HTTPS termination (SSL cert)      │
-│  - Static file serving               │
+│  - HTTPS termination (Certbot SSL)   │
+│  - Static file serving (landing page)│
 │  - Reverse proxy to FastAPI:8000     │
 ├──────────────────────────────────────┤
-│ FastAPI container (port 8000)        │
-│  - HTTP server                       │
-│  - WebSocket handler                 │
-│  - RAG query logic                   │
-│  - Connects to vLLM (via WireGuard)  │
+│ FastAPI (port 8000, async)           │
+│  - Landing page endpoint             │
+│  - Chat UI endpoint                  │
+│  - WebSocket proxy (WS /ws/chat)     │
+│  - Health check endpoint             │
+│  - Lightweight request forwarding    │
 ├──────────────────────────────────────┤
-│ Redis container (port 6379)          │
-│  - Rate limiting                     │
-│  - Session cache                     │
-├──────────────────────────────────────┤
-│ WireGuard (port 51820)               │
-│  - Encrypted tunnel to home          │
-│  - Gateway to home inference         │
+│ WireGuard (port 51820 inbound)       │
+│  - Encrypted tunnel to T5810         │
+│  - Persistent connection             │
+│  - <50ms latency to home server      │
 └──────────────────────────────────────┘
 ```
 
-### Home Gentoo (Your Hardware)
+### T5810 (Powerhouse Compute)
 
 ```
 ┌──────────────────────────────────────┐
-│ Gentoo Linux                         │
+│ Gentoo Linux (precision-t5810)       │
+│ 2x Xeon, 2x NVIDIA A4500, 64GB+ RAM  │
 ├──────────────────────────────────────┤
-│ vLLM container (port 8001)           │
+│ vLLM (port 8001)                     │
+│  - Model: Llama 2 70B (bfloat16)     │
 │  - 2x A4500 (tensor parallel)        │
-│  - Llama 70B inference               │
-│  - Accessible via WireGuard          │
+│  - GPU throughput: 50+ tok/sec       │
+│  - Accessible via WireGuard tunnel   │
 ├──────────────────────────────────────┤
-│ Qdrant container (port 6333)         │
+│ Qdrant (port 6333)                   │
 │  - Vector DB (in-memory)             │
-│  - Chris's knowledge base            │
-│  - Accessible via WireGuard          │
+│  - Chris's knowledge base (~200 docs)│
+│  - Fast semantic search              │
+│  - Accessible via WireGuard tunnel   │
+├──────────────────────────────────────┤
+│ Knowledge Base (disk storage)        │
+│  - Resume, case studies, experience │
+│  - Loaded & indexed at startup       │
+│  - Served by Qdrant                  │
 └──────────────────────────────────────┘
 ```
 
@@ -389,34 +402,28 @@ Benefits:
 
 ---
 
-## Database Schema (Day 30 MVP)
+## Data Storage (Day 30 MVP)
 
-**Minimal schema (chat history optional):**
+**No server-side database needed for MVP.**
 
-```sql
--- Chat sessions (optional, can use browser session storage instead)
-CREATE TABLE IF NOT EXISTS chat_sessions (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    session_token VARCHAR(255) UNIQUE,
-    created_at TIMESTAMP DEFAULT now(),
-    last_activity_at TIMESTAMP DEFAULT now(),
-    messages_count INT DEFAULT 0
-);
+**Chat history:** Stored in browser (localStorage)
+- Chat clears on page refresh
+- No server persistence
+- Minimal infrastructure required
+- Perfect for demo/showcase
 
--- Chat messages (optional)
-CREATE TABLE IF NOT EXISTS chat_messages (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    session_id UUID REFERENCES chat_sessions(id) ON DELETE CASCADE,
-    role VARCHAR(10), -- 'user' or 'assistant'
-    content TEXT,
-    tokens_used INT,
-    created_at TIMESTAMP DEFAULT now()
-);
-```
+**Knowledge base:** Pre-indexed at T5810 startup
+- Loaded from disk files
+- Indexed into Qdrant
+- Served by Qdrant (no database needed)
 
-**Day 30 Recommendation:** Skip persistent storage. Use browser session storage (localStorage) for chat history. Simplifies deployment, no DB operations.
-
-**Day 60+ Addition:** Add full multi-tenant schema with users, API keys, usage tracking, billing.
+**Day 60+ Addition:** PostgreSQL for persistence
+- Chat history storage
+- User authentication
+- API key management
+- Usage tracking
+- Billing records
+- Multi-tenant row-level security
 
 ---
 
