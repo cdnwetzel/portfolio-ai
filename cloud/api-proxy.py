@@ -157,6 +157,11 @@ async def websocket_chat(websocket: WebSocket):
                 messages = body.get("messages", [])
                 body["stream"] = True
 
+                # Tune for grounded, deterministic responses
+                body["temperature"] = 0.3  # Lower = more deterministic, less hallucination
+                body["top_p"] = 0.9  # Slightly more focused than default
+                body["presence_penalty"] = 0.5  # Discourage repetitive generic phrases
+
                 # RAG: Search knowledge base for context
                 user_query = messages[-1].get("content", "") if messages else ""
                 context_docs = await search_knowledge_base(user_query, limit=3)
