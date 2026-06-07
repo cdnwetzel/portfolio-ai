@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Portfolio AI - Chat with Chris Wetzel</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <style>
+        body { @apply bg-gray-900 text-white; }
+        .chat-container { height: calc(100vh - 120px); }
+        .message { animation: slideIn 0.3s ease-out; }
+        @keyframes slideIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+        .ai-message {
+            line-height: 1.6;
+            font-size: 0.95rem;
+        }
+
+        .ai-message h1, .ai-message h2, .ai-message h3 {
+            @apply font-bold mt-3 mb-2;
+        }
+
+        .ai-message h1 { @apply text-lg; }
+        .ai-message h2 { @apply text-base; }
+        .ai-message h3 { @apply text-sm; }
+
+        .ai-message p {
+            @apply mb-2;
+        }
+
+        .ai-message ul, .ai-message ol {
+            @apply ml-4 mb-2;
+        }
+
+        .ai-message li {
+            @apply mb-1;
+        }
+
+        .ai-message ul li {
+            @apply list-disc;
+        }
+
+        .ai-message ol li {
+            @apply list-decimal;
+        }
+
+        .ai-message code {
+            @apply bg-gray-800 px-2 py-1 rounded text-sm font-mono;
+        }
+
+        .ai-message pre {
+            @apply bg-gray-800 p-3 rounded mb-2 overflow-x-auto;
+            max-width: 100%;
+            word-break: break-word;
+            white-space: pre-wrap;
+        }
+
+        .ai-message pre code {
+            @apply bg-transparent px-0 py-0;
+            word-break: break-word;
+            white-space: pre-wrap;
+        }
+
+        .ai-message blockquote {
+            @apply border-l-4 border-blue-500 pl-3 ml-0 text-gray-300 italic;
+        }
+
+        .ai-message strong {
+            @apply font-semibold text-white;
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-white">
+    <div id="root" class="min-h-screen flex flex-col">
+        <!-- Landing Page -->
+        <div id="landing" class="landing-page min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 flex items-center justify-center p-4">
+            <div class="max-w-2xl text-center">
+                <h1 class="text-5xl font-bold mb-4">Portfolio AI</h1>
+                <p class="text-xl text-gray-300 mb-6">Chat with an AI trained on 26 years of enterprise infrastructure expertise</p>
+
+                <div class="bg-gray-800 p-8 rounded-lg mb-8 text-left border border-gray-700">
+                    <h2 class="text-2xl font-semibold mb-4">About Chris Wetzel</h2>
+                    <ul class="space-y-2 text-gray-300">
+                        <li>✓ 26 years in IT infrastructure & systems</li>
+                        <li>✓ Senior infrastructure engineer (9.5 years MSP experience)</li>
+                        <li>✓ Expertise: cloud migration, SOC2 compliance, disaster recovery</li>
+                        <li>✓ Projects: 50→300 user global infrastructure, $1.5M+ risk prevented</li>
+                    </ul>
+                </div>
+
+                <button id="startBtn" class="px-8 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition">
+                    Start Chat
+                </button>
+
+                <p class="text-sm text-gray-400 mt-8">Ask about infrastructure, cloud, compliance, disaster recovery, or anything from my experience</p>
+            </div>
+        </div>
+
+        <!-- Chat Page -->
+        <div id="chat-page" class="chat-page hidden flex flex-col h-screen">
+            <!-- Header -->
+            <div class="bg-gray-800 p-4 border-b border-gray-700">
+                <div class="max-w-4xl mx-auto flex justify-between items-center">
+                    <h1 class="text-2xl font-bold">Chat with AI</h1>
+                    <button id="backBtn" class="px-4 py-2 text-gray-300 hover:text-white transition">← Back</button>
+                </div>
+            </div>
+
+            <!-- Messages -->
+            <div id="messages" class="flex-1 overflow-y-auto chat-container">
+                <div class="max-w-4xl mx-auto">
+                    <div class="space-y-4 p-4">
+                        <div class="text-center text-gray-500 py-20">
+                            <p class="text-lg">Start a conversation below</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Input -->
+            <div class="bg-gray-800 border-t border-gray-700 p-4">
+                <div class="max-w-4xl mx-auto flex gap-2">
+                    <input
+                        id="messageInput"
+                        type="text"
+                        placeholder="Ask me about infrastructure, cloud, compliance..."
+                        class="flex-1 px-4 py-3 rounded-lg bg-gray-900 border border-gray-600 text-white placeholder-gray-400 focus:outline-none focus:border-blue-600"
+                    />
+                    <button id="sendBtn" class="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition">
+                        Send
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const landing = document.getElementById('landing')
+        const chatPage = document.getElementById('chat-page')
+        const startBtn = document.getElementById('startBtn')
+        const backBtn = document.getElementById('backBtn')
+        const messageInput = document.getElementById('messageInput')
+        const sendBtn = document.getElementById('sendBtn')
+        const messagesDiv = document.getElementById('messages')
+
+        let messages = []
+        let ws = null
+
+        startBtn.addEventListener('click', () => {
+            landing.classList.add('hidden')
+            chatPage.classList.remove('hidden')
+            messageInput.focus()
+        })
+
+        backBtn.addEventListener('click', () => {
+            chatPage.classList.add('hidden')
+            landing.classList.remove('hidden')
+            if (ws) ws.close()
+            messages = []
+            messagesDiv.innerHTML = '<div class="space-y-4 p-4"><div class="text-center text-gray-500 py-20"><p class="text-lg">Start a conversation below</p></div></div>'
+        })
+
+        function renderMessages() {
+            if (messages.length === 0) {
+                messagesDiv.innerHTML = '<div class="space-y-4 p-4"><div class="text-center text-gray-500 py-20"><p class="text-lg">Start a conversation below</p></div></div>'
+                return
+            }
+
+            let container = messagesDiv.querySelector('.space-y-4')
+            if (!container) {
+                container = document.createElement('div')
+                container.className = 'space-y-4 p-4'
+                messagesDiv.innerHTML = ''
+                messagesDiv.appendChild(container)
+            }
+
+            // Only render new messages (don't re-render existing ones)
+            const existingCount = container.children.length
+            for (let i = existingCount; i < messages.length; i++) {
+                const msg = messages[i]
+                const div = document.createElement('div')
+                div.className = `flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} message`
+
+                const bubble = document.createElement('div')
+                bubble.className = `max-w-2xl px-4 py-3 rounded-lg ${msg.role === 'user' ? 'bg-blue-600' : 'bg-gray-700'}`
+                bubble.id = `msg-${i}`
+
+                if (msg.role === 'assistant') {
+                    bubble.innerHTML = marked.parse(msg.content)
+                    bubble.classList.add('ai-message')
+                } else {
+                    bubble.textContent = msg.content
+                }
+
+                div.appendChild(bubble)
+                container.appendChild(div)
+            }
+
+            // Update only the last message if it's streaming
+            if (messages.length > 0) {
+                const lastMsg = messages[messages.length - 1]
+                const lastBubble = document.getElementById(`msg-${messages.length - 1}`)
+                if (lastBubble && lastMsg.role === 'assistant') {
+                    lastBubble.innerHTML = marked.parse(lastMsg.content)
+                    lastBubble.classList.add('ai-message')
+                }
+            }
+
+            messagesDiv.scrollTop = messagesDiv.scrollHeight
+        }
+
+        async function sendMessage() {
+            const content = messageInput.value.trim()
+            if (!content) return
+
+            messages.push({ role: 'user', content })
+            messageInput.value = ''
+            sendBtn.disabled = true
+            renderMessages()
+
+            try {
+                const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+                const wsUrl = `${protocol}//${window.location.host}/ws/chat`
+
+                ws = new WebSocket(wsUrl)
+                let assistantMessage = ''
+
+                ws.onopen = () => {
+                    ws.send(JSON.stringify({
+                        type: 'chat',
+                        payload: {
+                            messages,
+                            model: 'qwen2.5-coder-14b-pscode',
+                            temperature: 0.7,
+                            max_tokens: 1024
+                        }
+                    }))
+                }
+
+                ws.onmessage = (event) => {
+                    try {
+                        const data = JSON.parse(event.data)
+                        if (data.type === 'chunk' && data.data?.choices?.[0]?.delta?.content) {
+                            assistantMessage += data.data.choices[0].delta.content
+                            if (messages[messages.length - 1]?.role === 'assistant') {
+                                messages[messages.length - 1].content = assistantMessage
+                            } else {
+                                messages.push({ role: 'assistant', content: assistantMessage })
+                            }
+                            renderMessages()
+                        }
+                    } catch (e) {
+                        console.error('Parse error:', e)
+                    }
+                }
+
+                ws.onerror = (error) => {
+                    console.error('WebSocket error:', error)
+                    messages.push({ role: 'assistant', content: 'Error connecting to API. Please try again.' })
+                    renderMessages()
+                    sendBtn.disabled = false
+                }
+
+                ws.onclose = () => {
+                    sendBtn.disabled = false
+                }
+            } catch (error) {
+                console.error('Error:', error)
+                sendBtn.disabled = false
+            }
+        }
+
+        messageInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter' && !sendBtn.disabled) {
+                sendMessage()
+            }
+        })
+
+        sendBtn.addEventListener('click', sendMessage)
+    </script>
+</body>
+</html>
