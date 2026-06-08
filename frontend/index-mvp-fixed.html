@@ -244,9 +244,11 @@
         }
 
         async function sendMessage() {
+            console.log('sendMessage called', { btnDisabled: sendBtn.disabled, inputValue: messageInput.value })
             const content = messageInput.value.trim()
             if (!content) return
 
+            console.log('Sending message:', content)
             messages.push({ role: 'user', content })
             messageInput.value = ''
             sendBtn.disabled = true
@@ -258,6 +260,7 @@
 
                 ws = new WebSocket(wsUrl)
                 let assistantMessage = ''
+                let closed = false
 
                 ws.onopen = () => {
                     ws.send(JSON.stringify({
@@ -274,6 +277,7 @@
                 ws.onmessage = (event) => {
                     try {
                         const data = JSON.parse(event.data)
+                        console.log('Message received:', data.type)
                         if (data.type === 'chunk' && data.data?.choices?.[0]?.delta?.content) {
                             assistantMessage += data.data.choices[0].delta.content
                             if (messages[messages.length - 1]?.role === 'assistant') {
@@ -282,6 +286,13 @@
                                 messages.push({ role: 'assistant', content: assistantMessage })
                             }
                             renderMessages()
+                        } else if (data.type === 'done') {
+                            console.log('Done received, enabling button')
+                            // Response complete, enable send button and close connection
+                            closed = true
+                            sendBtn.disabled = false
+                            console.log('Button disabled set to:', sendBtn.disabled)
+                            ws.close()
                         }
                     } catch (e) {
                         console.error('Parse error:', e)
@@ -290,12 +301,18 @@
 
                 ws.onerror = (error) => {
                     console.error('WebSocket error:', error)
-                    messages.push({ role: 'assistant', content: 'Error connecting to API. Please try again.' })
-                    renderMessages()
+                    if (!closed) {
+                        messages.push({ role: 'assistant', content: 'Error connecting to API. Please try again.' })
+                        renderMessages()
+                        closed = true
+                    }
                     sendBtn.disabled = false
                 }
 
                 ws.onclose = () => {
+                    if (!closed) {
+                        closed = true
+                    }
                     sendBtn.disabled = false
                 }
             } catch (error) {

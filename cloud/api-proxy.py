@@ -150,7 +150,12 @@ async def websocket_chat(websocket: WebSocket):
 
     try:
         while True:
-            data = await websocket.receive_json()
+            try:
+                data = await websocket.receive_json()
+                logger.info(f"Received message: {data.get('type')}")
+            except Exception as receive_error:
+                logger.info(f"WebSocket receive ended: {receive_error}")
+                break
 
             if data.get("type") == "chat":
                 body = data.get("payload", {})
@@ -171,15 +176,14 @@ async def websocket_chat(websocket: WebSocket):
                     logger.info(f"  {i}. {doc.get('title')} ({doc.get('source')})")
 
                 # Build system prompt with strict grounding rules
-                system_prompt = """You are Chris Wetzel. Answer only from the knowledge base below.
+                system_prompt = """You are Chris Wetzel. Answer questions based on the knowledge base below.
 
 RULES (non-negotiable):
 1. First person only. You ARE Chris — never say "as an IT infrastructure expert" in third-person.
-2. If the answer is fully supported by the context below, begin with [FOUND].
-3. If the context does not contain the answer, respond with exactly: "[NOT FOUND] I don't have that documented in my knowledge base." Then stop.
-4. If sources conflict, respond with: "[CONFLICT] Conflicting information found in local knowledge base." Do not resolve or guess.
-5. Ground responses in your documented experience. When discussing tools, prioritize those in your knowledge base (Gentoo, kernel_config.sh, shell scripts, vLLM, Qdrant). You can mention how you've used other tools, but only if grounded in actual projects.
-6. Cite specific machines, files, or case studies for every factual claim. Include relevant paths like gentoo-machines/machines/*, tools/*, or case study names.
+2. If the knowledge base doesn't contain the answer, explicitly say: "I don't have that documented in my knowledge base."
+3. Always cite specific files, machines, tools, or case studies from the knowledge base.
+4. Ground every factual claim in documented experience. Prioritize tools in your knowledge base: Gentoo, kernel_config.sh, shell scripts, vLLM, Qdrant.
+5. If sources conflict, state: "My knowledge base has conflicting information on this."
 
 Your documented systems: Precision T5810 (dual A4500 GPUs, PCIe Gen4), Surface Pro 8, ThinkPad X1, custom AMD build, NUC8i7. OS: Gentoo Linux. Automation: custom shell scripts in gentoo-machines repo.
 
@@ -199,47 +203,49 @@ KNOWLEDGE BASE (your actual documented work):
 
                 logger.info(f"Chat request with {len(context_docs)} context docs")
 
-                async with httpx.AsyncClient(timeout=120.0) as client:
-                    async with client.stream(
-                        "POST",
-                        f"{VLLM_URL}/v1/chat/completions",
-                        json=body
-                    ) as response:
-                        full_response = ""
-                        async for line in response.aiter_lines():
-                            if line.startswith("data: "):
-                                try:
-                                    chunk = json.loads(line[6:])
-                                    # Accumulate response text to check for [NOT FOUND]
-                                    if chunk.get("choices"):
-                                        delta_content = chunk["choices"][0].get("delta", {}).get("content", "")
-                                        full_response += delta_content
-                                    # Stream chunk to client (strip [FOUND]/[NOT FOUND]/[CONFLICT] tags before sending)
-                                    if chunk.get("choices"):
-                                        modified_chunk = chunk.copy()
-                                        delta = modified_chunk["choices"][0].get("delta", {})
-                                        if delta:
-                                            # Remove control tags from display (preserve spaces between words)
-                                            delta_content = delta.get("content", "")
-                                            if delta_content:
-                                                delta["content"] = delta_content.replace("[FOUND]", "").replace("[NOT FOUND]", "").replace("[CONFLICT]", "")
-                                            modified_chunk["choices"][0]["delta"] = delta
-                                        await websocket.send_json({
-                                            "type": "chunk",
-                                            "data": modified_chunk
-                                        })
-                                except:
-                                    pass
+                try:
+                    async with httpx.AsyncClient(timeout=120.0) as client:
+                        async with client.stream(
+                            "POST",
+                            f"{VLLM_URL}/v1/chat/completions",
+                            json=body
+                        ) as response:
+                            full_response = ""
+                            async for line in response.aiter_lines():
+                                if line.startswith("data: "):
+                                    try:
+                                        chunk = json.loads(line[6:])
+                                        # Accumulate response text for logging
+                                        if chunk.get("choices"):
+                                            delta_content = chunk["choices"][0].get("delta", {}).get("content", "")
+                                            full_response += delta_content
+                                        # Stream chunk to client directly
+                                        if chunk.get("choices"):
+                                            await websocket.send_json({
+                                                "type": "chunk",
+                                                "data": chunk
+                                            })
+                                    except json.JSONDecodeError:
+                                        pass
+                                    except Exception as chunk_error:
+                                        logger.error(f"Chunk error: {chunk_error}")
 
-                        # Log whether response was grounded
-                        if "[NOT FOUND]" in full_response:
-                            logger.info(f"Response: NOT FOUND — query had no supporting context")
-                        elif "[CONFLICT]" in full_response:
-                            logger.info(f"Response: CONFLICT — multiple sources disagree")
-                        else:
-                            logger.info(f"Response: FOUND — answer grounded in knowledge base")
+                    # Log grounding status based on response content
+                    if "don't have that documented" in full_response.lower():
+                        logger.info(f"Response: NOT GROUNDED — query had no supporting context")
+                    elif "conflicting information" in full_response.lower():
+                        logger.info(f"Response: CONFLICT — multiple sources disagree")
+                    else:
+                        logger.info(f"Response: GROUNDED — answer cites documented experience")
 
-                await websocket.send_json({"type": "done"})
+                    await websocket.send_json({"type": "done"})
+                    logger.info(f"Sent done message")
+                except Exception as stream_error:
+                    logger.error(f"Stream error: {stream_error}")
+                    try:
+                        await websocket.send_json({"type": "error", "message": str(stream_error)})
+                    except:
+                        pass
     except Exception as e:
         logger.error(f"WebSocket error: {e}")
     finally:

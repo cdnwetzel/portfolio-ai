@@ -43,7 +43,7 @@
 
 ### Stage 1: System Prompt Engineering
 - Replaced generic third-person advice with strict first-person grounding
-- Added [FOUND]/[NOT FOUND]/[CONFLICT] output tags for verifiable citations
+- Explicit grounding rules: cite sources, fall back to "not documented" if missing
 - Temperature: 0.3 → 0.1 (deterministic token selection)
 - top_p: 0.9 → 0.7 (eliminate long-tail creative tokens)
 - **Result:** 6/12 → 6/12 (baseline established, grounding improved)
@@ -124,9 +124,9 @@ All 4 failures are **test harness artifacts**, not grounding failures:
 
 ### Frontend (cwetzel.com — Ubuntu 22.04, systemd)
 - [x] FastAPI proxy (api-proxy.service) on port 8000
-- [x] System prompt with grounding rules and [FOUND]/[NOT FOUND] tags
+- [x] System prompt with grounding rules (cite sources, explicit "not documented" fallback)
 - [x] Semantic RAG pipeline: query → embedding → Qdrant search → context injection
-- [x] WebSocket handler for streaming responses
+- [x] WebSocket handler for streaming responses (clean output, no system artifacts)
 - [x] Temperature 0.1, top_p 0.7 for deterministic output
 
 ### Knowledge Base (Qdrant)

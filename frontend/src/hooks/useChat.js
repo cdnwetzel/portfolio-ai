@@ -29,6 +29,7 @@ export function useChat() {
     }
 
     let assistantMessage = ''
+    let closed = false
 
     ws.onmessage = (event) => {
       try {
@@ -46,6 +47,8 @@ export function useChat() {
             return updated
           })
         } else if (data.type === 'done') {
+          closed = true
+          setLoading(false)
           ws.close()
         }
       } catch (e) {
@@ -55,15 +58,21 @@ export function useChat() {
 
     ws.onerror = (error) => {
       console.error('WebSocket error:', error)
-      setMessages(prev => [...prev, {
-        role: 'assistant',
-        content: 'Error connecting to API. Please try again.'
-      }])
+      if (!closed) {
+        setMessages(prev => [...prev, {
+          role: 'assistant',
+          content: 'Error connecting to API. Please try again.'
+        }])
+        closed = true
+      }
       setLoading(false)
     }
 
     ws.onclose = () => {
-      setLoading(false)
+      if (!closed) {
+        closed = true
+        setLoading(false)
+      }
     }
 
     wsRef.current = ws
