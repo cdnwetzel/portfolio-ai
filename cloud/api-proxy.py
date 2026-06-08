@@ -219,10 +219,10 @@ KNOWLEDGE BASE (your actual documented work):
                                         modified_chunk = chunk.copy()
                                         delta = modified_chunk["choices"][0].get("delta", {})
                                         if delta:
-                                            # Remove control tags from display
+                                            # Remove control tags from display (preserve spaces between words)
                                             delta_content = delta.get("content", "")
                                             if delta_content:
-                                                delta["content"] = delta_content.replace("[FOUND]", "").replace("[NOT FOUND]", "").replace("[CONFLICT]", "").lstrip()
+                                                delta["content"] = delta_content.replace("[FOUND]", "").replace("[NOT FOUND]", "").replace("[CONFLICT]", "")
                                             modified_chunk["choices"][0]["delta"] = delta
                                         await websocket.send_json({
                                             "type": "chunk",
