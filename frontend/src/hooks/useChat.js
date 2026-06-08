@@ -1,5 +1,8 @@
 import { useState, useRef } from 'react'
 
+const DEBUG = typeof localStorage !== 'undefined' && localStorage.getItem('debug') === 'true'
+const log = DEBUG ? console.log.bind(console) : () => {}
+
 export function useChat() {
   const [messages, setMessages] = useState([])
   const [loading, setLoading] = useState(false)
