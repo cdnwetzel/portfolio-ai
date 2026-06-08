@@ -243,7 +243,10 @@ KNOWLEDGE BASE (your actual documented work):
     except Exception as e:
         logger.error(f"WebSocket error: {e}")
     finally:
-        await websocket.close()
+        try:
+            await websocket.close()
+        except Exception as close_error:
+            logger.debug(f"WebSocket already closed: {close_error}")
 
 if __name__ == "__main__":
     import uvicorn
