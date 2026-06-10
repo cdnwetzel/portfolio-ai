@@ -24,22 +24,20 @@ Following the **5-Gate Workflow** (psplan framework):
 
 ```
 User Browser
-    ↓
-Cloudflare / SSL
-    ↓
-Cloud Ubuntu ($5/month)
-├─ React Frontend (Shadcn UI)
-├─ Nginx (Reverse Proxy)
-├─ Redis (Caching/Rate-limiting)
-├─ pgBouncer (Connection Pooling)
-└─ FastAPI Proxy
-    ↓ [WireGuard Tunnel]
-    ↓
-Home Gentoo Server (Your Hardware)
-├─ vLLM (2x A4500 NVLink Inference)
-├─ PostgreSQL (Multi-tenant Data)
-├─ Qdrant (Vector DB)
-└─ GitHub Webhook Receiver
+    ↓ HTTPS
+cwetzel.com Cloud Server
+├─ Nginx (SSL, reverse proxy)
+├─ FastAPI API Proxy (port 8000)
+│  └─ Routes to T5810 via SSH tunnel
+└─ Static HTML frontend
+    ↓ [SSH Tunnel]
+    ↓ (ai.cwetzel.com:8004)
+T5810 Home Server (Gentoo, Your Hardware)
+├─ vLLM (port 8004, local LAN only)
+│  └─ Model: Qwen2.5-Coder-14B-Pscode
+│  └─ 2x A4500 NVLink, tensor parallel
+├─ Qdrant (port 6333, vector DB)
+└─ Knowledge base (indexed docs)
 ```
 
 ## Key Features
@@ -144,18 +142,15 @@ portfolio-saas/
 
 | Layer | Technology | Purpose |
 |-------|-----------|---------|
-| **GPU Inference** | vLLM + PyTorch | LLM serving on 2x A4500s |
-| **API Framework** | FastAPI + Uvicorn | Async Python backend |
-| **Database** | PostgreSQL + SQLAlchemy | Multi-tenant data + migrations |
-| **Caching** | Redis | Token caching, rate limiting |
-| **Vector DB** | Qdrant | RAG retrieval |
-| **Frontend** | React + Shadcn UI | SaaS dashboard |
-| **Reverse Proxy** | Nginx | SSL termination, static serving |
-| **Networking** | WireGuard | Encrypted tunnel (GPU ↔ Cloud) |
-| **Payments** | Stripe | Billing & subscriptions |
-| **Orchestration** | Docker Compose | Local dev + cloud deployment |
-| **Migrations** | Alembic | Database versioning |
-| **CI/CD** | GitHub Actions | Automated testing & deployment |
+| **GPU Inference** | vLLM + Qwen2.5-Coder-14B-Pscode | LLM serving on 2x A4500s (T5810) |
+| **API Framework** | FastAPI + Uvicorn | Async Python proxy (cloud server) |
+| **Vector DB** | Qdrant | Semantic search + RAG retrieval |
+| **Embeddings** | BAAI/bge-small-en-v1.5 | Document → vector conversion |
+| **Frontend** | Standalone HTML + vanilla JS | Simple, no build step |
+| **Reverse Proxy** | Nginx | SSL termination, static HTML serving |
+| **Networking** | SSH Tunnel | Secure T5810 ↔ Cloud communication (LAN-only access) |
+| **Knowledge Base** | Local filesystem | Indexed documents + case studies |
+| **Caching** | Browser localStorage | Per-session chat history |
 
 ## Key Configuration Files
 
@@ -181,34 +176,34 @@ portfolio-saas/
 | **POST** | /webhooks/github | GitHub push event | Secret |
 | **POST** | /webhooks/stripe | Stripe event | Secret |
 
-## Environment Variables
+## Actual Deployment Config
 
-```
-# Database
-DATABASE_URL=postgresql+asyncpg://user:pass@localhost/saas_prod
-REDIS_URL=redis://localhost:6379/0
-
-# JWT
-JWT_SECRET_KEY=your-secret-key-here
-JWT_ALGORITHM=HS256
-JWT_EXPIRATION_HOURS=24
-
-# Stripe
-STRIPE_SECRET_KEY=sk_live_...
-STRIPE_WEBHOOK_SECRET=whsec_...
-
-# GitHub
-GITHUB_TOKEN=ghp_...
-GITHUB_WEBHOOK_SECRET=your-webhook-secret
-
-# GPU Inference
-MODEL_ID=meta-llama/Llama-2-70b-chat-hf
+**On T5810 (Home Server):**
+```bash
+# vLLM Service (systemd: vllm-qwen.service)
+MODEL=qwen2.5-coder-14b-pscode
+PORT=8004
 TENSOR_PARALLEL_SIZE=2
+CUDA_VISIBLE_DEVICES=0,1
 GPU_MEMORY_UTILIZATION=0.85
 
-# Frontend
-FRONTEND_URL=https://app.yourdomain.com
-API_URL=https://api.yourdomain.com
+# Qdrant Vector DB (systemd: qdrant.service)
+QDRANT_PORT=6333
+STORAGE_PATH=/opt/qdrant/storage
+```
+
+**On Cloud Server (cwetzel.com):**
+```bash
+# API Proxy (systemd: api-proxy.service)
+VLLM_URL=http://ai.cwetzel.com:8004  # via SSH tunnel
+QDRANT_URL=http://ai.cwetzel.com:6333  # via SSH tunnel
+EMBED_URL=http://127.0.0.1:8005  # Embedding service
+```
+
+**SSH Tunnel (maintains T5810 access):**
+```bash
+# Cloud → T5810 forward tunnel
+# Port 8004 accessible as ai.cwetzel.com:8004 locally
 ```
 
 ## Deployment Checklist

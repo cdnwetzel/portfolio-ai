@@ -24,7 +24,7 @@ export function useChat() {
         type: 'chat',
         payload: {
           messages: [...messages, userMessage],
-          model: 'Qwen2.5-14B',
+          model: 'qwen2.5-coder-14b-pscode',
           temperature: 0.7,
           max_tokens: 1024
         }
