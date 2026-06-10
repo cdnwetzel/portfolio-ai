@@ -274,5 +274,42 @@ For issues during setup, refer to the troubleshooting section in each documentat
 
 ---
 
-**Last Updated**: 2026-06-06
-**Current Phase**: Scaffolding Complete, Ready for Implementation
+---
+
+## Documentation Alignment
+
+**Last Updated**: 2026-06-10  
+**Current Phase**: MVP (RAG Chat Demo)
+
+### Recent Changes (2026-06-10)
+
+After aligning docs with actual deployment:
+
+1. **Frontend**: Migrated from standalone HTML to React Vite build
+   - Source: `/frontend/src/` (React components, hooks)
+   - Deployed: `dev.cwetzel.com` (built via `npm run build`)
+   - Deployment: `rsync -avz --delete frontend/dist/ root@cwetzel.com:/var/www/dev.cwetzel.com/`
+   - See: [frontend/README-DEPLOYMENT.md](frontend/README-DEPLOYMENT.md)
+
+2. **Model**: Qwen2.5-Coder-14B-Pscode (not Llama 2 70B)
+   - Running on T5810 port 8004 (LAN-only)
+   - Accessible via SSH tunnel from cloud server
+   - Tensor parallel: 2x A4500 GPUs
+
+3. **Architecture**: Fixed docs to match actual setup
+   - Removed SaaS multi-tenant references (outdated)
+   - Clarified T5810 + SSH tunnel + cloud proxy structure
+   - Added actual tech stack (Qwen, Qdrant, BAAI embeddings, standalone HTML → React)
+
+### What This Means
+
+- **Documentation now reflects reality** (not aspirations)
+- **Frontend code matches deployed version** (useChat.js has correct model)
+- **Deployment is reproducible** (build + rsync script documented)
+- **Future changes should update both code AND docs**
+
+### Resources
+
+- **Deployment guide**: [frontend/README-DEPLOYMENT.md](frontend/README-DEPLOYMENT.md)
+- **Session notes**: Memory file `session-docs-alignment-2026-06-10.md`
+- **Architecture**: This file (updated above)
