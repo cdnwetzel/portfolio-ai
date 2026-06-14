@@ -1,4 +1,20 @@
 import { forwardRef } from 'react'
+import ReactMarkdown from 'react-markdown'
+import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
+import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism'
+
+const CodeBlock = ({ className, children }) => {
+  const language = /language-(\w+)/.exec(className || '')?.[1]
+  return language ? (
+    <SyntaxHighlighter style={oneDark} language={language} PreTag="div">
+      {String(children).replace(/\n$/, '')}
+    </SyntaxHighlighter>
+  ) : (
+    <code className="bg-gray-900 text-pink-300 px-1 py-0.5 rounded text-sm font-mono">
+      {children}
+    </code>
+  )
+}
 
 const ChatWindow = forwardRef(({ messages }, ref) => {
   return (
@@ -20,7 +36,16 @@ const ChatWindow = forwardRef(({ messages }, ref) => {
                   : 'bg-gray-700 text-gray-100'
               }`}
             >
-              <p className="whitespace-pre-wrap">{msg.content}</p>
+              {msg.role === 'user' ? (
+                <p className="whitespace-pre-wrap">{msg.content}</p>
+              ) : (
+                <ReactMarkdown
+                  className="prose prose-invert prose-sm max-w-none"
+                  components={{ code: CodeBlock }}
+                >
+                  {msg.content}
+                </ReactMarkdown>
+              )}
             </div>
           </div>
         ))
