@@ -7,7 +7,7 @@ const STARTER_CHIPS = [
   "What has Chris built?",
   "Tell me about the GPU home lab setup",
   "What startup experience does Chris have?",
-  "What's psaios?",
+  "Tell me about the pxx project",
   "How does this AI system work?",
   "Walk me through a major infrastructure project",
 ]
