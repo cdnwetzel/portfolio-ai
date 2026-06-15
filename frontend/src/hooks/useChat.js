@@ -3,7 +3,7 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 const DEBUG = typeof localStorage !== 'undefined' && localStorage.getItem('debug') === 'true'
 const log = DEBUG ? console.log.bind(console) : () => {}
 
-const FOLLOWUPS_RE = /\n?FOLLOWUPS:(\[[\s\S]*?\])\s*$/
+const FOLLOWUPS_RE = /\n?FOLLOWUPS:\s*(\[[\s\S]*?\])\s*$/
 
 function parseFollowups(content) {
   const match = content.match(FOLLOWUPS_RE)
@@ -44,7 +44,7 @@ export function useChat() {
           messages: allMessages,
           model: 'qwen2.5-coder-14b-pscode',
           temperature: 0.7,
-          max_tokens: 1024
+          max_tokens: 2048
         }
       }))
     }
