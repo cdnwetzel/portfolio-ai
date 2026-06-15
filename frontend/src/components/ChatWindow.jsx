@@ -142,8 +142,12 @@ const ChatWindow = forwardRef(({ messages, status, suggestions, error, onSuggest
         <div className="flex justify-start">
           <div className="bg-red-900/50 border border-red-700 text-red-300 px-4 py-3
                           rounded-lg text-sm flex items-center gap-3">
-            <span>{error === 'connection_lost' ? 'Connection lost' : 'Something went wrong'}</span>
-            {onRetry && (
+            <span>
+              {error === 'connection_lost' && 'Connection lost'}
+              {error === 'server_error' && 'Something went wrong'}
+              {error === 'prompt_too_long' && 'Message too long — please keep questions under 4,000 characters'}
+            </span>
+            {onRetry && error !== 'prompt_too_long' && (
               <button onClick={onRetry} className="underline hover:text-white transition">
                 Retry
               </button>

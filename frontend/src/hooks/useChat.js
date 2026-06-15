@@ -83,7 +83,8 @@ export function useChat() {
           ws.close()
         } else if (data.type === 'error') {
           settle()
-          setError('server_error')
+          const msg = data.message || ''
+          setError(msg.toLowerCase().includes('too long') ? 'prompt_too_long' : 'server_error')
           setStatus('idle')
           ws.close()
         }

@@ -19,6 +19,10 @@ VLLM_URL  = "http://127.0.0.1:8004"
 QDRANT_URL = "http://127.0.0.1:6333"
 EMBED_URL  = "http://127.0.0.1:8005"
 
+# Input limits
+MAX_PROMPT_CHARS = 4000   # hard cap per user message (~1000 tokens)
+MAX_HISTORY_CHARS = 24000 # sliding window: drop oldest pairs beyond this (~6000 tokens)
+
 # Persistent client — avoids TCP hand-shake overhead on every request
 _http: httpx.AsyncClient | None = None
 
@@ -164,7 +168,32 @@ async def websocket_chat(websocket: WebSocket):
             body["top_p"] = 0.7
             body["presence_penalty"] = 0.5
 
+            # Guard: hard cap on single prompt length
             user_query = messages[-1].get("content", "") if messages else ""
+            if len(user_query) > MAX_PROMPT_CHARS:
+                logger.warning(f"Prompt too long: {len(user_query)} chars from {websocket.client}")
+                await websocket.send_json({
+                    "type": "error",
+                    "message": f"Message too long (max {MAX_PROMPT_CHARS} characters)"
+                })
+                continue
+
+            # Sliding window: drop oldest user/assistant pairs when history is too large
+            total_chars = sum(len(m.get("content", "")) for m in messages)
+            while total_chars > MAX_HISTORY_CHARS and len(messages) > 2:
+                # Drop the oldest user+assistant pair (indices 0 and 1, skipping any system msg)
+                start = 1 if messages[0].get("role") == "system" else 0
+                if start + 1 < len(messages):
+                    removed = messages.pop(start)
+                    total_chars -= len(removed.get("content", ""))
+                    if start < len(messages) and messages[start].get("role") == "assistant":
+                        removed = messages.pop(start)
+                        total_chars -= len(removed.get("content", ""))
+                else:
+                    break
+            if total_chars > MAX_HISTORY_CHARS:
+                logger.info(f"History compacted to {total_chars} chars")
+
             context_docs = await search_knowledge_base(user_query, limit=3)
             logger.info(f"RAG: {len(context_docs)} docs for query: {user_query[:100]}")
             for i, doc in enumerate(context_docs, 1):
