@@ -9,7 +9,7 @@ My Linux system administration experience spans 26+ years managing production in
 - **Gentoo Linux**: Primary OS for personal infrastructure. Deep expertise in stage3 builds, custom kernel compilation for specific hardware, portage package management, and performance optimization.
 - **RHEL/CentOS/Fedora**: Managed in enterprise environments with RPM package management, SELinux policies, and systemd service architecture.
 - **Ubuntu/Debian**: Deployed in cloud environments and development infrastructure. APT package management and Upstart/systemd configuration.
-- **Custom build environments**: Built and maintained custom Linux distributions for specialized hardware deployments (NUC, ThinkPad, Surface Pro, AMD systems).
+- **Custom build environments**: Built and maintained custom Gentoo Linux configurations for specific hardware deployments (T5810 GPU server, ASRock B550 / Ryzen 9 5950X, Dell XPS 15 9510, Beelink MINI S, Surface Pro 6). NUC 11 and Surface Pro 9 profiled; OS not installed on those.
 
 ### Kernel Configuration & Optimization
 Configured Linux kernels across multiple hardware architectures:
