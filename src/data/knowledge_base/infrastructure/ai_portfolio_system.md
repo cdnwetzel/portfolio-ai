@@ -6,6 +6,10 @@ The AI chat at dev.cwetzel.com is a full-stack AI inference system built on pers
 
 The system demonstrates that high-quality AI inference can run on owned infrastructure at low cost, and that portfolio showcasing can be done with real engineering rather than polished demos.
 
+**The code is open source:** https://github.com/cdnwetzel/portfolio-saas
+
+If you're talking to this AI right now, you're using this system. The repo contains everything: the FastAPI proxy, the React frontend, the RAG pipeline, the Qdrant indexing scripts, and the vLLM service configuration.
+
 ---
 
 ## Full Stack
@@ -90,8 +94,12 @@ Comparable cloud GPU inference (2× A4500 equivalent) would cost $3-5/hour. At m
 
 **Persistent httpx client:** The FastAPI proxy uses a single `AsyncClient` via lifespan context rather than creating a new connection per request. This eliminates TCP handshake overhead on every RAG query.
 
-**Strict grounding system prompt:** Temperature=0.1, top_p=0.7 forces near-deterministic outputs. The model is instructed to say "I don't have that documented" rather than hallucinate, and to always cite sources from the KB.
+**Grounding system prompt:** Low temperature + strict rules force the model to say "I don't have that documented" rather than hallucinate, and to always cite sources from the KB. RAG context does the factual grounding; temperature handles response naturalness.
 
 **FOLLOWUPS pattern:** Instead of a separate API call to generate follow-up questions, the model appends them in a structured block at the end of its response. The frontend regex-parses and strips them, showing chips without an extra round-trip.
 
 **OpenRC not systemd:** The T5810 runs Gentoo with OpenRC. Service management uses `rc-service` and `rc-update` with environment files in `/etc/conf.d/`. This is by design — Gentoo's init flexibility lets me tune startup dependencies precisely.
+
+**Why RAG over fine-tuning:** A LoRA adapter (`20260429T133650Z-fc3ecc58`) was trained on the psaios Python project codebase. It's a code-completion adapter, not biographical. For factual Q&A about my experience, RAG with structured KB documents gives more accurate, citable answers than fine-tuning on narrative text. The LoRA exists but is not loaded in production.
+
+**Why owned hardware over cloud GPU:** At moderate usage, an A4500 NVLink pair pays for itself in months vs. cloud GPU rental. More importantly, it's a portfolio signal in itself — the infrastructure is the demonstration.

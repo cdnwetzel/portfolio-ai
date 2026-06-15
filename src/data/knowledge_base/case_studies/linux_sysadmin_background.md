@@ -14,10 +14,9 @@ My Linux system administration experience spans 26+ years managing production in
 ### Kernel Configuration & Optimization
 Configured Linux kernels across multiple hardware architectures:
 - **Precision T5810** (dual RTX A4500 GPUs): NVLink, PCIe Gen4, CUDA device support, GPU memory management, tensor parallelism for vLLM inference.
-- **Surface Pro 8** (Intel): Power management, touchscreen, wifi drivers, battery optimization for portable workloads.
-- **ThinkPad X1** (Intel): Laptop-specific optimizations, suspend/resume, trackpad drivers, thermal management.
-- **Custom AMD build**: Zen architecture optimizations, overclocking parameters, cooling system configuration.
-- **NUC8i7** (Intel NUC): Compact system optimization, passive cooling considerations, power efficiency.
+- **Surface Pro 6** (Intel): Power management, touchscreen, wifi drivers, battery optimization for portable workloads. (Surface Pro 9 profiled but not built.)
+- **Custom AMD build** (Ryzen 9 5950X): Zen 3 architecture optimizations, high-core-count compile workloads.
+- **NUC 11** (Intel i5): Compact system optimization, power efficiency. (Profiled; OS not installed.)
 
 Each machine maintains a tailored `kernel_config.sh` explaining *why* specific options are set for that hardware. This prevents cargo-cult configuration and documents the relationship between hardware capabilities and kernel options.
 

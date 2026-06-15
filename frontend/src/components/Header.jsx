@@ -1,6 +1,7 @@
 const GITHUB_URL   = 'https://github.com/cdnwetzel'
 const LINKEDIN_URL = 'https://linkedin.com/in/chris-wetzel'
 const EMAIL        = 'mailto:chris@cwetzel.com'
+const REPO_URL     = 'https://github.com/cdnwetzel/portfolio-saas'
 
 const GitHubIcon = () => (
   <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
@@ -72,6 +73,10 @@ export default function Header() {
           <a href={EMAIL}
              className="text-gray-400 hover:text-white transition" title="Email">
             <EmailIcon />
+          </a>
+          <a href={REPO_URL} target="_blank" rel="noreferrer"
+             className="hidden sm:inline text-xs text-gray-500 hover:text-gray-300 transition border border-gray-700 hover:border-gray-500 rounded px-2 py-1">
+            View source
           </a>
         </div>
       </div>

@@ -164,7 +164,7 @@ async def websocket_chat(websocket: WebSocket):
             body = data.get("payload", {})
             messages = body.get("messages", [])
             body["stream"] = True
-            body["temperature"] = 0.1
+            body["temperature"] = 0.35
             body["top_p"] = 0.7
             body["presence_penalty"] = 0.5
 

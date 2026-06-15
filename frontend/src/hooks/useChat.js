@@ -43,7 +43,6 @@ export function useChat() {
         payload: {
           messages: allMessages,
           model: 'qwen2.5-coder-14b-pscode',
-          temperature: 0.7,
           max_tokens: 2048
         }
       }))

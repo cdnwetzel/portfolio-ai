@@ -38,6 +38,9 @@ export default function Chat() {
             status={status}
             placeholder="Ask about infrastructure, AI systems, startup work…"
           />
+          <p className="text-center text-xs text-gray-600 mt-2">
+            Conversations are not stored or logged · Running on owned hardware · No cloud GPU
+          </p>
         </div>
       </div>
 
