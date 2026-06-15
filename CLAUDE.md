@@ -185,7 +185,7 @@ MODEL=qwen2.5-coder-14b-pscode
 PORT=8004
 TENSOR_PARALLEL_SIZE=2
 CUDA_VISIBLE_DEVICES=0,1
-GPU_MEMORY_UTILIZATION=0.85
+GPU_MEMORY_UTILIZATION=0.93  # 0.90 was too tight for vLLM v0.14.0 KV cache; 0.95 OOM with CUDA graphs
 
 # Qdrant Vector DB (systemd: qdrant.service)
 QDRANT_PORT=6333
