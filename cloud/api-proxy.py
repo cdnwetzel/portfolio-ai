@@ -167,6 +167,8 @@ KNOWLEDGE BASE:
                 content = doc.get("content", "")[:2000]
                 system_prompt += f"\n\n### {title} ({source})\n{content}"
 
+            system_prompt += '\n\n---\nFOLLOWUPS:["question one","question two","question three"] — replace with three real follow-up questions. This line must appear at the end of your response.'
+
             messages = inject_system_prompt(messages, system_prompt)
             body["messages"] = messages
 

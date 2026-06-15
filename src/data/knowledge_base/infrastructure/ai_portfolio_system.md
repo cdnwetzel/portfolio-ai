@@ -46,7 +46,7 @@ The knowledge base (indexed into Qdrant) includes:
 - Case studies: SAP B1 global deployment, AVD 200-user migration, SOC2 Type II, disaster recovery
 - Resume and professional context
 - Infrastructure write-ups: T5810 homelab, this AI system
-- Project docs: psaios (Python AI project)
+- Project docs: pxx (aider orchestrator), gentoo-machines (fleet config)
 
 Documents are chunked at 400 words with 50-word overlap, embedded, and stored as vectors.
 
@@ -60,7 +60,7 @@ The model was chosen for:
 - **Code understanding:** Strong structured output (JSON for FOLLOWUPS), markdown formatting, technical accuracy
 - **Speed:** Faster streaming than 32B models, perceptibly more responsive for portfolio demos
 
-The `pscode` naming in the service reflects a past experiment with a LoRA adapter trained on Python code (psaios project). The LoRA is NOT loaded in production — the base instruct model is used with RAG context instead of fine-tuning.
+The `pscode` naming in the service reflects a past experiment with a LoRA adapter trained on Python code. The LoRA is NOT loaded in production — the base instruct model is used with RAG context instead of fine-tuning.
 
 ---
 
@@ -100,6 +100,6 @@ Comparable cloud GPU inference (2× A4500 equivalent) would cost $3-5/hour. At m
 
 **OpenRC not systemd:** The T5810 runs Gentoo with OpenRC. Service management uses `rc-service` and `rc-update` with environment files in `/etc/conf.d/`. This is by design — Gentoo's init flexibility lets me tune startup dependencies precisely.
 
-**Why RAG over fine-tuning:** A LoRA adapter (`20260429T133650Z-fc3ecc58`) was trained on the psaios Python project codebase. It's a code-completion adapter, not biographical. For factual Q&A about my experience, RAG with structured KB documents gives more accurate, citable answers than fine-tuning on narrative text. The LoRA exists but is not loaded in production.
+**Why RAG over fine-tuning:** A LoRA adapter was previously trained on a Python code corpus as an experiment. It was a code-completion adapter, not biographical. For factual Q&A about my experience, RAG with structured KB documents gives more accurate, citable answers than fine-tuning on narrative text. The LoRA is not loaded in production.
 
 **Why owned hardware over cloud GPU:** At moderate usage, an A4500 NVLink pair pays for itself in months vs. cloud GPU rental. More importantly, it's a portfolio signal in itself — the infrastructure is the demonstration.
