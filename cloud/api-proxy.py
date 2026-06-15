@@ -11,6 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import httpx
 import json
 from datetime import datetime
+from context_manager import compact_history, inject_system_prompt, prompt_too_long, MAX_PROMPT_CHARS, MAX_HISTORY_CHARS
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -18,10 +19,6 @@ logger = logging.getLogger(__name__)
 VLLM_URL  = "http://127.0.0.1:8004"
 QDRANT_URL = "http://127.0.0.1:6333"
 EMBED_URL  = "http://127.0.0.1:8005"
-
-# Input limits
-MAX_PROMPT_CHARS = 4000   # hard cap per user message (~1000 tokens)
-MAX_HISTORY_CHARS = 24000 # sliding window: drop oldest pairs beyond this (~6000 tokens)
 
 # Persistent client — avoids TCP hand-shake overhead on every request
 _http: httpx.AsyncClient | None = None
@@ -130,7 +127,7 @@ async def websocket_chat(websocket: WebSocket):
 
             # Guard: hard cap on single prompt length
             user_query = messages[-1].get("content", "") if messages else ""
-            if len(user_query) > MAX_PROMPT_CHARS:
+            if prompt_too_long(user_query):
                 logger.warning(f"Prompt too long: {len(user_query)} chars from {websocket.client}")
                 await websocket.send_json({
                     "type": "error",
@@ -139,20 +136,10 @@ async def websocket_chat(websocket: WebSocket):
                 continue
 
             # Sliding window: drop oldest user/assistant pairs when history is too large
-            total_chars = sum(len(m.get("content", "")) for m in messages)
-            while total_chars > MAX_HISTORY_CHARS and len(messages) > 2:
-                # Drop the oldest user+assistant pair (indices 0 and 1, skipping any system msg)
-                start = 1 if messages[0].get("role") == "system" else 0
-                if start + 1 < len(messages):
-                    removed = messages.pop(start)
-                    total_chars -= len(removed.get("content", ""))
-                    if start < len(messages) and messages[start].get("role") == "assistant":
-                        removed = messages.pop(start)
-                        total_chars -= len(removed.get("content", ""))
-                else:
-                    break
-            if total_chars > MAX_HISTORY_CHARS:
-                logger.info(f"History compacted to {total_chars} chars")
+            before = len(messages)
+            messages = compact_history(messages)
+            if len(messages) < before:
+                logger.info(f"History compacted: {before} → {len(messages)} messages")
 
             context_docs = await search_knowledge_base(user_query, limit=3)
             logger.info(f"RAG: {len(context_docs)} docs for query: {user_query[:100]}")
@@ -179,9 +166,8 @@ KNOWLEDGE BASE:
                 content = doc.get("content", "")[:2000]
                 system_prompt += f"\n\n### {title} ({source})\n{content}"
 
-            if not any(m.get("role") == "system" for m in messages):
-                messages = [{"role": "system", "content": system_prompt}] + messages
-                body["messages"] = messages
+            messages = inject_system_prompt(messages, system_prompt)
+            body["messages"] = messages
 
             try:
                 async with _http.stream(

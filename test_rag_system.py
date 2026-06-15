@@ -1,132 +1,173 @@
 #!/usr/bin/env python3
 """
-Automated RAG test suite.
-Tests semantic search + chat grounding with synthetic questions.
-"""
+RAG system test suite.
+Requires the full stack running locally: api-proxy on :8000, vLLM on :8004,
+Qdrant on :6333, embedding service on :8005.
 
+Usage:
+    python test_rag_system.py
+"""
 import asyncio
 import json
 import websockets
 from typing import List, Tuple
 
-TEST_CASES = [
-    ("What is your experience with Gentoo Linux?", ["gentoo", "kernel", "portage", "openrc"], "Gentoo expertise"),
-    ("How do you configure kernel options for different hardware?", ["kernel_config", "hardware", "nuc", "xps", "surface"], "Kernel configuration"),
-    ("Tell me about your multi-machine Gentoo setup.", ["machine", "precision", "beelink", "xps", "surface"], "Infrastructure at scale"),
-    ("What is your experience with Linux system administration?", ["openrc", "gentoo", "configuration", "setup"], "Linux sysadmin background"),
-    ("How do you approach hardware compatibility in Linux?", ["hardware", "kernel", "driver", "patch"], "Hardware driver experience"),
-    ("How much have you saved clients through infrastructure consolidation?", ["vmware", "p2v", "800k", "hardware"], "Infrastructure ROI"),
-    ("Tell me about a multi-region virtual desktop project.", ["avd", "azure", "region", "latency"], "VDI deployment"),
-    ("How do you handle system updates across multiple machines?", ["update", "emerge", "gentoo", "portage"], "Update management"),
-    ("What's your experience with GPU-accelerated systems?", ["gpu", "nvlink", "precision", "cuda"], "GPU infrastructure"),
-    ("How do you manage kernel configuration across different hardware?", ["kernel", "hardware", "config", "laptop", "desktop"], "Cross-hardware kernel"),
-    ("Tell me about your infrastructure automation tools.", ["script", "tool", "harvest", "generate", "update"], "Automation and tooling"),
-    ("What infrastructure challenges have you solved?", ["infrastructure", "consolidation", "migration", "gentoo"], "General infrastructure"),
+WS_URL = "ws://127.0.0.1:8000/ws/chat"
+RESPONSE_TIMEOUT = 120  # seconds for a full response
+
+NOT_DOCUMENTED_PHRASE = "don't have that documented"
+
+# Positive cases: question + keywords that should appear in a grounded response.
+# Pass threshold: >=50% of keywords present.
+POSITIVE_CASES = [
+    ("What is your experience with Gentoo Linux?",
+     ["gentoo", "kernel", "portage", "openrc"],
+     "Gentoo expertise"),
+    ("Tell me about your multi-machine Gentoo setup.",
+     ["machine", "t5810", "surface", "amd"],
+     "Infrastructure fleet"),
+    ("How do you configure kernels for different hardware?",
+     ["kernel_config", "hardware", "driver", "patch"],
+     "Kernel configuration"),
+    ("What GPU hardware do you run for AI inference?",
+     ["a4500", "nvlink", "vllm", "tensor"],
+     "GPU inference setup"),
+    ("Tell me about your infrastructure automation tools.",
+     ["harvest", "generate", "kernel", "tools"],
+     "Automation tooling"),
+    ("How much have you saved clients through infrastructure consolidation?",
+     ["vmware", "p2v", "server", "cost"],
+     "Infrastructure ROI"),
+    ("Tell me about a multi-region virtual desktop project.",
+     ["avd", "azure", "migration", "user"],
+     "VDI deployment"),
+    ("What is the pxx project?",
+     ["aider", "memory", "endpoint", "observation"],
+     "pxx project"),
+    ("How do you handle system updates across your Gentoo machines?",
+     ["emerge", "update", "portage", "kernel"],
+     "Update management"),
+    ("What is the AI chat system at dev.cwetzel.com?",
+     ["qdrant", "rag", "vllm", "websocket"],
+     "Portfolio chat system"),
+    ("Tell me about your SOC2 compliance work.",
+     ["soc2", "audit", "control", "compliance"],
+     "SOC2 compliance"),
+    ("What is your SAP deployment experience?",
+     ["sap", "warehouse", "continent", "integration"],
+     "SAP deployment"),
 ]
 
-async def test_chat(question: str) -> str:
-    """Send a question via WebSocket chat."""
+# Negative cases: questions that are off-KB.
+# Pass condition: response contains the NOT_DOCUMENTED_PHRASE.
+NEGATIVE_CASES = [
+    ("What are your thoughts on Bitcoin and cryptocurrency investing?",
+     "Off-KB: cryptocurrency"),
+    ("Can you explain the history of the Roman Empire?",
+     "Off-KB: Roman history"),
+    ("What is the best programming language for a complete beginner to learn first?",
+     "Off-KB: beginner programming advice"),
+    ("Tell me about your experience with Kubernetes, Helm, and Terraform.",
+     "Off-KB: Kubernetes/Helm/Terraform"),
+]
+
+
+async def query(question: str) -> str:
+    """Send a question over WebSocket and collect the full streamed response."""
     try:
-        async with websockets.connect('ws://127.0.0.1:8000/ws/chat') as ws:
+        async with websockets.connect(WS_URL) as ws:
             await ws.send(json.dumps({
-                'type': 'chat',
-                'payload': {
-                    'model': 'qwen2.5-coder-14b-pscode',
-                    'messages': [{'role': 'user', 'content': question}]
+                "type": "chat",
+                "payload": {
+                    "model": "qwen2.5-coder-14b-pscode",
+                    "messages": [{"role": "user", "content": question}],
                 }
             }))
 
-            response = ''
-            while True:
-                try:
-                    msg = json.loads(await asyncio.wait_for(ws.recv(), timeout=2))
-                    if msg.get('type') == 'chunk':
-                        chunk = msg.get('data', {})
-                        if 'choices' in chunk:
-                            delta = chunk['choices'][0].get('delta', {})
-                            if 'content' in delta:
-                                response += delta['content']
-                    elif msg.get('type') == 'done':
-                        break
-                except asyncio.TimeoutError:
-                    break
+            response = ""
+            try:
+                async with asyncio.timeout(RESPONSE_TIMEOUT):
+                    while True:
+                        raw = await ws.recv()
+                        msg = json.loads(raw)
+                        if msg.get("type") == "chunk":
+                            delta = (msg.get("data", {})
+                                       .get("choices", [{}])[0]
+                                       .get("delta", {})
+                                       .get("content", ""))
+                            response += delta
+                        elif msg.get("type") in ("done", "error"):
+                            break
+            except asyncio.TimeoutError:
+                response += "  [TIMED OUT]"
 
             return response
     except Exception as e:
-        return f"[ERROR: {str(e)}]"
+        return f"[ERROR: {e}]"
 
-def check_keywords(response: str, keywords: List[str]) -> Tuple[int, List[str]]:
-    """Count matching keywords."""
-    response_lower = response.lower()
-    found = [kw for kw in keywords if kw.lower() in response_lower]
+
+def keyword_score(response: str, keywords: List[str]) -> Tuple[int, List[str]]:
+    lower = response.lower()
+    found = [kw for kw in keywords if kw.lower() in lower]
     return len(found), found
 
-async def run_tests():
-    """Run all test cases."""
-    print("=" * 80)
-    print("RAG SYSTEM TEST SUITE - Gentoo + Infrastructure Knowledge")
-    print("=" * 80)
-    print()
 
-    results = []
-    passed = 0
+async def run():
+    total = passed = 0
+    failures = []
 
-    for i, (question, keywords, description) in enumerate(TEST_CASES, 1):
-        print(f"[{i}/{len(TEST_CASES)}] {description}")
-        print(f"Q: {question}")
+    print("=" * 72)
+    print("RAG TEST SUITE")
+    print("=" * 72)
 
-        response = await test_chat(question)
-        found_count, found_keywords = check_keywords(response, keywords)
-        match_ratio = found_count / len(keywords) if keywords else 0
-        is_pass = match_ratio >= 0.5 and not response.startswith("[ERROR")
-
-        if is_pass:
+    # --- Positive cases ---
+    print(f"\nPositive cases ({len(POSITIVE_CASES)}) — expect grounded answers\n")
+    for question, keywords, label in POSITIVE_CASES:
+        total += 1
+        response = await query(question)
+        found_count, found = keyword_score(response, keywords)
+        ratio = found_count / len(keywords) if keywords else 0
+        ok = ratio >= 0.5 and not response.startswith("[ERROR")
+        if ok:
             passed += 1
-            status = "✓ PASS"
+            print(f"  ✓  {label}  ({found_count}/{len(keywords)} keywords)")
         else:
-            status = "✗ FAIL"
+            failures.append((label, question, response))
+            print(f"  ✗  {label}  ({found_count}/{len(keywords)} keywords: {found})")
+            print(f"     {response[:120]}...")
 
-        print(f"{status} ({found_count}/{len(keywords)} keywords: {', '.join(found_keywords)})")
-        print(f"Response: {response[:150]}...")
-        print()
+    # --- Negative cases ---
+    print(f"\nNegative cases ({len(NEGATIVE_CASES)}) — expect 'not documented' responses\n")
+    for question, label in NEGATIVE_CASES:
+        total += 1
+        response = await query(question)
+        ok = NOT_DOCUMENTED_PHRASE in response.lower() and not response.startswith("[ERROR")
+        if ok:
+            passed += 1
+            print(f"  ✓  {label}")
+        else:
+            failures.append((label, question, response))
+            print(f"  ✗  {label}")
+            print(f"     {response[:120]}...")
 
-        results.append({
-            'question': question,
-            'description': description,
-            'passed': is_pass,
-            'keywords_found': found_keywords,
-            'response': response[:300]
-        })
-
-    # Summary
-    print("=" * 80)
-    print(f"RESULTS: {passed}/{len(TEST_CASES)} tests passed ({100*passed/len(TEST_CASES):.0f}%)")
-    print("=" * 80)
+    # --- Summary ---
     print()
+    print("=" * 72)
+    pct = 100 * passed // total if total else 0
+    print(f"RESULT: {passed}/{total} passed ({pct}%)")
+    if failures:
+        print("\nFailed:")
+        for label, q, r in failures:
+            print(f"  {label}")
+            print(f"    Q: {q}")
+            print(f"    A: {r[:100]}...")
+    print("=" * 72)
 
-    for r in results:
-        status = "✓" if r['passed'] else "✗"
-        print(f"{status} {r['description']}")
-        if not r['passed']:
-            print(f"   Expected: {', '.join(r.get('keywords_found', []))}")
-            print(f"   Got: {r['response'][:80]}...")
-        print()
+    if passed >= total * 0.75:
+        print("✅ RAG grounding looks solid.")
+    else:
+        print("⚠️  Below 75% pass rate — check KB coverage or model behavior.")
 
-    return passed, len(TEST_CASES)
-
-async def main():
-    try:
-        passed, total = await run_tests()
-        if passed >= total * 0.7:
-            print(f"✅ {passed}/{total} tests passed. RAG is grounding well.")
-            return 0
-        else:
-            print(f"⚠️  {passed}/{total} tests passed. Check response quality.")
-            return 0
-    except Exception as e:
-        print(f"✗ Error: {e}")
-        return 1
 
 if __name__ == "__main__":
-    import sys
-    sys.exit(asyncio.run(main()))
+    asyncio.run(run())
