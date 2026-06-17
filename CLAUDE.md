@@ -34,11 +34,19 @@ cwetzel.com Cloud Server
     ↓ (ai.cwetzel.com:8004)
 T5810 Home Server (Gentoo, Your Hardware)
 ├─ vLLM (port 8004, local LAN only)
-│  └─ Model: Qwen2.5-Coder-14B-Pscode
+│  └─ Model: Qwen2.5-Coder-14B-Pscode (BF16, 16K context)
 │  └─ 2x A4500 NVLink, tensor parallel
 ├─ Qdrant (port 6333, vector DB)
+├─ Embedding service (port 8005, all-MiniLM-L6-v2, CPU)
+├─ Reranker service (port 8006, bge-reranker-base, CPU)
 └─ Knowledge base (indexed docs)
 ```
+
+**RAG pipeline:** query → embed (8005) → Qdrant cosine top-15 → rerank to top-5
+(8006, CPU cross-encoder) → inject into prompt → vLLM stream. The reranker adds
+precision the bi-encoder cosine can't: MiniLM surfaces candidates, the cross-encoder
+picks the best 5. Runs CPU-only on the T5810's idle 256GB DDR4 — no VRAM contention
+with vLLM. Fails open (cosine top-5) if the reranker is down.
 
 ## Key Features
 
@@ -144,8 +152,9 @@ portfolio-saas/
 |-------|-----------|---------|
 | **GPU Inference** | vLLM + Qwen2.5-Coder-14B-Pscode | LLM serving on 2x A4500s (T5810) |
 | **API Framework** | FastAPI + Uvicorn | Async Python proxy (cloud server) |
-| **Vector DB** | Qdrant | Semantic search + RAG retrieval |
-| **Embeddings** | BAAI/bge-small-en-v1.5 | Document → vector conversion |
+| **Vector DB** | Qdrant | Semantic search + RAG retrieval (cosine top-15) |
+| **Embeddings** | all-MiniLM-L6-v2 (384-d) | Query/document → vector (CPU service, port 8005) |
+| **Reranker** | bge-reranker-base | Cross-encoder precision, cosine top-15 → top-5 (CPU, port 8006) |
 | **Frontend** | Standalone HTML + vanilla JS | Simple, no build step |
 | **Reverse Proxy** | Nginx | SSL termination, static HTML serving |
 | **Networking** | SSH Tunnel | Secure T5810 ↔ Cloud communication (LAN-only access) |
@@ -197,10 +206,13 @@ STORAGE_PATH=/opt/qdrant/storage
 # API Proxy (systemd: api-proxy.service)
 VLLM_URL=http://ai.cwetzel.com:8004  # via SSH tunnel
 QDRANT_URL=http://ai.cwetzel.com:6333  # via SSH tunnel
-EMBED_URL=http://127.0.0.1:8005  # Embedding service
+EMBED_URL=http://127.0.0.1:8005  # Embedding service (tunneled to T5810)
+RERANK_URL=http://127.0.0.1:8006  # Reranker service (tunneled to T5810)
 ```
 
 **SSH Tunnel (maintains T5810 access):**
+Forwards ports 8004 (vLLM), 8005 (embeddings), 8006 (reranker), 6333 (Qdrant)
+from T5810 to the cloud server. Managed by `portfolio-ai-tunnel.service` (systemd).
 ```bash
 # Cloud → T5810 forward tunnel
 # Port 8004 accessible as ai.cwetzel.com:8004 locally

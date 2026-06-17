@@ -16,9 +16,16 @@ from context_manager import compact_history, inject_system_prompt, prompt_too_lo
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-VLLM_URL  = "http://127.0.0.1:8004"
+VLLM_URL   = "http://127.0.0.1:8004"
 QDRANT_URL = "http://127.0.0.1:6333"
 EMBED_URL  = "http://127.0.0.1:8005"
+RERANK_URL = "http://127.0.0.1:8006"
+
+# RAG retrieval: pull a wide candidate set via cosine, then rerank to the best few.
+# MiniLM cosine is imprecise — good enough to surface candidates into the top-20,
+# not to pick the best 5. The CPU cross-encoder (T5810:8006) closes that gap.
+RAG_RETRIEVE_LIMIT = 15   # candidates from Qdrant (bi-encoder cosine); ~3s CPU rerank
+RAG_TOP_K = 5             # final chunks after cross-encoder reranking
 
 # Persistent client — avoids TCP hand-shake overhead on every request
 _http: httpx.AsyncClient | None = None
@@ -64,8 +71,35 @@ async def search(request: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-async def search_knowledge_base(query: str, limit: int = 3) -> list:
-    """Embed query then vector-search Qdrant. Uses persistent httpx client."""
+async def rerank_documents(query: str, payloads: list, top_k: int) -> list:
+    """Re-score retrieved chunks with the CPU cross-encoder (T5810:8006); return best top_k.
+    Fails open: if the reranker is unavailable, fall back to the cosine order's top_k so
+    chat never breaks on a reranker outage."""
+    if not payloads:
+        return payloads
+    try:
+        documents = [p.get("content", "") for p in payloads]
+        resp = await _http.post(
+            f"{RERANK_URL}/rerank",
+            json={"query": query, "documents": documents, "top_k": top_k},
+            timeout=10.0,
+        )
+        if resp.status_code != 200:
+            logger.error(f"Rerank failed: {resp.status_code}; falling back to cosine top-{top_k}")
+            return payloads[:top_k]
+        results = resp.json().get("results", [])
+        reranked = [payloads[r["index"]] for r in results]
+        logger.info(f"Reranked {len(payloads)} candidates -> top {len(reranked)}")
+        return reranked
+    except Exception as e:
+        logger.error(f"Rerank error: {e}; falling back to cosine top-{top_k}")
+        return payloads[:top_k]
+
+
+async def search_knowledge_base(query: str, retrieve_limit: int = RAG_RETRIEVE_LIMIT,
+                                top_k: int = RAG_TOP_K) -> list:
+    """Embed query, vector-search Qdrant for a wide candidate set, then rerank to top_k.
+    Uses persistent httpx client."""
     try:
         # Embed
         embed_resp = await _http.post(
@@ -80,10 +114,10 @@ async def search_knowledge_base(query: str, limit: int = 3) -> list:
         query_embedding = embed_resp.json()["embedding"]
         logger.info(f"Query embedded ({len(query_embedding)} dims)")
 
-        # Search
+        # Search — pull a wide candidate set; precision comes from the reranker
         search_resp = await _http.post(
             f"{QDRANT_URL}/collections/documents/points/search",
-            json={"vector": query_embedding, "limit": limit, "with_payload": True},
+            json={"vector": query_embedding, "limit": retrieve_limit, "with_payload": True},
             timeout=10.0
         )
         if search_resp.status_code != 200:
@@ -92,8 +126,8 @@ async def search_knowledge_base(query: str, limit: int = 3) -> list:
 
         results = search_resp.json().get("result", [])
         payloads = [r.get("payload", {}) for r in results]
-        logger.info(f"Search returned {len(payloads)} results")
-        return payloads
+        logger.info(f"Cosine search returned {len(payloads)} candidates")
+        return await rerank_documents(query, payloads, top_k)
 
     except Exception as e:
         logger.error(f"Search error: {e}")
@@ -141,7 +175,7 @@ async def websocket_chat(websocket: WebSocket):
             if len(messages) < before:
                 logger.info(f"History compacted: {before} → {len(messages)} messages")
 
-            context_docs = await search_knowledge_base(user_query, limit=3)
+            context_docs = await search_knowledge_base(user_query)
             logger.info(f"RAG: {len(context_docs)} docs for query: {user_query[:100]}")
             for i, doc in enumerate(context_docs, 1):
                 logger.info(f"  {i}. {doc.get('title')} ({doc.get('source')})")
@@ -164,7 +198,7 @@ KNOWLEDGE BASE:
             for doc in context_docs:
                 title   = doc.get("title", "Unknown")
                 source  = doc.get("source", "")
-                content = doc.get("content", "")[:2000]
+                content = doc.get("content", "")[:3000]  # full ~400-word chunk; top-5 fits 16K budget
                 system_prompt += f"\n\n### {title} ({source})\n{content}"
 
             system_prompt += '\n\n---\nFOLLOWUPS:["question one","question two","question three"] — replace with three real follow-up questions. This line must appear at the end of your response.'

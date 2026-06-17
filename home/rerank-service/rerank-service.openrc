@@ -1,0 +1,26 @@
+#!/sbin/openrc-run
+# Install to /etc/init.d/rerank-service (root-owned, 0755)
+# Enable: rc-update add rerank-service default
+# Mirrors embed-service (port 8005); CPU cross-encoder reranker on port 8006.
+
+name="Reranker Service"
+description="bge-reranker-base CPU cross-encoder FastAPI server (RAG precision)"
+
+supervisor="supervise-daemon"
+command="/home/chris/miniforge3/bin/python3"
+command_args="/opt/rerank-service/rerank.py"
+pidfile="/run/rerank-service.pid"
+respawn_delay=5
+respawn_max=5
+respawn_period=30
+command_user="chris:chris"
+
+depend() {
+    need localmount
+    after bootmisc
+}
+
+start_pre() {
+    mkdir -p /opt/rerank-service
+    chown -R chris:chris /opt/rerank-service
+}
