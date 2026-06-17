@@ -2,10 +2,10 @@
 """
 repo_to_kb.py — Generate a portfolio KB doc from a repo using the local LoRA.
 
-Strategy: map-reduce over chunks so no content is lost to truncation.
-  1. Split all discovered markdown into ~12k-char chunks
-  2. Extract key facts from each chunk independently (map)
-  3. Synthesize all fact extracts into the final KB doc (reduce)
+Strategy: README-first map-reduce. README gets its own dedicated extract pass
+(it is the authoritative source). All other docs are chunked and extracted as
+supporting context. Facts are labeled PRIMARY vs SUPPORTING so the synthesize
+step knows what to trust when details conflict.
 
 Usage:
     python scripts/repo_to_kb.py /path/to/repo [--url https://github.com/...] [--out kb_doc.md]
@@ -22,12 +22,11 @@ import requests
 VLLM_URL = os.environ.get("VLLM_URL", "http://10.0.1.125:8003")
 MODEL = os.environ.get("KB_MODEL", "pscode-prod")
 
-# Chunk size for map phase (~3k tokens each, well within context limit)
+# Chunk size for map phase (~3k tokens, well within the 16k context limit)
 CHUNK_CHARS = 12_000
 
-# Read these first, in order
+# Priority order for non-README docs
 MD_PRIORITY = [
-    "README.md",
     "architecture.md", "ARCHITECTURE.md",
     "VISION.md", "vision.md",
     "STATUS.md",
@@ -36,93 +35,178 @@ MD_PRIORITY = [
     "CONVENTIONS.md",
     "CLAUDE.md", "AGENTS.md", "GEMINI.md",
     "pending-tasks.md",
-    "CHANGELOG.md",
 ]
 
-# Directories that are never project content
 EXCLUDE_DIRS = {
     ".git", ".venv", "venv", "env",
     "node_modules", ".pytest_cache", "__pycache__",
     "site-packages", ".mypy_cache", ".ruff_cache",
     "archive", "review", "reviews", ".claude",
     "dist", "build", ".eggs",
-    "planning",  # internal planning artifacts
+    "planning",
 }
 
-# Max facts chunks to feed into a single synthesize call (~16k token limit)
-MAX_CHUNKS_PER_SYNTHESIZE = 8
-
-# Top-level subdirs to scan for additional .md files (after priority files)
-# Note: "plans" excluded — internal planning artifacts, not useful for KB
 CONTENT_SUBDIRS = ["docs", "specs", "services", "deploy"]
 
 EXCLUDE_FILES = {"CHANGELOG.md", "LICENSE.md", "LICENSE", ".aider.chat.history.md"}
 
-SYSTEM_PROMPT = """You generate knowledge base documents for a technical portfolio chatbot.
-Documents are chunked and indexed for RAG retrieval, so they must be dense with specific,
-searchable facts: version numbers, counts, names, file paths, architectural decisions, and lessons."""
+# Max fact groups to feed into a single synthesize call (context limit guard)
+MAX_CHUNKS_PER_SYNTHESIZE = 8
 
-EXTRACT_PROMPT = """You are reading part {chunk_num} of {total_chunks} from a software repository.
-Extract every specific, concrete fact that would be useful in a technical KB doc:
-- What the project does and its current version/status
-- Architecture: components, ports, protocols, file paths, data flows
-- Key features with specific details (counts, names, behaviors)
-- Engineering decisions and why they were made
-- Test counts, tooling, quality practices
-- Hard-won lessons and non-obvious insights
-- Tech stack: languages, libraries, infrastructure
+SYSTEM_PROMPT = """You extract and synthesize facts for a professional technical portfolio knowledge base.
+This is used by recruiters, collaborators, and clients to understand the author's engineering work.
+Accuracy is non-negotiable — errors here misrepresent someone's career. Be precise and complete."""
+
+# README gets a dedicated extract with a thorough checklist — it is the authoritative source
+README_EXTRACT_PROMPT = """You are extracting facts from the README of a software repository for a professional portfolio KB.
+The README is the PRIMARY source — extract every concrete detail. Miss nothing.
+
+Work through this checklist explicitly:
+
+PROJECT IDENTITY
+- Project name, one-line description
+- Version number and current status (alpha/beta/stable/v1.0 etc.)
+- PyPI package name and install command (exact)
+- GitHub URL
+- Any separately installable sub-packages or standalone components
+
+CLI COMMANDS & FLAGS — list every one found, including:
+- Default invocation and what it does
+- Edit/write modes and their flags
+- Autonomous or loop modes (--loop, --heal, --self-fix, etc.)
+- Diagnostic/health commands (--doctor, --self-test, --self-lint, etc.)
+- Any slash commands (/recall, /remember, /forget, etc.)
+- Flags that pass through to underlying tools
+
+ARCHITECTURE — extract specifically:
+- Each named component and what it does
+- Port numbers for every service
+- File paths and config file locations
+- The exact process handoff pattern (e.g. os.execv, subprocess, exec)
+- Data flow: what goes in, what comes out, where it goes next
+- What runs locally vs remotely
+
+DESIGN DECISIONS — why each architectural choice was made:
+- Why os.execv (or equivalent) instead of subprocess/wrapper
+- Why fail-closed vs fail-open
+- Why local vs cloud
+- Any "deliberate" or "intentional" design choices with stated reasons
+
+STANDALONE COMPONENTS
+- Any sub-package installable independently (pip install X)
+- Services that can run standalone
+
+TEST SUITE
+- The count from the project's OWN pytest/test runner (label as "project test suite")
+- Do NOT count install verification tests as the project test suite
+- If multiple counts appear, list each with its source
+
+NAMED OPTIMIZATIONS & ALGORITHMS
+- Cache layers and their speedup (LRU cache, etc.)
+- Search algorithms with their parameters (HNSW, BM25 weight %, vector weight %)
+- Performance figures (latency, dataset size benchmarks)
+
+MULTI-TOOL OR MULTI-MODEL PATTERNS
+- Parallel reviewer setups (multiple AI tools reviewing simultaneously)
+- Multi-model routing or fallback chains
+- Named reviewer tools used
+
+ENVIRONMENT & CONFIG
+- Every environment variable name and default value
+- Config file locations
+- Override mechanisms
 
 Repository: {repo_url}
+
+README content:
+---
+{content}
+---
+
+Extract every fact found. One fact per line. Group by the checklist categories above.
+Mark any metric that is a goal/target (not yet measured) with "(target)".
+Mark install verification test counts with "(install check, not project test suite)":"""
+
+# Supporting docs get a thorough but briefer extract
+SUPPORTING_EXTRACT_PROMPT = """You are extracting facts from part {chunk_num} of {total_chunks} of the supporting documentation
+for a software repository. These facts supplement the README.
+
+Look specifically for anything NOT typically in a README:
+- Internal architecture details, file paths, class/function names
+- Engineering decisions with reasons (why X was chosen over Y)
+- Lessons learned, what broke, what was surprising
+- CLI commands or features not documented in README
+- Test counts from the project's own pytest suite (NOT install verification counts)
+- Named sub-features with implementation specifics (cache hit rates, algorithm parameters)
+- Multi-tool patterns (parallel reviewers, concurrent LLM calls)
+- Standalone installable sub-packages
+
+Repository: {repo_url}
+Source: chunk {chunk_num}/{total_chunks} of supporting docs
 
 ---
 {content}
 ---
 
-List all concrete facts found in this chunk. Be specific — include numbers, names, and paths exactly as written. One fact per line, grouped loosely by topic.
-If a number appears as a goal or target (e.g. "we plan to reach 1500 tests"), mark it as "(target)" not a fact. Only report measured/observed values as plain facts:"""
+Extract concrete facts not already obvious from a typical README. One fact per line.
+Mark any metric that is a goal/target with "(target)".
+Mark install verification test counts with "(install check, not project test suite)":"""
 
-SYNTHESIZE_PROMPT = """You are writing a knowledge base document for a technical portfolio chatbot.
-The author is Chris Wetzel — a senior IT/infrastructure professional who builds sophisticated
-engineering projects as hobby/portfolio work. Frame these as personal engineering projects
-that demonstrate technical depth, not as client deliverables.
+SYNTHESIZE_PROMPT = """You are writing a professional portfolio knowledge base document for Chris Wetzel.
+This will be read by recruiters, collaborators, and clients asking about his engineering projects.
+Getting the facts right matters — this represents his career and skills.
 
-Below are facts extracted from all sections of the repository documentation.
-Synthesize them into a complete KB doc using these exact sections:
+Facts are labeled [PRIMARY] (from README — highest confidence) or [SUPPORTING] (from other docs).
+Rules for conflicts:
+- Prefer [PRIMARY] facts over [SUPPORTING] facts
+- For test counts: use the count from the project's OWN test suite (pytest), NOT from install verification
+- If a [PRIMARY] fact and [SUPPORTING] fact conflict, use [PRIMARY] and note the discrepancy only if significant
 
-# <Project Name> — <what it does, 10 words max>
+Frame this as a personal engineering project that demonstrates technical depth.
+Chris Wetzel is a senior IT/infrastructure professional — not a student, not a contractor billing hours.
+
+Write the KB doc with EXACTLY these sections and headers:
+
+# <Project Name> — <one-line description, 10 words max>
 
 ## What It Is
-2-3 sentences. Concrete facts: what it does, current version/status, where it runs.
+2-3 sentences. What it does, current version/status, where it runs. Concrete facts only.
 
 ## What Problem It Solves
-The real motivation. Specific pain point, not generic "improves productivity."
+The real motivation behind building it. Specific pain point, not generic "improves workflow."
 
 ## Architecture
-How it actually works. Components, data flow, key interfaces. Include port numbers, paths, protocols.
+How it actually works: components, data flow, key interfaces. Include port numbers, file paths,
+and the specific process handoff pattern (e.g. os.execv vs subprocess). Show the actual flow.
 
 ## Key Features
-Specific capabilities with concrete details. Numbers, names, behaviors — not vague adjectives.
+Specific capabilities with concrete details. Include:
+- Named modes and commands (autonomous, diagnostic, dogfooding)
+- Named algorithms with parameters (HNSW, BM25 weights, LRU cache behavior)
+- Slash commands or interactive session commands
+- Multi-tool or multi-model patterns
 
 ## Engineering Quality
-Tests (count if known), tooling, discipline choices, notable decisions and why.
+Test count (from project's own pytest suite — not install verification), tooling choices,
+notable discipline decisions and the reason behind each.
 
 ## Tech Stack
-Bullet list or table: language, key libraries, infrastructure.
+Clean bullet list: language/version, key libraries, infrastructure components with roles.
 
 ## What I Learned Building This
-Non-obvious insights. Hard-won lessons. What surprised him. What he'd do differently.
+Non-obvious insights. Hard-won lessons. What broke and what that revealed. What he'd do differently.
+Specific, not generic. Each point should be something a reader couldn't have guessed.
 
-Rules:
-- Only use facts from the extracted list below. Do not invent details.
-- Write in third person: "Chris built...", "the project ships...", "pxx uses..."
-- No vague claims ("robust", "scalable") — say what it specifically does.
-- Dense over verbose. Each sentence should earn its place with a searchable fact.
-- Prefer measured/observed facts over goals or planned targets (e.g. actual test count, not a roadmap target).
-- End after the last section. Do not add any closing commentary, meta-notes, or explanations about the document.
+Strict rules:
+- Use ONLY facts from the extracted lists below. Do not invent or infer details.
+- Write in third person: "Chris built...", "pxx uses...", "the project ships..."
+- No vague adjectives ("robust", "scalable", "powerful") — replace with specifics.
+- Dense over verbose. Every sentence earns its place with a searchable fact.
+- Use measured/observed values not targets. Do not report planned future counts as current facts.
+- Stop after ## What I Learned Building This. No closing commentary, no meta-notes.
 
 Repository: {repo_url}
 
-Extracted facts:
 ---
 {facts}
 ---
@@ -138,14 +222,15 @@ def is_excluded(path: Path, repo_root: Path) -> bool:
     return any(part in EXCLUDE_DIRS for part in rel.parts)
 
 
-def discover_md_files(repo_path: Path) -> list[Path]:
-    """Discover project markdown files in priority order, excluding noise."""
+def discover_supporting_files(repo_path: Path) -> list[Path]:
+    """Discover non-README markdown files in priority order."""
     seen = set()
     found = []
+    readme = repo_path / "README.md"
 
     def add(p: Path):
-        if p not in seen and p.exists() and not is_excluded(p, repo_path):
-            if p.name not in EXCLUDE_FILES:
+        if p != readme and p not in seen and p.exists() and not is_excluded(p, repo_path):
+            if p.name not in EXCLUDE_FILES and p.name != "README.md":
                 seen.add(p)
                 found.append(p)
 
@@ -157,7 +242,6 @@ def discover_md_files(repo_path: Path) -> list[Path]:
         if not subdir.is_dir() or is_excluded(subdir, repo_path):
             continue
         if subdir_name == "services":
-            # Services: one level deep only — just each service's README
             for svc_dir in sorted(subdir.iterdir()):
                 if svc_dir.is_dir() and not is_excluded(svc_dir, repo_path):
                     add(svc_dir / "README.md")
@@ -172,8 +256,8 @@ def discover_md_files(repo_path: Path) -> list[Path]:
     return found
 
 
-def build_full_context(files: list[Path]) -> tuple[str, list[str]]:
-    """Read all files into a single string. Returns (full_text, included_names)."""
+def build_text(files: list[Path]) -> tuple[str, list[str]]:
+    """Concatenate files into a single string."""
     parts = []
     included = []
     for f in files:
@@ -189,10 +273,9 @@ def build_full_context(files: list[Path]) -> tuple[str, list[str]]:
 
 
 def split_into_chunks(text: str, chunk_size: int = CHUNK_CHARS) -> list[str]:
-    """Split text into chunks, breaking on double-newlines where possible."""
+    """Split text into chunks at paragraph boundaries."""
     chunks = []
     while len(text) > chunk_size:
-        # Try to break on a paragraph boundary near the chunk size
         split_at = text.rfind("\n\n", 0, chunk_size)
         if split_at == -1 or split_at < chunk_size // 2:
             split_at = chunk_size
@@ -203,40 +286,68 @@ def split_into_chunks(text: str, chunk_size: int = CHUNK_CHARS) -> list[str]:
     return chunks
 
 
-def lora_call(messages: list[dict], model: str, vllm_url: str, max_tokens: int = 1024) -> str:
-    resp = requests.post(
-        f"{vllm_url}/v1/chat/completions",
-        json={
-            "model": model,
-            "messages": messages,
-            "max_tokens": max_tokens,
-            "temperature": 0.1,
-        },
-        timeout=300,
-    )
-    resp.raise_for_status()
-    return resp.json()["choices"][0]["message"]["content"]
+def lora_call(messages: list[dict], model: str, vllm_url: str, max_tokens: int = 1024, retries: int = 3) -> str:
+    import time
+    last_err = None
+    for attempt in range(retries):
+        try:
+            resp = requests.post(
+                f"{vllm_url}/v1/chat/completions",
+                json={
+                    "model": model,
+                    "messages": messages,
+                    "max_tokens": max_tokens,
+                    "temperature": 0.1,
+                },
+                timeout=300,
+            )
+            resp.raise_for_status()
+            return resp.json()["choices"][0]["message"]["content"]
+        except Exception as e:
+            last_err = e
+            if attempt < retries - 1:
+                wait = 15 * (attempt + 1)
+                print(f"  Call failed ({e.__class__.__name__}), retrying in {wait}s...", file=sys.stderr)
+                time.sleep(wait)
+    raise last_err
 
 
-def extract_facts(chunk: str, chunk_num: int, total: int, repo_url: str, model: str, vllm_url: str) -> str:
-    """Map phase: extract concrete facts from one chunk."""
-    prompt = EXTRACT_PROMPT.format(
+def extract_readme(content: str, repo_url: str, model: str, vllm_url: str) -> str:
+    """Dedicated README extract with full checklist. Returns labeled PRIMARY facts."""
+    chunks = split_into_chunks(content, CHUNK_CHARS)
+    facts_parts = []
+    for i, chunk in enumerate(chunks):
+        print(f"  README chunk {i+1}/{len(chunks)}...", file=sys.stderr)
+        prompt = README_EXTRACT_PROMPT.format(repo_url=repo_url or "not specified", content=chunk)
+        facts_parts.append(lora_call(
+            [{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": prompt}],
+            model, vllm_url, max_tokens=2048,
+        ))
+    combined = "\n\n".join(facts_parts)
+    return f"[PRIMARY - README]\n{combined}"
+
+
+def extract_supporting(chunk: str, chunk_num: int, total: int, repo_url: str, model: str, vllm_url: str) -> str:
+    """Extract facts from a supporting doc chunk. Returns labeled SUPPORTING facts."""
+    prompt = SUPPORTING_EXTRACT_PROMPT.format(
         chunk_num=chunk_num,
         total_chunks=total,
         repo_url=repo_url or "not specified",
         content=chunk,
     )
-    return lora_call(
+    facts = lora_call(
         [{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": prompt}],
         model, vllm_url, max_tokens=1024,
     )
+    return f"[SUPPORTING - chunk {chunk_num}/{total}]\n{facts}"
 
 
 def compress_facts(facts_list: list[str], model: str, vllm_url: str) -> str:
-    """Compress a group of fact lists into a single deduplicated fact list."""
-    combined = "\n\n".join(f"[Section {i+1}]\n{f}" for i, f in enumerate(facts_list))
-    prompt = f"""Merge these fact lists into a single deduplicated list of concrete facts.
-Keep all specific details: numbers, names, ports, paths, versions. Remove only true duplicates.
+    """Compress a group of fact strings into one deduplicated list, preserving PRIMARY labels."""
+    combined = "\n\n".join(facts_list)
+    prompt = f"""Merge these fact lists into one deduplicated list.
+Preserve all [PRIMARY] and [SUPPORTING] labels. Keep every specific detail: numbers, names,
+ports, paths, versions, algorithm parameters. Remove only true word-for-word duplicates.
 
 ---
 {combined}
@@ -245,15 +356,12 @@ Keep all specific details: numbers, names, ports, paths, versions. Remove only t
 Merged fact list:"""
     return lora_call(
         [{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": prompt}],
-        model, vllm_url, max_tokens=1024,
+        model, vllm_url, max_tokens=1500,
     )
 
 
 def synthesize(facts_list: list[str], repo_url: str, model: str, vllm_url: str) -> str:
-    """Reduce phase: synthesize all extracted facts into the final KB doc.
-    If facts_list is too large for one synthesize call, compress hierarchically first.
-    """
-    # Hierarchical compression if too many chunks
+    """Reduce phase: synthesize labeled facts into the final KB doc."""
     while len(facts_list) > MAX_CHUNKS_PER_SYNTHESIZE:
         print(f"  Compressing {len(facts_list)} fact groups...", file=sys.stderr)
         compressed = []
@@ -262,9 +370,7 @@ def synthesize(facts_list: list[str], repo_url: str, model: str, vllm_url: str) 
             compressed.append(compress_facts(group, model, vllm_url))
         facts_list = compressed
 
-    combined_facts = "\n\n".join(
-        f"[Section {i+1}]\n{facts}" for i, facts in enumerate(facts_list)
-    )
+    combined_facts = "\n\n".join(facts_list)
     prompt = SYNTHESIZE_PROMPT.format(
         repo_url=repo_url or "not specified",
         facts=combined_facts,
@@ -289,24 +395,34 @@ def generate_kb_doc(
     if not path.is_dir():
         raise ValueError(f"Not a directory: {path}")
 
-    files = discover_md_files(path)
-    if not files:
-        raise ValueError(f"No markdown files found in {path}")
+    readme = path / "README.md"
+    supporting_files = discover_supporting_files(path)
 
-    full_text, included = build_full_context(files)
-    chunks = split_into_chunks(full_text, CHUNK_CHARS)
-
-    print(f"Files read ({len(included)}): {', '.join(included)}", file=sys.stderr)
-    print(f"Total context: {len(full_text):,} chars → {len(chunks)} chunks", file=sys.stderr)
-
-    # Map: extract facts from each chunk
     facts_list = []
-    for i, chunk in enumerate(chunks):
-        print(f"Extracting facts from chunk {i+1}/{len(chunks)}...", file=sys.stderr)
-        facts = extract_facts(chunk, i + 1, len(chunks), repo_url, model, vllm_url)
-        facts_list.append(facts)
 
-    # Reduce: synthesize into final KB doc
+    # Phase 1: README dedicated extract (PRIMARY)
+    if readme.exists():
+        readme_text = readme.read_text(encoding="utf-8", errors="ignore").strip()
+        print(f"Extracting README ({len(readme_text):,} chars)...", file=sys.stderr)
+        facts_list.append(extract_readme(readme_text, repo_url, model, vllm_url))
+    else:
+        print("No README.md found — proceeding with supporting docs only.", file=sys.stderr)
+
+    # Phase 2: Supporting docs chunked extract (SUPPORTING)
+    if supporting_files:
+        supporting_text, included = build_text(supporting_files)
+        chunks = split_into_chunks(supporting_text, CHUNK_CHARS)
+        print(f"Supporting docs ({len(included)} files, {len(supporting_text):,} chars → {len(chunks)} chunks):", file=sys.stderr)
+        for name in included:
+            print(f"  {name}", file=sys.stderr)
+        for i, chunk in enumerate(chunks):
+            print(f"Extracting supporting chunk {i+1}/{len(chunks)}...", file=sys.stderr)
+            facts_list.append(extract_supporting(chunk, i + 1, len(chunks), repo_url, model, vllm_url))
+
+    if not facts_list:
+        raise ValueError(f"No content found in {path}")
+
+    # Phase 3: Synthesize (with hierarchical compression if needed)
     print("Synthesizing KB doc...", file=sys.stderr)
     return synthesize(facts_list, repo_url, model, vllm_url)
 
