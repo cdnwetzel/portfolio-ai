@@ -21,6 +21,7 @@ If you're talking to this AI right now, you're using this system. The repo conta
 | LLM | vLLM + Qwen2.5-Coder 14B Instruct | T5810 home server |
 | Vector DB | Qdrant | T5810 home server |
 | Embeddings | all-MiniLM-L6-v2 | T5810 home server (CPU) |
+| Reranker | bge-reranker-base (cross-encoder) | T5810 home server (CPU) |
 | Tunnel | SSH reverse forward | VPS ↔ T5810 |
 
 ---
@@ -30,10 +31,11 @@ If you're talking to this AI right now, you're using this system. The repo conta
 Every chat message goes through a Retrieval-Augmented Generation pipeline:
 
 1. **Embed query:** The user's message is embedded using `all-MiniLM-L6-v2` (384 dims, CPU)
-2. **Vector search:** Qdrant searches the `documents` collection using cosine similarity, returns top-3 matching knowledge base chunks
-3. **Inject context:** The retrieved docs are injected into the LLM system prompt
-4. **Stream response:** vLLM streams the response token-by-token over WebSocket to the browser
-5. **Extract follow-ups:** The model appends `FOLLOWUPS:[...]` at the end; the frontend parses and strips it, showing suggestion chips
+2. **Vector search:** Qdrant searches the `documents` collection using cosine similarity, returning the top-15 candidate chunks
+3. **Rerank:** A `bge-reranker-base` cross-encoder (CPU, T5810) re-scores all 15 candidates against the query and keeps the top 5. Bi-encoder cosine is fast but imprecise — it surfaces candidates; the cross-encoder picks the genuinely most relevant. Runs on the T5810's idle CPU/RAM, no GPU contention with vLLM.
+4. **Inject context:** The reranked top-5 docs are injected into the LLM system prompt
+5. **Stream response:** vLLM streams the response token-by-token over WebSocket to the browser
+6. **Extract follow-ups:** The model appends `FOLLOWUPS:[...]` at the end; the frontend parses and strips it, showing suggestion chips
 
 This means the LLM is grounded in actual documented facts (my real projects, case studies, posts) rather than hallucinating biographical details.
 
@@ -71,7 +73,7 @@ The chat uses a WebSocket connection (not polling):
 ```
 Browser → wss://dev.cwetzel.com/ws/chat
   FastAPI WebSocket handler
-    → Qdrant search (3 docs)
+    → Qdrant search (top-15) → bge-reranker (top-5)
     → vLLM streaming (token by token)
     → Browser renders chunks as they arrive
 ```
