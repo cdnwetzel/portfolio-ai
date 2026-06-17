@@ -66,50 +66,50 @@ Work through this checklist explicitly:
 PROJECT IDENTITY
 - Project name, one-line description
 - Version number and current status (alpha/beta/stable/v1.0 etc.)
-- PyPI package name and install command (exact)
+- Package registry name and exact install command (PyPI, npm, crates.io, etc.)
 - GitHub URL
 - Any separately installable sub-packages or standalone components
 
 CLI COMMANDS & FLAGS — list every one found, including:
 - Default invocation and what it does
 - Edit/write modes and their flags
-- Autonomous or loop modes (--loop, --heal, --self-fix, etc.)
-- Diagnostic/health commands (--doctor, --self-test, --self-lint, etc.)
-- Any slash commands (/recall, /remember, /forget, etc.)
+- Autonomous, batch, or long-running modes and their flags
+- Diagnostic, health-check, or self-test commands and their flags
+- Any interactive/in-session commands (slash commands, REPL verbs, etc.)
 - Flags that pass through to underlying tools
 
 ARCHITECTURE — extract specifically:
 - Each named component and what it does
 - Port numbers for every service
 - File paths and config file locations
-- The exact process handoff pattern (e.g. os.execv, subprocess, exec)
+- The process/concurrency model and any handoff pattern (exec, subprocess, fork, async workers, etc.)
 - Data flow: what goes in, what comes out, where it goes next
 - What runs locally vs remotely
 
 DESIGN DECISIONS — why each architectural choice was made:
-- Why os.execv (or equivalent) instead of subprocess/wrapper
+- Why a particular process/concurrency model was chosen
 - Why fail-closed vs fail-open
 - Why local vs cloud
 - Any "deliberate" or "intentional" design choices with stated reasons
 
 STANDALONE COMPONENTS
-- Any sub-package installable independently (pip install X)
+- Any sub-package or component installable independently
 - Services that can run standalone
 
 TEST SUITE
-- The count from the project's OWN pytest/test runner (label as "project test suite")
+- The count from the project's OWN test runner (label as "project test suite")
 - Do NOT count install verification tests as the project test suite
 - If multiple counts appear, list each with its source
 
 NAMED OPTIMIZATIONS & ALGORITHMS
-- Cache layers and their speedup (LRU cache, etc.)
-- Search algorithms with their parameters (HNSW, BM25 weight %, vector weight %)
-- Performance figures (latency, dataset size benchmarks)
+- Cache layers and their measured speedup
+- Search/retrieval algorithms and their named parameters
+- Performance figures (latency, throughput, dataset size benchmarks)
 
 MULTI-TOOL OR MULTI-MODEL PATTERNS
-- Parallel reviewer setups (multiple AI tools reviewing simultaneously)
+- Parallel processing setups (multiple tools or workers running simultaneously)
 - Multi-model routing or fallback chains
-- Named reviewer tools used
+- Named external tools the project orchestrates
 
 ENVIRONMENT & CONFIG
 - Every environment variable name and default value
@@ -136,9 +136,9 @@ Look specifically for anything NOT typically in a README:
 - Engineering decisions with reasons (why X was chosen over Y)
 - Lessons learned, what broke, what was surprising
 - CLI commands or features not documented in README
-- Test counts from the project's own pytest suite (NOT install verification counts)
+- Test counts from the project's own test runner (NOT install verification counts)
 - Named sub-features with implementation specifics (cache hit rates, algorithm parameters)
-- Multi-tool patterns (parallel reviewers, concurrent LLM calls)
+- Multi-tool or multi-process patterns (parallel workers, concurrent calls)
 - Standalone installable sub-packages
 
 Repository: {repo_url}
@@ -159,7 +159,7 @@ Getting the facts right matters — this represents his career and skills.
 Facts are labeled [PRIMARY] (from README — highest confidence) or [SUPPORTING] (from other docs).
 Rules for conflicts:
 - Prefer [PRIMARY] facts over [SUPPORTING] facts
-- For test counts: use the count from the project's OWN test suite (pytest), NOT from install verification
+- For test counts: use the count from the project's OWN test runner, NOT from install verification
 - If a [PRIMARY] fact and [SUPPORTING] fact conflict, use [PRIMARY] and note the discrepancy only if significant
 
 Frame this as a personal engineering project that demonstrates technical depth.
@@ -177,17 +177,17 @@ The real motivation behind building it. Specific pain point, not generic "improv
 
 ## Architecture
 How it actually works: components, data flow, key interfaces. Include port numbers, file paths,
-and the specific process handoff pattern (e.g. os.execv vs subprocess). Show the actual flow.
+and the process/concurrency model with any handoff pattern. Show the actual flow.
 
 ## Key Features
 Specific capabilities with concrete details. Include:
 - Named modes and commands (autonomous, diagnostic, dogfooding)
-- Named algorithms with parameters (HNSW, BM25 weights, LRU cache behavior)
-- Slash commands or interactive session commands
+- Named algorithms with their parameters
+- Interactive/in-session commands
 - Multi-tool or multi-model patterns
 
 ## Engineering Quality
-Test count (from project's own pytest suite — not install verification), tooling choices,
+Test count (from project's own test runner — not install verification), tooling choices,
 notable discipline decisions and the reason behind each.
 
 ## Tech Stack
@@ -199,7 +199,7 @@ Specific, not generic. Each point should be something a reader couldn't have gue
 
 Strict rules:
 - Use ONLY facts from the extracted lists below. Do not invent or infer details.
-- Write in third person: "Chris built...", "pxx uses...", "the project ships..."
+- Write in third person: "Chris built...", "the project uses...", "it ships..."
 - No vague adjectives ("robust", "scalable", "powerful") — replace with specifics.
 - Dense over verbose. Every sentence earns its place with a searchable fact.
 - Use measured/observed values not targets. Do not report planned future counts as current facts.
