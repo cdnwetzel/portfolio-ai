@@ -3,20 +3,40 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 const DEBUG = typeof localStorage !== 'undefined' && localStorage.getItem('debug') === 'true'
 const log = DEBUG ? console.log.bind(console) : () => {}
 
-const FOLLOWUPS_RE = /\n?FOLLOWUPS:\s*(\[[\s\S]*?\])\s*$/
+// FOLLOWUPS appears as a trailing block. The mandated form is a JSON array:
+//   FOLLOWUPS:["q1","q2","q3"]
+// but the model intermittently emits a numbered/bulleted list instead. Parse
+// both forms, and ALWAYS strip the block from the stored message — even when no
+// suggestions are extracted — so a malformed FOLLOWUPS never leaks into history.
+// (Retained malformed blocks poisoned follow-ups on the 2nd+ turn.)
+const FOLLOWUPS_MARKER = /\n?\s*FOLLOWUPS:/gi
 
 function parseFollowups(content) {
-  const match = content.match(FOLLOWUPS_RE)
-  if (!match) return { content, suggestions: [] }
-  try {
-    const parsed = JSON.parse(match[1])
-    return {
-      content: content.slice(0, match.index).trimEnd(),
-      suggestions: Array.isArray(parsed) ? parsed.slice(0, 3) : []
-    }
-  } catch {
-    return { content, suggestions: [] }
+  const marks = [...content.matchAll(FOLLOWUPS_MARKER)]
+  if (marks.length === 0) return { content, suggestions: [] }
+
+  const mark = marks[marks.length - 1]   // last occurrence = the trailing block
+  const clean = content.slice(0, mark.index).trimEnd()
+  const block = content.slice(mark.index + mark[0].length).trim()
+
+  let suggestions = []
+  // Preferred: JSON array
+  const jsonMatch = block.match(/\[[\s\S]*?\]/)
+  if (jsonMatch) {
+    try {
+      const parsed = JSON.parse(jsonMatch[0])
+      if (Array.isArray(parsed)) suggestions = parsed.filter(s => typeof s === 'string' && s.trim())
+    } catch { /* fall through to list parsing */ }
   }
+  // Fallback: numbered / bulleted / line-separated questions
+  if (suggestions.length === 0) {
+    suggestions = block
+      .split('\n')
+      .map(l => l.replace(/^[\s\-*\d.)\]]+/, '').replace(/^["']|["']$/g, '').trim())
+      .filter(l => l.length > 3)
+  }
+
+  return { content: clean, suggestions: suggestions.slice(0, 3) }
 }
 
 export function useChat() {
@@ -38,10 +58,19 @@ export function useChat() {
     const settle = () => { settled = true }
 
     ws.onopen = () => {
+      // Send raw assistant text (WITH its FOLLOWUPS block) as history. The model
+      // relies on seeing its own prior FOLLOWUPS to keep emitting them on later
+      // turns; sending the display-cleaned text made it drop chips after turn 1.
+      // Strip UI-only fields so the model sees clean role/content.
+      const history = allMessages.map(m =>
+        m.role === 'assistant' && m.raw
+          ? { role: 'assistant', content: m.raw }
+          : { role: m.role, content: m.content }
+      )
       ws.send(JSON.stringify({
         type: 'chat',
         payload: {
-          messages: allMessages,
+          messages: history,
           model: 'qwen2.5-coder-14b-pscode',
           max_tokens: 2048
         }
@@ -69,10 +98,12 @@ export function useChat() {
           settle()
           const { content: clean, suggestions: sugs } = parseFollowups(assistantText)
           if (clean !== assistantText) {
+            // content = cleaned (for display); raw = full text with FOLLOWUPS
+            // (sent back as history to keep the model emitting chips on later turns).
             setMessages(prev => {
               const next = [...prev]
               if (next[next.length - 1]?.role === 'assistant') {
-                next[next.length - 1] = { role: 'assistant', content: clean }
+                next[next.length - 1] = { role: 'assistant', content: clean, raw: assistantText }
               }
               return next
             })
