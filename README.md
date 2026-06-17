@@ -14,13 +14,14 @@ Browser
 cwetzel.com (Ubuntu VPS)
   ├─ Nginx  — SSL termination, static React build
   └─ FastAPI api-proxy (port 8000)
-       ├─ RAG: embed query → Qdrant vector search → inject context
+       ├─ RAG: embed query → Qdrant search (top-15) → rerank (top-5) → inject context
        └─ Stream: vLLM WebSocket → browser
             ↓ SSH reverse tunnel
 T5810 Home Server (Gentoo Linux)
   ├─ vLLM  — Qwen2.5-Coder 14B, tensor parallel, port 8004
   ├─ Qdrant — vector DB, 384-dim cosine similarity, port 6333
-  └─ all-MiniLM-L6-v2 — CPU embeddings, port 8005
+  ├─ all-MiniLM-L6-v2 — CPU embeddings, port 8005
+  └─ bge-reranker-base — CPU cross-encoder reranker, port 8006
 ```
 
 **Key properties:**
@@ -68,7 +69,7 @@ plans/          Design documents and implementation plans
 
 ## Running Locally
 
-You need vLLM, Qdrant, and an embedding service running. The proxy expects them on localhost ports 8004, 6333, and 8005 respectively (same as the SSH tunnel forwards in production).
+You need vLLM, Qdrant, an embedding service, and a reranker running. The proxy expects them on localhost ports 8004, 6333, 8005, and 8006 respectively (same as the SSH tunnel forwards in production). The reranker is optional — the proxy fails open to cosine top-5 if port 8006 is unreachable.
 
 ```bash
 # Frontend dev server

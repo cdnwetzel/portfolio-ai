@@ -14,14 +14,16 @@
 |---------|------|--------|-----------|---------|
 | api-proxy | 8000 | ✅ Running | ✅ Enabled | Always |
 | apache2 | 80/443 | ✅ Running | ✅ Enabled | On-failure |
-| portfolio-ai-tunnel | 8001/8004/6333 | ✅ Running | ✅ Enabled | Always |
+| portfolio-ai-tunnel | 8001/8004/8005/8006/6333 | ✅ Running | ✅ Enabled | Always |
 
 ### Services (T5810)
 
 | Service | Port | Status | Usage |
 |---------|------|--------|-------|
-| pscode vLLM | 8004 | ✅ Running (16 days) | 18GB/GPU (95%) |
-| Qdrant | 6333 | ⏳ To be set up | Vector DB |
+| pscode vLLM | 8004 | ✅ Running | BF16, 16K context, 18GB/GPU |
+| Qdrant | 6333 | ✅ Running | Vector DB |
+| embed-service | 8005 | ✅ Running | all-MiniLM-L6-v2 (CPU) |
+| rerank-service | 8006 | ✅ Running | bge-reranker-base (CPU) |
 
 ---
 

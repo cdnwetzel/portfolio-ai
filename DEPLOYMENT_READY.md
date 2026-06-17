@@ -116,16 +116,17 @@ All 4 failures are **test harness artifacts**, not grounding failures:
 ## Deployment Checklist
 
 ### Backend (T5810 — Gentoo Linux, OpenRC)
-- [x] vLLM serving Qwen2.5-Coder-32B-AWQ on port 8004
+- [x] vLLM serving Qwen2.5-Coder-14B (BF16, 16K context) on port 8004
 - [x] Embed-service (all-MiniLM-L6-v2) on port 8005
-- [x] Qdrant vector DB on port 6333 (1,056 points indexed)
+- [x] Rerank-service (bge-reranker-base, CPU cross-encoder) on port 8006
+- [x] Qdrant vector DB on port 6333
 - [x] All services configured as OpenRC services (reboot-resilient)
-- [x] SSH tunnel to cwetzel.com (ports 8004, 6333, 8005 forwarded)
+- [x] SSH tunnel to cwetzel.com (ports 8004, 8005, 8006, 6333 forwarded)
 
 ### Frontend (cwetzel.com — Ubuntu 22.04, systemd)
 - [x] FastAPI proxy (api-proxy.service) on port 8000
 - [x] System prompt with grounding rules (cite sources, explicit "not documented" fallback)
-- [x] Semantic RAG pipeline: query → embedding → Qdrant search → context injection
+- [x] Semantic RAG pipeline: query → embedding → Qdrant search (top-15) → rerank (top-5) → context injection
 - [x] WebSocket handler for streaming responses (clean output, no system artifacts)
 - [x] Temperature 0.1, top_p 0.7 for deterministic output
 
@@ -173,7 +174,7 @@ All 4 failures are **test harness artifacts**, not grounding failures:
 1. **Interview-driven docs:** Collect additional expertise areas (DoD compliance, FINRA, HIPAA, BCDR specifics) and create synthetic docs
 2. **Synthetic doc expansion:** Based on user questions, identify new coverage gaps and create proactive documentation
 3. **Fine-tuning (optional):** If specific question patterns underperform, collect examples and fine-tune on 100-200 synthetic QA pairs
-4. **Reranker (optional):** If retrieval accuracy drops below 70%, implement cross-encoder reranking for harder queries
+4. **Reranker:** ✅ Implemented — `bge-reranker-base` CPU cross-encoder (port 8006) reranks cosine top-15 → top-5. See `home/rerank-service/`.
 
 ### Ongoing
 - Monitor question quality and answer grounding
@@ -193,12 +194,13 @@ cwetzel.com (Cloud Ubuntu)
     ├─ FastAPI proxy (port 8000)
     ├─ Semantic RAG pipeline
     └─ WebSocket streaming
-    ↓ SSH tunnel (WireGuard)
+    ↓ SSH reverse tunnel
     ↓
 T5810 (Home Gentoo)
-    ├─ vLLM (port 8004) — Qwen2.5-Coder-32B-AWQ on 2x A4500
-    ├─ Embedding service (port 8005) — all-MiniLM-L6-v2
-    └─ Qdrant (port 6333) — 1,056 points, semantic search
+    ├─ vLLM (port 8004) — Qwen2.5-Coder-14B (BF16, 16K) on 2x A4500
+    ├─ Embedding service (port 8005) — all-MiniLM-L6-v2 (CPU)
+    ├─ Reranker (port 8006) — bge-reranker-base (CPU)
+    └─ Qdrant (port 6333) — semantic search
 ```
 
 ---

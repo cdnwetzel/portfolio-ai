@@ -37,17 +37,21 @@
                        │ cwetzel.com:localhost → T5810
                        │ • 8001 → 8001 (unused, reserved)
                        │ • 8004 → 8004 (pscode vLLM)
+                       │ • 8005 → 8005 (embedding service)
+                       │ • 8006 → 8006 (reranker service)
                        │ • 6333 → 6333 (Qdrant)
                        │
 ┌──────────────────────┴──────────────────────────────────┐
 │ T5810 Home Server (Gentoo)                             │
 ├──────────────────────────────────────────────────────────┤
 │ pscode (existing)                                       │
-│ └─ vLLM:8004 (Qwen 2.5 14B, cached, running)           │
-│    GPU: 18GB per card (95% of 20GB, proven working)     │
+│ └─ vLLM:8004 (Qwen 2.5 14B, BF16, 16K context)         │
+│    GPU: 18GB per card (proven working)                  │
 │                                                         │
-│ Portfolio AI (new)                                      │
-│ └─ Qdrant:6333 (Vector DB, to be indexed)              │
+│ Portfolio AI                                            │
+│ ├─ Qdrant:6333 (Vector DB, indexed)                    │
+│ ├─ embed-service:8005 (all-MiniLM-L6-v2, CPU)          │
+│ └─ rerank-service:8006 (bge-reranker-base, CPU)        │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -61,7 +65,9 @@
 **Ports forwarded:**
 - `localhost:8001` → T5810:8001 (reserved, unused)
 - `localhost:8004` → T5810:8004 (pscode vLLM, active)
-- `localhost:6333` → T5810:6333 (Qdrant, to be set up)
+- `localhost:8005` → T5810:8005 (embedding service, active)
+- `localhost:8006` → T5810:8006 (reranker service, active)
+- `localhost:6333` → T5810:6333 (Qdrant, active)
 
 **Verify:**
 ```bash
