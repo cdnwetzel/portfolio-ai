@@ -1,7 +1,22 @@
-import { forwardRef, useState, useCallback } from 'react'
+import { forwardRef, useState, useCallback, useEffect } from 'react'
 import ReactMarkdown from 'react-markdown'
-import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
-import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism'
+
+// Lazy-load the heavy syntax highlighter + prism style so they are not in the
+// initial bundle. Only downloaded when a code block actually renders.
+function useLazyHighlighter() {
+  const [mod, setMod] = useState(null)
+  useEffect(() => {
+    let cancelled = false
+    Promise.all([
+      import('react-syntax-highlighter'),
+      import('react-syntax-highlighter/dist/esm/styles/prism'),
+    ]).then(([sh, style]) => {
+      if (!cancelled) setMod({ Prism: sh.Prism, oneDark: style.oneDark })
+    })
+    return () => { cancelled = true }
+  }, [])
+  return mod
+}
 
 const STARTER_CHIPS = [
   "What has Chris built?",
@@ -14,6 +29,7 @@ const STARTER_CHIPS = [
 
 const CodeBlock = ({ className, children }) => {
   const [copied, setCopied] = useState(false)
+  const highlighter = useLazyHighlighter()
   const language = /language-(\w+)/.exec(className || '')?.[1]
   const code = String(children).replace(/\n$/, '')
 
@@ -32,6 +48,15 @@ const CodeBlock = ({ className, children }) => {
     )
   }
 
+  if (!highlighter) {
+    return (
+      <pre className="bg-gray-900 rounded p-3 overflow-x-auto text-sm font-mono text-gray-300">
+        <code>{code}</code>
+      </pre>
+    )
+  }
+
+  const { Prism, oneDark } = highlighter
   return (
     <div className="relative group">
       <button
@@ -42,9 +67,39 @@ const CodeBlock = ({ className, children }) => {
       >
         {copied ? 'Copied ✓' : 'Copy'}
       </button>
-      <SyntaxHighlighter style={oneDark} language={language} PreTag="div">
+      <Prism style={oneDark} language={language} PreTag="div">
         {code}
-      </SyntaxHighlighter>
+      </Prism>
+    </div>
+  )
+}
+
+const SourceBlock = ({ sources }) => {
+  const [open, setOpen] = useState(false)
+  if (!sources || sources.length === 0) return null
+  return (
+    <div className="mt-2 pt-2 border-t border-gray-600/50">
+      <button
+        onClick={() => setOpen(v => !v)}
+        className="text-xs text-gray-400 hover:text-blue-300 flex items-center gap-1 transition"
+      >
+        <span>{open ? '▾' : '▸'}</span>
+        <span>Sources ({sources.length})</span>
+      </button>
+      {open && (
+        <ul className="mt-2 space-y-2 text-xs text-gray-400">
+          {sources.map((s, i) => (
+            <li key={i} className="bg-gray-800/50 rounded p-2">
+              <div className="flex justify-between gap-2 text-gray-300">
+                <span className="font-medium truncate">{s.title || 'Unknown'}</span>
+                <span className="shrink-0 text-gray-500">{s.score !== undefined ? s.score.toFixed(3) : ''}</span>
+              </div>
+              {s.source && <div className="text-gray-500 truncate">{s.source}</div>}
+              {s.snippet && <div className="mt-1 text-gray-400 line-clamp-2">{s.snippet}</div>}
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   )
 }
@@ -89,6 +144,7 @@ const ChatWindow = forwardRef(({ messages, status, suggestions, error, onSuggest
                     {msg.content}
                   </ReactMarkdown>
                 )}
+                {msg.role === 'assistant' && <SourceBlock sources={msg.sources} />}
               </div>
             </div>
 

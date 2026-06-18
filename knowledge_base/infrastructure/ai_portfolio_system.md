@@ -118,3 +118,71 @@ Comparable cloud GPU inference (2× A4500 equivalent) would cost $3-5/hour. At m
 **Why RAG over fine-tuning:** A LoRA adapter was previously trained on a Python code corpus as an experiment. It was a code-completion adapter, not biographical. For factual Q&A about my experience, RAG with structured KB documents gives more accurate, citable answers than fine-tuning on narrative text. The LoRA is not loaded in production.
 
 **Why owned hardware over cloud GPU:** At moderate usage, an A4500 NVLink pair pays for itself in months vs. cloud GPU rental. More importantly, it's a portfolio signal in itself — the infrastructure is the demonstration.
+
+---
+
+## Model & Runtime Card
+
+| Property | Value |
+|---|---|
+| Base model | Qwen2.5-Coder 14B Instruct |
+| Model creator | Alibaba Cloud |
+| Inference engine | vLLM 0.14.0 |
+| Serving host | Dell Precision T5810, Gentoo Linux |
+| GPU layout | 2× NVIDIA RTX A4500 20 GB, NVLink (40 GB aggregate) |
+| Tensor parallelism | 2-way across the A4500 pair |
+| Context window | 16,384 tokens |
+| Reserved response budget | 2,048 tokens |
+| Temperature | 0.35 |
+| Top-p | 0.7 |
+| Presence penalty | 0.5 |
+
+---
+
+## Ports & Services
+
+All services on the T5810 bind to localhost only. The public VPS reaches them through an SSH reverse tunnel.
+
+| Service | Port | Role | Fallback if unavailable |
+|---|---|---|---|
+| FastAPI proxy | 8000 (VPS) | WebSocket/API entry, RAG orchestration | None — chat stops |
+| vLLM | 8004 | LLM inference | None — chat stops |
+| Qdrant | 6333 | Vector search | None — chat stops |
+| Embedding service | 8005 | `all-MiniLM-L6-v2` query/document embeddings | None — chat stops |
+| bge-reranker-base | 8006 | Cross-encoder reranking of top-15 cosine candidates | Cosine top-5, capped at one chunk per source doc |
+| SSH tunnel | 8004, 6333, 8005 forwarded | Secure VPS↔T5810 link | None — services unreachable from public internet |
+
+---
+
+## Reranker Fallback Behavior
+
+The proxy always retrieves 15 candidate chunks from Qdrant using cosine similarity. It then asks the CPU reranker (port 8006) to re-score all 15 and return the best ones. If the reranker is unreachable, returns a non-200 status, or times out, the proxy fails open: it uses the original cosine-similarity order, applies the per-source-doc cap (max one chunk per document), and returns the top 5. Chat continues with slightly lower relevance precision.
+
+---
+
+## Cost Comparison
+
+| Cost item | Owned hardware | Equivalent cloud GPU |
+|---|---|---|
+| Cloud VPS (edge) | ~$20/month | ~$20/month |
+| T5810 + 2× A4500 | Already owned; electricity ~$30–40/month | N/A |
+| GPU inference | $0/hour | ~$3–5/hour for A4500-class GPU |
+| 24/7 light usage | ~$50–60/month total | ~$2,200–3,600/month |
+| One-time hardware | ~$2,500–3,500 (used/refurb) | $0 upfront |
+
+At moderate usage, the owned hardware breaks even in roughly 1–2 months versus renting equivalent cloud GPU time. The main trade-off is operational responsibility: power, cooling, hardware failures, and tunnel maintenance.
+
+---
+
+## Known Limitations & Honest Weaknesses
+
+1. **No source citations in the UI.** Retrieved documents ground the answer, but the visitor cannot see which chunks were used. This makes it harder to verify claims.
+2. **No live eval pipeline.** There is no automated test set that runs after prompt or KB changes. Quality is checked manually by asking test questions.
+3. **Single point of failure.** The T5810 is one machine. A power outage, hardware failure, or ISP issue takes the chat offline until it recovers.
+4. **No dynamic knowledge.** The KB is static Markdown files. Recent work after the last index run is not reflected until `scripts/index_with_embeddings.py` is re-run.
+5. **Reranker runs on CPU.** It adds ~2–3 seconds of latency per query compared to a GPU reranker, but keeps GPU memory free for vLLM.
+6. **Small embedding model.** `all-MiniLM-L6-v2` is fast but imprecise; it needs the reranker to place the right chunks in the final top 5.
+7. **Context window limits.** Long conversations are compacted by dropping oldest turns, so multi-turn threads can lose earlier context.
+8. **Model can still hallucinate.** The grounding rules reduce but do not eliminate hallucination, especially if the retrieved chunks are borderline-relevant.
+
+Planned fixes: source citations in the UI, an eval test suite, and automated re-indexing on KB changes.

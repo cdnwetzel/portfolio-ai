@@ -57,10 +57,9 @@ frontend/       React + Vite app — built and rsync'd to /var/www/dev.cwetzel.c
 scripts/        KB indexer (index_with_embeddings.py), one-off tools
 knowledge_base/
   RESUME.md
-  case_studies/   8 project write-ups (AVD, SAP, SOC2, DR, VMware, ...)
+  case_studies/   9 project write-ups (AVD, SAP, SOC2, DR, VMware, AI iterations, ...)
   posts/          Top LinkedIn posts (by impressions)
   infrastructure/ T5810 homelab, this AI system
-  psaios_project.md
 plans/          Design documents and implementation plans
 ```
 

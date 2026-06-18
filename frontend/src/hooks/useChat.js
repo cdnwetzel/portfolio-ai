@@ -54,6 +54,7 @@ export function useChat() {
     wsRef.current = ws
 
     let assistantText = ''
+    let pendingSources = []
     let settled = false
     const settle = () => { settled = true }
 
@@ -80,7 +81,9 @@ export function useChat() {
     ws.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data)
-        if (data.type === 'chunk') {
+        if (data.type === 'sources') {
+          pendingSources = data.data || []
+        } else if (data.type === 'chunk') {
           const delta = data.data?.choices?.[0]?.delta?.content
           if (!delta) return
           setStatus('generating')
@@ -88,9 +91,9 @@ export function useChat() {
           setMessages(prev => {
             const next = [...prev]
             if (next[next.length - 1]?.role === 'assistant') {
-              next[next.length - 1] = { role: 'assistant', content: assistantText }
+              next[next.length - 1] = { ...next[next.length - 1], content: assistantText }
             } else {
-              next.push({ role: 'assistant', content: assistantText })
+              next.push({ role: 'assistant', content: assistantText, sources: pendingSources })
             }
             return next
           })
@@ -102,8 +105,9 @@ export function useChat() {
             // (sent back as history to keep the model emitting chips on later turns).
             setMessages(prev => {
               const next = [...prev]
-              if (next[next.length - 1]?.role === 'assistant') {
-                next[next.length - 1] = { role: 'assistant', content: clean, raw: assistantText }
+              const last = next[next.length - 1]
+              if (last?.role === 'assistant') {
+                next[next.length - 1] = { ...last, content: clean, raw: assistantText, sources: pendingSources }
               }
               return next
             })

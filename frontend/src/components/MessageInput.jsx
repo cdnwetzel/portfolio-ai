@@ -32,7 +32,7 @@ export default function MessageInput({ onSend, status, placeholder }) {
         disabled={busy}
         className="flex-1 px-4 py-3 rounded-lg bg-primary border border-gray-600 text-white
                    placeholder-gray-400 focus:outline-none focus:border-blue-600
-                   disabled:opacity-50"
+                   disabled:opacity-50 text-base"
       />
       <button
         type="submit"

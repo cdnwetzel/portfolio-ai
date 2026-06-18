@@ -19,6 +19,14 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     sourcemap: false,
-    minify: 'terser'
+    minify: 'terser',
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          // Heavy syntax highlighter + languages only loads when a code block renders
+          'syntax-highlighter': ['react-syntax-highlighter'],
+        },
+      },
+    },
   }
 })

@@ -7,6 +7,7 @@ const STACK = [
   { label: 'Context',    value: '16 384 tokens' },
   { label: 'Vector DB',  value: 'Qdrant (cosine similarity)' },
   { label: 'Embeddings', value: 'all-MiniLM-L6-v2' },
+  { label: 'Reranker',   value: 'bge-reranker-base (CPU)' },
   { label: 'Server',     value: 'Dell Precision T5810 (Gentoo)' },
   { label: 'Frontend',   value: 'React + Vite + Tailwind' },
 ]
