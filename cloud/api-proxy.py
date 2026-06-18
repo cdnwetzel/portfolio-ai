@@ -35,8 +35,9 @@ RAG_RETRIEVE_LIMIT = 15   # candidates from Qdrant (bi-encoder cosine); ~3s CPU 
 RAG_TOP_K = 5             # final chunks after cross-encoder reranking
 RAG_MAX_PER_DOC = 1       # cap chunks from one source doc in the final context, so a
                           # multi-chunk doc (e.g. the resume) can't hog the top-5
-RAG_MIN_SCORE = 0.55      # if the top retrieved chunk scores below this, refuse rather
-                          # than hallucinate. Tuned for cosine + reranker overlap.
+RAG_MIN_SCORE = 0.35      # if the top retrieved chunk scores below this, refuse rather
+                          # than hallucinate. Tuned for all-MiniLM-L6-v2 cosine; the
+                          # reranker later re-orders the final top-5.
 
 # Persistent client — avoids TCP hand-shake overhead on every request
 _http: httpx.AsyncClient | None = None
