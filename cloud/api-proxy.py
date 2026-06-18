@@ -11,7 +11,14 @@ from fastapi.middleware.cors import CORSMiddleware
 import httpx
 import json
 from datetime import datetime
-from context_manager import compact_history, inject_system_prompt, prompt_too_long, MAX_PROMPT_CHARS, MAX_HISTORY_CHARS
+from context_manager import (
+    compact_history_by_tokens,
+    inject_system_prompt,
+    prompt_too_long,
+    fit_context_docs,
+    MAX_PROMPT_CHARS,
+    MAX_CONTEXT_TOKENS,
+)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -197,7 +204,7 @@ async def websocket_chat(websocket: WebSocket):
 
             # Sliding window: drop oldest user/assistant pairs when history is too large
             before = len(messages)
-            messages = compact_history(messages)
+            messages = compact_history_by_tokens(messages)
             if len(messages) < before:
                 logger.info(f"History compacted: {before} → {len(messages)} messages")
 
@@ -207,7 +214,7 @@ async def websocket_chat(websocket: WebSocket):
             for i, doc in enumerate(context_docs, 1):
                 logger.info(f"  {i}. {doc.get('title')} ({doc.get('source')})")
 
-            system_prompt = """You are Chris Wetzel. Answer questions based solely on the knowledge base documents below.
+            system_prefix = """You are Chris Wetzel. Answer questions based solely on the knowledge base documents below.
 
 RULES (non-negotiable):
 1. First person only. You ARE Chris — never refer to yourself in the third person.
@@ -222,13 +229,25 @@ Replace the quoted strings with three natural follow-up questions based on your 
 ---
 KNOWLEDGE BASE:
 """
-            for doc in context_docs:
-                title   = doc.get("title", "Unknown")
-                source  = doc.get("source", "")
-                content = doc.get("content", "")[:3000]  # full ~400-word chunk; top-5 fits 16K budget
-                system_prompt += f"\n\n### {title} ({source})\n{content}"
+            system_suffix = '\n\n---\nFOLLOWUPS:["question one","question two","question three"] — replace with three real follow-up questions. This line must appear at the end of your response.'
 
-            system_prompt += '\n\n---\nFOLLOWUPS:["question one","question two","question three"] — replace with three real follow-up questions. This line must appear at the end of your response.'
+            context_docs = fit_context_docs(
+                context_docs,
+                system_prefix,
+                system_suffix,
+                messages,
+                user_query,
+                max_tokens=MAX_CONTEXT_TOKENS,
+            )
+            logger.info(f"Context budget fit: {len(context_docs)} docs selected")
+
+            system_prompt = system_prefix
+            for doc in context_docs:
+                title = doc.get("title", "Unknown")
+                source = doc.get("source", "")
+                content = doc.get("content", "")
+                system_prompt += f"\n\n### {title} ({source})\n{content}"
+            system_prompt += system_suffix
 
             messages = inject_system_prompt(messages, system_prompt)
             body["messages"] = messages

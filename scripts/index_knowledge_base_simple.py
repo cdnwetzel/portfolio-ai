@@ -133,7 +133,7 @@ def index_documents(qdrant_url: str, docs: list, collection_name: str = "documen
 
 def main():
     qdrant_url = "http://ai.cwetzel.com:6333"
-    kb_path = "src/data/knowledge_base"
+    kb_path = "knowledge_base"
 
     print(f"Qdrant URL: {qdrant_url}")
     print(f"KB Path: {kb_path}\n")

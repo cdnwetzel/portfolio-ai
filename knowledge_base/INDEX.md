@@ -9,7 +9,7 @@
 ## Structure
 
 ```
-src/data/knowledge_base/
+knowledge_base/
 ├── INDEX.md                    (this file)
 ├── POSTS_METADATA.json         (ranking + engagement metrics)
 ├── RESUME.md                   (comprehensive CV + projects)

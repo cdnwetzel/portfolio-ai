@@ -246,7 +246,7 @@ All errors logged with timestamp + details for troubleshooting.
 
 ```
 1. During startup:
-   a) Load all documents from files (src/data/knowledge_base/)
+   a) Load all documents from files (knowledge_base/)
    b) Split into chunks: 512 tokens, 256 token overlap
    c) Convert chunks to embeddings (BAAI/bge-small)
    d) Index in Qdrant (in-memory)

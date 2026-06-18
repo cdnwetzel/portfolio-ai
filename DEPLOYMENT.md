@@ -193,7 +193,7 @@ ssh root@t5810.local "apt-get install -y qdrant && systemctl enable qdrant && sy
 ```bash
 python scripts/index_knowledge_base.py \
   --qdrant-url http://ai.cwetzel.com:6333 \
-  --kb-path src/data/knowledge_base/
+  --kb-path knowledge_base/
 ```
 
 **Knowledge base content:**

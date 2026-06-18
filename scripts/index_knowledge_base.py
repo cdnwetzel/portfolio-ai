@@ -163,7 +163,7 @@ def index_documents(qdrant_url: str, docs: list, collection_name: str = "documen
 def main():
     parser = argparse.ArgumentParser(description="Index knowledge base to Qdrant")
     parser.add_argument("--qdrant-url", default="http://ai.cwetzel.com:6333", help="Qdrant URL")
-    parser.add_argument("--kb-path", default="src/data/knowledge_base", help="Knowledge base path")
+    parser.add_argument("--kb-path", default="knowledge_base", help="Knowledge base path")
     parser.add_argument("--collection", default="documents", help="Collection name")
     args = parser.parse_args()
 

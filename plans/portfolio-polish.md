@@ -287,7 +287,7 @@ The indexer runs on T5810 directly (uses `localhost:6333`). Steps:
 
 ```bash
 # 1. Sync updated KB content to T5810
-rsync -avz /Users/cwetzel/ai/cwdotcom/src/data/knowledge_base/ \
+rsync -avz /Users/cwetzel/ai/cwdotcom/knowledge_base/ \
   chris@T5810:/tmp/knowledge_base/
 
 # 2. SSH to T5810 and run indexer
@@ -316,7 +316,7 @@ for subdir in ['infrastructure', 'pxx_docs']:
 The indexer uses `sentence_transformers` locally — both use the same `all-MiniLM-L6-v2` model
 (384 dimensions, matches Qdrant collection config). Keep them consistent.
 
-**Files:** `src/data/knowledge_base/infrastructure/*.md` (new), `src/data/knowledge_base/case_studies/startup_experience.md` (new), `src/data/knowledge_base/case_studies/psaios_project.md` (new), `scripts/index_with_embeddings.py` (add subdir walker)
+**Files:** `knowledge_base/infrastructure/*.md` (new), `knowledge_base/case_studies/startup_experience.md` (new), `knowledge_base/case_studies/psaios_project.md` (new), `scripts/index_with_embeddings.py` (add subdir walker)
 
 ---
 
@@ -746,7 +746,7 @@ Test at: 375px (iPhone SE), 390px (iPhone 15), 768px (iPad).
 | 1 | Starter chips + AI follow-up suggestions | Low–Med | `useChat.js`, `ChatWindow.jsx`, `Chat.jsx`, `api-proxy.py` |
 | 2 | Loading / typing indicator | Low | `useChat.js`, `ChatWindow.jsx`, `Chat.jsx`, `MessageInput.jsx` |
 | 3 | Hero header with social links | Low–Med | `Header.jsx` (new), `Chat.jsx` |
-| 4 | Audit + expand knowledge base | Medium | `src/data/knowledge_base/**`, `scripts/index_with_embeddings.py` |
+| 4 | Audit + expand knowledge base | Medium | `knowledge_base/**`, `scripts/index_with_embeddings.py` |
 | 5 | "About this system" panel | Low | `SystemInfo.jsx` (new), `Chat.jsx` |
 | 6 | Error recovery / reconnect | Medium | `useChat.js`, `ChatWindow.jsx`, `Chat.jsx` |
 | 7 | Copy button on code blocks | Low | `ChatWindow.jsx` |

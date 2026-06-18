@@ -2,7 +2,7 @@
 # Rebuild the production Qdrant `documents` collection from the repo's committed KB.
 #
 # This is the reproducibility guarantee for the vector index: the collection is
-# derived data (embeddings of src/data/knowledge_base/), and this script regenerates
+# derived data (embeddings of knowledge_base/), and this script regenerates
 # it from committed source. Re-run any time to restore the index to match the repo —
 # e.g. after editing KB docs, or to recover from Qdrant loss.
 #
@@ -15,7 +15,7 @@ set -euo pipefail
 
 T5810="${T5810_HOST:-root@10.0.1.125}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
-REPO_KB="${HERE}/../src/data/knowledge_base"
+REPO_KB="${HERE}/../knowledge_base"
 REMOTE_KB="/tmp/knowledge_base"
 REMOTE_INDEXER="/tmp/reindex_indexer.py"
 PYTHON="/home/chris/miniforge3/bin/python3"
@@ -32,4 +32,4 @@ ssh "${T5810}" "chmod -R a+r ${REMOTE_KB} ${REMOTE_INDEXER} && \
   su - chris -c '${PYTHON} ${REMOTE_INDEXER} --kb-path ${REMOTE_KB} \
     --qdrant-url http://localhost:6333 --collection documents --wipe'"
 
-echo "==> Done. Live index now matches src/data/knowledge_base/."
+echo "==> Done. Live index now matches knowledge_base/."

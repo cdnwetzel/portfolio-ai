@@ -96,4 +96,4 @@ run_phase0_direct.sh
 scripts/cwdotcom-api.initd
 
 # KB subdirs not tracked in git
-src/data/knowledge_base/pxx_docs/
+knowledge_base/pxx_docs/

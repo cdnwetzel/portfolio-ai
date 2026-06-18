@@ -44,7 +44,9 @@ jobs:
     - name: Run tests
       env:
         DATABASE_URL: postgresql+asyncpg://postgres:test@localhost/saas_test
-      run: pytest tests/ -v || true
+      run: |
+        set -eo pipefail
+        pytest tests/ -v
 
   deploy:
     needs: [test]
@@ -56,17 +58,19 @@ jobs:
 
     - name: Setup SSH
       run: |
+        set -eo pipefail
         mkdir -p ~/.ssh
         echo "${{ secrets.CLOUD_SSH_KEY }}" > ~/.ssh/deploy
         chmod 600 ~/.ssh/deploy
-        ssh-keyscan -H ${{ secrets.CLOUD_IP }} >> ~/.ssh/known_hosts || true
+        ssh-keyscan -H ${{ secrets.CLOUD_IP }} >> ~/.ssh/known_hosts
 
     - name: Deploy backend
       run: |
+        set -eo pipefail
         rsync -avz \
           -e "ssh -i ~/.ssh/deploy" \
           src/ requirements.txt Dockerfile docker-compose.yml \
-          ubuntu@${{ secrets.CLOUD_IP }}:/opt/portfolio-saas/ || true
+          ubuntu@${{ secrets.CLOUD_IP }}:/opt/portfolio-saas/
 
     - name: Notify Slack
       if: always()

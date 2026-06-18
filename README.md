@@ -55,13 +55,12 @@ T5810 Home Server (Gentoo Linux)
 cloud/          FastAPI proxy (api-proxy.py) — deployed to VPS
 frontend/       React + Vite app — built and rsync'd to /var/www/dev.cwetzel.com/
 scripts/        KB indexer (index_with_embeddings.py), one-off tools
-src/data/
-  knowledge_base/
-    RESUME.md
-    case_studies/   8 project write-ups (AVD, SAP, SOC2, DR, VMware, ...)
-    posts/          Top LinkedIn posts (by impressions)
-    infrastructure/ T5810 homelab, this AI system
-    psaios_project.md
+knowledge_base/
+  RESUME.md
+  case_studies/   8 project write-ups (AVD, SAP, SOC2, DR, VMware, ...)
+  posts/          Top LinkedIn posts (by impressions)
+  infrastructure/ T5810 homelab, this AI system
+  psaios_project.md
 plans/          Design documents and implementation plans
 ```
 
