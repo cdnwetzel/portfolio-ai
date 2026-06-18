@@ -34,4 +34,21 @@ ssh "${CLOUD}" "chown apiproxy:apiproxy ${APIDIR}/main.py ${APIDIR}/context_mana
 
 echo "==> Health check"
 ssh "${CLOUD}" "curl -sf http://127.0.0.1:8000/health && echo" || { echo "✗ HEALTH CHECK FAILED"; exit 1; }
+
+# Hands-free regression gate: run the self-test battery against the live endpoint.
+# Catches grounding regressions (e.g. the RAG_MIN_SCORE bug that refused every query)
+# that a health check can't see. Runs from here (needs python `websockets`), against
+# the public URL — no dependency on T5810 SSH. Skips gracefully if websockets absent.
+echo "==> Self-test (hands-free regression gate)"
+if python3 -c "import websockets" >/dev/null 2>&1; then
+    if python3 "${REPO}/scripts/selftest.py" --url "wss://dev.cwetzel.com/ws/chat"; then
+        echo "==> Self-test passed."
+    else
+        echo "✗ SELF-TEST FAILED — code is LIVE but a regression was detected. Roll back or fix forward." >&2
+        exit 1
+    fi
+else
+    echo "⚠ Self-test skipped: python 'websockets' not installed here (pip install websockets to enable the gate)." >&2
+fi
+
 echo "==> Deployed: https://dev.cwetzel.com"
