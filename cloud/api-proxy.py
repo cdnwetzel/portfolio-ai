@@ -245,7 +245,7 @@ Replace the quoted strings with three natural follow-up questions based on your 
 ---
 KNOWLEDGE BASE:
 """
-            system_suffix = '\n\n---\nFOLLOWUPS:["question one","question two","question three"] — replace with three real follow-up questions. This line must appear at the end of your response.'
+            system_suffix = '\n\n---\nFOLLOWUPS:["question one","question two","question three"]'
 
             context_docs = fit_context_docs(
                 context_docs,
