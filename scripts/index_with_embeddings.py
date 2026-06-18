@@ -5,6 +5,7 @@ Generates real 384-dim vectors for each chunk using all-MiniLM-L6-v2.
 No more manual weight tuning — semantic similarity handles relevance.
 """
 
+import argparse
 import json
 import sys
 from pathlib import Path
@@ -150,6 +151,18 @@ def create_collection(qdrant_url: str, collection_name: str) -> bool:
         logger.error(f"✗ Error creating collection: {e}")
         return False
 
+
+def wipe_collection(qdrant_url: str, collection_name: str) -> None:
+    """Delete the collection so the next create_collection rebuilds it from scratch.
+    Use before a full rebuild to clear orphan points left by partial/targeted
+    re-indexes (e.g. hand-patched chunks with custom IDs), so the result is byte-for-byte
+    what a clean indexer run produces from committed source."""
+    try:
+        resp = requests.delete(f"{qdrant_url}/collections/{collection_name}", timeout=30)
+        logger.info(f"✓ Wiped collection '{collection_name}' (status {resp.status_code})")
+    except Exception as e:
+        logger.error(f"✗ Error wiping collection: {e}")
+
 def index_documents(qdrant_url: str, docs: List[Dict], collection_name: str = "documents"):
     """Index documents as chunks with semantic embeddings."""
     logger.info(f"\n=== Indexing Documents with Semantic Embeddings ===")
@@ -215,20 +228,36 @@ def index_documents(qdrant_url: str, docs: List[Dict], collection_name: str = "d
         return False
 
 def main():
-    qdrant_url = "http://localhost:6333"  # Direct local access on T5810
-    kb_path = "/tmp/knowledge_base"
+    parser = argparse.ArgumentParser(
+        description="Index the knowledge base into Qdrant with semantic embeddings. "
+                    "Point --kb-path at the repo's knowledge_base for a rebuild from committed source."
+    )
+    parser.add_argument("--kb-path", default="/tmp/knowledge_base",
+                        help="Path to the knowledge_base directory (default: /tmp/knowledge_base)")
+    parser.add_argument("--qdrant-url", default="http://localhost:6333",
+                        help="Qdrant base URL (default: http://localhost:6333)")
+    parser.add_argument("--collection", default="documents",
+                        help="Qdrant collection name (default: documents)")
+    parser.add_argument("--wipe", action="store_true",
+                        help="Delete and rebuild the collection from scratch — recommended for a clean, "
+                             "reproducible rebuild (clears orphan points from prior targeted re-indexes)")
+    args = parser.parse_args()
 
-    logger.info(f"Qdrant URL: {qdrant_url}")
-    logger.info(f"KB Path: {kb_path}\n")
+    logger.info(f"Qdrant URL: {args.qdrant_url}")
+    logger.info(f"KB Path:    {args.kb_path}")
+    logger.info(f"Collection: {args.collection}  (wipe={args.wipe})\n")
 
-    docs = load_documents(kb_path)
+    docs = load_documents(args.kb_path)
     if not docs:
         logger.error("✗ No documents found")
         return 1
 
     logger.info(f"\n✓ Total: {len(docs)} documents\n")
 
-    if index_documents(qdrant_url, docs, "documents"):
+    if args.wipe:
+        wipe_collection(args.qdrant_url, args.collection)
+
+    if index_documents(args.qdrant_url, docs, args.collection):
         logger.info("\n✅ Knowledge base indexed with semantic embeddings!")
         logger.info("RAG search now uses real vector similarity — no manual weight tuning needed.")
         return 0
