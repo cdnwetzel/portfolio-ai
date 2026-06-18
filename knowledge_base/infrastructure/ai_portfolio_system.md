@@ -113,7 +113,7 @@ Comparable cloud GPU inference (2× A4500 equivalent) would cost $3-5/hour. At m
 
 **FOLLOWUPS pattern:** Instead of a separate API call to generate follow-up questions, the model appends them in a structured block at the end of its response. The frontend regex-parses and strips them, showing chips without an extra round-trip.
 
-**OpenRC not systemd:** The T5810 runs Gentoo with OpenRC. Service management uses `rc-service` and `rc-update` with environment files in `/etc/conf.d/`. This is by design — Gentoo's init flexibility lets me tune startup dependencies precisely.
+**OpenRC not systemd:** The T5810 runs Gentoo with OpenRC. Service management uses `rc-service` and `rc-update` with environment files in `/etc/conf.d/`. The `api-proxy` service is managed with `rc-service api-proxy restart` and started on boot via `rc-update add api-proxy default`. This is by design — Gentoo's init flexibility lets me tune startup dependencies precisely.
 
 **Why RAG over fine-tuning:** A LoRA adapter was previously trained on a Python code corpus as an experiment. It was a code-completion adapter, not biographical. For factual Q&A about my experience, RAG with structured KB documents gives more accurate, citable answers than fine-tuning on narrative text. The LoRA is not loaded in production.
 
