@@ -1,16 +1,18 @@
-# Portfolio AI SaaS Platform
+# Portfolio AI Chat
 
-## Current Status
-
-**GATE 0: Project Initiation** ⏳  
-**Phase:** Charter + Context Documentation Complete  
-**Next Gate:** GATE 1 (Planning) — Awaiting approval to proceed to design & requirements  
-
----
+> **What this actually is:** a single-tenant **portfolio RAG chat** at dev.cwetzel.com — a
+> React frontend + FastAPI proxy on a VPS, talking over an SSH tunnel to vLLM (Qwen2.5-Coder-14B
+> + pscode LoRA), Qdrant, a CPU embedder, and a CPU reranker on the T5810. **The multi-tenant
+> SaaS / Stripe / billing / auth content below is archived aspiration** — that scaffold lived in
+> `src/` and is preserved on the `legacy/saas-scaffold` branch; it is NOT part of the running
+> system. See the "Actual Deployment Config" and "Documentation Alignment" sections for reality.
 
 ## Project Overview
 
-This is a production-grade, multi-tenant AI SaaS platform built on your personal infrastructure (2x A4500 GPUs + 300 Mbps fiber). The platform serves as both your professional portfolio showcase and a revenue-generating SaaS product.
+This is a single-tenant portfolio RAG chat built on personal infrastructure (2x A4500 GPUs +
+300 Mbps fiber) — a professional-portfolio showcase, not a revenue-generating SaaS product. The
+original multi-tenant SaaS vision (below) was scoped down; the SaaS scaffold is archived on
+`legacy/saas-scaffold`.
 
 Following the **5-Gate Workflow** (psplan framework):
 - **GATE 0** ✅ Initiation (Charter, Vision, Red-lines, Invariants)
