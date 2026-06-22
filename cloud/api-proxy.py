@@ -37,6 +37,15 @@ RERANK_URL = "http://127.0.0.1:8006"
 # message list so cwdotcom never user-facing breaks on Headroom's behalf.
 COMPRESS_URL = os.environ.get("COMPRESS_URL", "").rstrip("/")
 COMPRESS_TIMEOUT = float(os.environ.get("COMPRESS_TIMEOUT", "3.0"))
+# How much of the original to KEEP. 0.5 = keep 50% (target 50% savings). Lower
+# values are more aggressive but risk losing detail on narrow-fact queries —
+# 0.1 caused the "What GPUs does Chris run" answer to regress to 41 chars in
+# initial testing because the GPU specifics got squeezed out. Tune via the
+# systemd drop-in without redeploy. Default 0.5 is the safe-but-still-useful spot.
+COMPRESS_TARGET_RATIO = float(os.environ.get("COMPRESS_TARGET_RATIO", "0.5"))
+# How many trailing turns to skip compression on. cwdotcom is single-turn,
+# so 0 is correct here; a multi-turn caller might want 2-4.
+COMPRESS_PROTECT_RECENT = int(os.environ.get("COMPRESS_PROTECT_RECENT", "0"))
 
 # RAG retrieval: pull a wide candidate set via cosine, then rerank to the best few.
 # MiniLM cosine is imprecise — good enough to surface candidates into the top-20,
@@ -294,9 +303,9 @@ KNOWLEDGE BASE:
                         f"{COMPRESS_URL}/compress",
                         json={
                             "messages": messages,
-                            "compress_user_messages": False,
-                            "target_ratio": 0.1,
-                            "protect_recent": 0,
+                            "compress_user_messages": False,  # user query is critical, keep verbatim
+                            "target_ratio": COMPRESS_TARGET_RATIO,
+                            "protect_recent": COMPRESS_PROTECT_RECENT,
                         },
                         timeout=COMPRESS_TIMEOUT,
                     )
