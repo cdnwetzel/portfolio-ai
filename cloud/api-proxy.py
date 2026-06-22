@@ -4,6 +4,7 @@ WebSocket chat with RAG pipeline: embed → Qdrant search → vLLM stream.
 """
 import asyncio
 import logging
+import os
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, WebSocket, HTTPException, Request
 from fastapi.responses import StreamingResponse, JSONResponse
@@ -23,7 +24,7 @@ from context_manager import (
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-VLLM_URL   = "http://127.0.0.1:8004"
+VLLM_URL   = os.environ.get("VLLM_URL", "http://127.0.0.1:8004")
 QDRANT_URL = "http://127.0.0.1:6333"
 EMBED_URL  = "http://127.0.0.1:8005"
 RERANK_URL = "http://127.0.0.1:8006"
