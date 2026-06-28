@@ -51,10 +51,13 @@ acct-group/ollama ~amd64
 KW
 if [ "${GPU:-0}" = "1" ]; then
   echo "sci-ml/ollama-bin cuda" > /etc/portage/package.use/ollama
-  echo "    GPU=1 → cuda USE enabled (will pull nvidia-cuda-toolkit)"
+  # the cuda toolkit is ~amd64-masked too — keyword it for GPU mode
+  echo "dev-util/nvidia-cuda-toolkit ~amd64" >> /etc/portage/package.accept_keywords/ollama
+  echo "    GPU=1 → cuda USE enabled (will pull nvidia-cuda-toolkit ~amd64)"
 else
-  rm -f /etc/portage/package.use/ollama
-  echo "    CPU-only (no cuda). Set GPU=1 to use the 3060 Ti."
+  # ebuild defaults cuda ON, so EXPLICITLY disable it (and rocm) for a true CPU build.
+  echo "sci-ml/ollama-bin -cuda -rocm" > /etc/portage/package.use/ollama
+  echo "    CPU-only (cuda/rocm disabled — no toolkit). Set GPU=1 to use the 3060 Ti."
 fi
 
 echo "    --- build plan (review before installing) ---"
