@@ -50,6 +50,7 @@ async def ask(url: str, question: str, timeout: float = 60.0):
     sources = []
     first_chunk_at = None
     done_at = None
+    prompt_version = None
 
     try:
         async with websockets.connect(url, open_timeout=10, close_timeout=5) as ws:
@@ -83,6 +84,7 @@ async def ask(url: str, question: str, timeout: float = 60.0):
                     response_parts.append(delta)
                 elif data.get("type") == "done":
                     done_at = time.time() - start
+                    prompt_version = data.get("prompt_version")
                     break
                 elif data.get("type") == "error":
                     response_parts.append(f"[ERROR: {data.get('message')}]")
@@ -94,6 +96,7 @@ async def ask(url: str, question: str, timeout: float = 60.0):
         "question": question,
         "answer": "".join(response_parts).strip(),
         "sources": sources,
+        "prompt_version": prompt_version,
         "timing": {
             "ttfb_s": round(first_chunk_at, 3) if first_chunk_at else None,
             "total_s": round(done_at, 3) if done_at else round(time.time() - start, 3),

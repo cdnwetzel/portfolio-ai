@@ -26,10 +26,13 @@ echo "==> Deploying frontend -> ${CLOUD}:${WEBROOT}"
 rsync -avz --delete "${REPO}/frontend/dist/" "${CLOUD}:${WEBROOT}/"
 
 echo "==> Deploying backend proxy -> ${CLOUD}:${APIDIR}"
-# cloud/api-proxy.py deploys as main.py (uvicorn main:app); context_manager.py is imported by it.
-scp -q "${HERE}/api-proxy.py"       "${CLOUD}:${APIDIR}/main.py"
-scp -q "${HERE}/context_manager.py" "${CLOUD}:${APIDIR}/context_manager.py"
-ssh "${CLOUD}" "chown apiproxy:apiproxy ${APIDIR}/main.py ${APIDIR}/context_manager.py && \
+# cloud/api-proxy.py deploys as main.py (uvicorn main:app). main.py imports
+# context_manager.py AND query_expansion.py — all three MUST ship together, or the
+# service crash-loops on ImportError (the 2026-06 partial-deploy outage).
+scp -q "${HERE}/api-proxy.py"        "${CLOUD}:${APIDIR}/main.py"
+scp -q "${HERE}/context_manager.py"  "${CLOUD}:${APIDIR}/context_manager.py"
+scp -q "${HERE}/query_expansion.py"  "${CLOUD}:${APIDIR}/query_expansion.py"
+ssh "${CLOUD}" "chown apiproxy:apiproxy ${APIDIR}/main.py ${APIDIR}/context_manager.py ${APIDIR}/query_expansion.py && \
   systemctl restart api-proxy.service && sleep 2 && systemctl is-active api-proxy.service"
 
 echo "==> Health check"
