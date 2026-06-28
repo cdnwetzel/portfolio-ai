@@ -1,0 +1,35 @@
+#!/sbin/openrc-run
+# Faithfulness verifier service (verifier-faithfulness-layer.md).
+# Target: the spare Ryzen 9 5950X / RTX 3060 Ti box (NOT the T5810).
+# Install to /etc/init.d/verifier-service (root-owned, 0755)
+# Enable:  rc-update add verifier-service default
+# Needs a judge model reachable at JUDGE_URL (default: local Ollama :11434).
+# On a systemd box, use the equivalent unit (see README) instead.
+
+name="Faithfulness Verifier"
+description="Out-of-band claim-level faithfulness judge for the portfolio RAG chat (port 8007)"
+
+supervisor="supervise-daemon"
+command="/home/chris/miniforge3/bin/python3"
+command_args="/opt/verifier-service/verifier.py"
+pidfile="/run/verifier-service.pid"
+respawn_delay=5
+respawn_max=5
+respawn_period=30
+command_user="chris:chris"
+
+# Config (override in /etc/conf.d/verifier-service):
+#   JUDGE_BACKEND=ollama
+#   JUDGE_MODEL=qwen2.5:7b-instruct-q4_K_M
+#   THRESHOLD=0.8
+#   DB_PATH=/home/chris/verifier/verdicts.db
+
+depend() {
+    need localmount net
+    after bootmisc
+}
+
+start_pre() {
+    mkdir -p /opt/verifier-service
+    chown -R chris:chris /opt/verifier-service
+}

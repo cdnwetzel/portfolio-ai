@@ -7,6 +7,7 @@ import hashlib
 import logging
 import os
 import time
+import uuid
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, WebSocket, HTTPException, Request
 from fastapi.responses import StreamingResponse, JSONResponse
@@ -31,6 +32,12 @@ VLLM_URL   = os.environ.get("VLLM_URL", "http://127.0.0.1:8004")
 QDRANT_URL = "http://127.0.0.1:6333"
 EMBED_URL  = "http://127.0.0.1:8005"
 RERANK_URL = "http://127.0.0.1:8006"
+# Optional out-of-band faithfulness verifier (verifier-faithfulness-layer.md §7).
+# Default empty = disabled (no behavior change). When set (e.g. to the tunneled
+# spare-box judge at http://127.0.0.1:8007), the proxy fires a fire-and-forget
+# /verify AFTER the answer is delivered — it must never block or affect the chat.
+VERIFIER_URL = os.environ.get("VERIFIER_URL", "").rstrip("/")
+VERIFIER_TIMEOUT = float(os.environ.get("VERIFIER_TIMEOUT", "5.0"))
 # Optional input-token compression via the headroom-lib service on T5810,
 # reached via the existing portfolio-ai-tunnel ssh -L forward. Default
 # empty = disabled (no behavior change on this VPS). To enable, set in
@@ -261,6 +268,29 @@ async def _stream_completion(websocket: WebSocket, body: dict) -> tuple[str, boo
     return full_response, got_token
 
 
+async def _fire_verify(request_id: str, query: str, answer: str, context_docs: list) -> None:
+    """Fire-and-forget faithfulness verification (verifier plan §7.1). Runs AFTER the
+    answer is delivered; swallows every error so it can never affect the chat. No-op
+    unless VERIFIER_URL is configured. The verifier strips FOLLOWUPS and skips refusals
+    server-side, so we pass the raw answer + full chunk content."""
+    if not VERIFIER_URL or _http is None:
+        return
+    try:
+        chunks = [
+            {"title": d.get("title", ""), "source": d.get("source", ""),
+             "content": d.get("content", "")}
+            for d in context_docs
+        ]
+        await _http.post(
+            f"{VERIFIER_URL}/verify",
+            json={"request_id": request_id, "query": query, "answer": answer, "chunks": chunks},
+            timeout=VERIFIER_TIMEOUT,
+        )
+    except Exception as e:
+        # red-lines.md #2: metadata only, never query/answer content.
+        logger.debug(f"verifier fire-and-forget failed (non-fatal): {e!r}")
+
+
 @app.websocket("/ws/chat")
 async def websocket_chat(websocket: WebSocket):
     """WebSocket: real-time chat streaming with RAG"""
@@ -423,7 +453,14 @@ async def websocket_chat(websocket: WebSocket):
                     logger.info("Response: CONFLICT")
                 else:
                     logger.info("Response: GROUNDED")
-                await websocket.send_json({"type": "done", "prompt_version": PROMPT_VERSION})
+                request_id = uuid.uuid4().hex
+                await websocket.send_json({"type": "done", "prompt_version": PROMPT_VERSION,
+                                           "request_id": request_id})
+                # Out-of-band faithfulness check (verifier plan §7.1): post-`done`,
+                # fire-and-forget, no-op unless VERIFIER_URL is set. Never blocks.
+                asyncio.create_task(
+                    _fire_verify(request_id, user_query, full_response, context_docs)
+                )
 
     except Exception as e:
         logger.error(f"WebSocket error: {e}")

@@ -11,6 +11,14 @@ User=root
 # are never exposed to the internet — only reachable through this tunnel.
 #   8001=reserved  8004=vLLM  8005=embeddings  8006=reranker  6333=Qdrant  8788=headroom-lib
 #
+# Faithfulness verifier (verifier-faithfulness-layer.md §7.2): the verifier runs on a
+# SEPARATE spare box on the home LAN, not the T5810 that terminates this tunnel. Once
+# that box's LAN IP is pinned (open question #1) AND it is reachable from the tunnel's
+# home-side host, append this forward to ExecStart below (do NOT add it before the box
+# exists — an unresolvable -L makes ssh exit and kills the whole tunnel):
+#       -L 127.0.0.1:8007:<RYZEN_LAN_IP>:8007
+# then set VERIFIER_URL=http://127.0.0.1:8007 in the api-proxy unit.
+#
 # Per-machine config lives in /etc/default/portfolio-ai-tunnel (NOT in the repo):
 #   T5810_USER=chris
 #   T5810_HOST=ai.cwetzel.com    # DNS preferred over a raw IP; survives Verizon dynamic-IP rotation

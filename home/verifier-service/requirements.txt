@@ -1,0 +1,6 @@
+fastapi
+uvicorn
+httpx
+pydantic>=2
+# Judge model served separately (Ollama default: `ollama pull qwen2.5:7b-instruct-q4_K_M`).
+# No ML deps here — the service only orchestrates the judge call + SQLite (stdlib).

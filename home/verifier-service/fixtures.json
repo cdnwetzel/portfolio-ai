@@ -1,0 +1,49 @@
+[
+  {
+    "name": "faithful_fully_covered",
+    "query": "What GPUs does Chris run?",
+    "answer": "Chris runs two NVIDIA RTX A4500 GPUs connected with NVLink. [source: infrastructure]",
+    "chunks": [
+      {"title": "AI Portfolio System", "source": "infrastructure",
+       "content": "The system runs on a Dell Precision T5810 with two RTX A4500 20 GB GPUs connected via NVLink (40 GB aggregate), tensor-parallel."}
+    ],
+    "expected": {"verdict_type": "judged", "flagged": false}
+  },
+  {
+    "name": "hallucinated_unsupported_claim",
+    "query": "What GPUs does Chris run?",
+    "answer": "Chris runs four NVIDIA H100 GPUs in a custom liquid-cooled rack. [source: infrastructure]",
+    "chunks": [
+      {"title": "AI Portfolio System", "source": "infrastructure",
+       "content": "The system runs on a Dell Precision T5810 with two RTX A4500 20 GB GPUs connected via NVLink."}
+    ],
+    "expected": {"verdict_type": "judged", "flagged": true}
+  },
+  {
+    "name": "contradicted_claim",
+    "query": "What inference engine serves the model?",
+    "answer": "The model is served with Ollama on a single GPU. [source: infrastructure]",
+    "chunks": [
+      {"title": "AI Portfolio System", "source": "infrastructure",
+       "content": "The model is served with vLLM 0.14.0, tensor-parallel across two A4500 GPUs."}
+    ],
+    "expected": {"verdict_type": "judged", "flagged": true}
+  },
+  {
+    "name": "refusal_not_scored",
+    "query": "What is Chris's blood type?",
+    "answer": "I don't have that documented in my knowledge base.",
+    "chunks": [],
+    "expected": {"verdict_type": "refusal", "flagged": false}
+  },
+  {
+    "name": "paraphrase_still_supported",
+    "query": "How is the home server reached from the cloud?",
+    "answer": "The public VPS talks to the home machine over an encrypted SSH tunnel. [source: infrastructure]",
+    "chunks": [
+      {"title": "AI Portfolio System", "source": "infrastructure",
+       "content": "Backend services bind to localhost on the T5810; the cloud server reaches them only through an SSH reverse tunnel with key-based authentication."}
+    ],
+    "expected": {"verdict_type": "judged", "flagged": false}
+  }
+]
