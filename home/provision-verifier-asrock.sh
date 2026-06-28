@@ -38,24 +38,37 @@ CONF
 fi
 emaint sync -r guru
 
-echo "==> [2/4] app-misc/ollama"
-mkdir -p /etc/portage/package.accept_keywords
-echo "app-misc/ollama ~amd64" > /etc/portage/package.accept_keywords/ollama
+echo "==> [2/4] sci-ml/ollama-bin (prebuilt binary — no Go/CUDA source build)"
+# Correct atom is sci-ml/ollama-bin (GURU), not app-misc/ollama. Keyword it + its
+# GURU acct-* deps (~amd64). DEFAULT = CPU-only: the 'cuda' USE flag would pull the
+# multi-GB dev-util/nvidia-cuda-toolkit. For a post-hoc, one-at-a-time judge, CPU on
+# the 5950X is fine. To use the 3060 Ti instead, set GPU=1 (accepts the toolkit).
+mkdir -p /etc/portage/package.accept_keywords /etc/portage/package.use
+cat > /etc/portage/package.accept_keywords/ollama <<'KW'
+sci-ml/ollama-bin ~amd64
+acct-user/ollama ~amd64
+acct-group/ollama ~amd64
+KW
+if [ "${GPU:-0}" = "1" ]; then
+  echo "sci-ml/ollama-bin cuda" > /etc/portage/package.use/ollama
+  echo "    GPU=1 → cuda USE enabled (will pull nvidia-cuda-toolkit)"
+else
+  rm -f /etc/portage/package.use/ollama
+  echo "    CPU-only (no cuda). Set GPU=1 to use the 3060 Ti."
+fi
 
 echo "    --- build plan (review before installing) ---"
-emerge -pv app-misc/ollama || true
+emerge -pv sci-ml/ollama-bin || true
 echo "    ---------------------------------------------"
-echo "    NOTE: GPU use on the 3060 Ti needs the 'cuda' USE flag, which can pull a"
-echo "    large CUDA toolkit. Review the plan above. CPU-only ollama also works (slower)."
 if [ "${CONFIRM:-0}" != "1" ]; then
   echo ""
-  echo "    Nothing installed yet. GURU overlay is now synced. To proceed, re-run with:"
-  echo "        sudo CONFIRM=1 ./provision-verifier-asrock.sh"
-  echo "    (optionally first: echo 'app-misc/ollama cuda' >> /etc/portage/package.use/ollama  for GPU)"
+  echo "    Nothing installed yet. GURU overlay is synced. To proceed, re-run with:"
+  echo "        sudo CONFIRM=1 ./provision-verifier-asrock.sh           # CPU judge"
+  echo "        sudo CONFIRM=1 GPU=1 ./provision-verifier-asrock.sh     # GPU judge (+CUDA toolkit)"
   exit 0
 fi
 
-emerge -q app-misc/ollama
+emerge -q sci-ml/ollama-bin
 [ -f /etc/init.d/ollama ] && { rc-update add ollama default 2>/dev/null || true; rc-service ollama start || rc-service ollama restart; } \
   || echo "    NOTE: no /etc/init.d/ollama — start ollama however the ebuild documents."
 echo "    waiting for ollama API..."
