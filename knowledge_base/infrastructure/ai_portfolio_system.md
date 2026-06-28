@@ -112,7 +112,7 @@ Comparable cloud GPU inference (2× A4500 equivalent) would cost $3-5/hour. At m
 
 **Persistent httpx client:** The FastAPI proxy uses a single `AsyncClient` via lifespan context rather than creating a new connection per request. This eliminates TCP handshake overhead on every RAG query.
 
-**Grounding system prompt:** Low temperature + strict rules force the model to say "I don't have that documented" rather than hallucinate, and to always cite sources from the KB. RAG context does the factual grounding; temperature handles response naturalness.
+**Grounding system prompt:** Low temperature + strict rules force the model to say "I don't have that documented" rather than hallucinate, and to ground every claim strictly in the retrieved KB documents (sources are shown to the visitor in a separate panel, so the prose stays clean). RAG context does the factual grounding; temperature handles response naturalness.
 
 **FOLLOWUPS pattern:** Instead of a separate API call to generate follow-up questions, the model appends them in a structured block at the end of its response. The frontend regex-parses and strips them, showing chips without an extra round-trip.
 
@@ -208,11 +208,11 @@ At moderate usage, the owned hardware breaks even in roughly 1–2 months versus
 
 ## Known Limitations & Honest Weaknesses
 
-1. **Source citations not surfaced in the UI.** The backend tracks which chunks grounded each answer (and sends them over the WebSocket), but the visitor-facing UI doesn't yet render them prominently.
+1. **Answer-level, not claim-level, citations.** Every answer shows a collapsible "Sources" panel listing the exact KB chunks that grounded it (title, source, relevance score, snippet) — deterministic, from the actual retrieval. What it does not do is tie each individual sentence to a specific source; attribution is at the answer level.
 2. **The chat's compute is a single point of failure.** The T5810 is one machine; a power, hardware, or ISP issue takes the chat offline until it recovers. (The asrock verifier is *not* a SPOF — it fails open, so the chat is unaffected if it's down.)
 3. **No dynamic knowledge.** The KB is static Markdown. Recent work after the last index run isn't reflected until `scripts/index_with_embeddings.py` is re-run.
 4. **Reranker and verifier run on CPU.** Each adds latency versus a GPU, but keeps GPU memory free for vLLM (and keeps the judge on a separate box entirely).
 5. **Context window limits.** Long conversations are compacted by dropping oldest turns, so multi-turn threads can lose earlier context.
 6. **The model can still hallucinate.** Grounding rules + hybrid retrieval reduce but don't eliminate it, especially with borderline-relevant chunks. The out-of-band verifier doesn't *prevent* a bad answer reaching the user once — it catches it afterward and flags it for the next iteration.
 
-Addressed since earlier versions: upgraded embeddings (MiniLM-384 → bge-base-768), added hybrid dense+BM25 retrieval, a graded eval pipeline + golden set, a deterministic prompt-extraction guardrail, and a live faithfulness verifier. Still planned: UI source citations and automated re-indexing on KB changes.
+Addressed since earlier versions: upgraded embeddings (MiniLM-384 → bge-base-768), a graded eval pipeline + golden set, a deterministic prompt-extraction guardrail, a live faithfulness verifier, and a per-answer Sources panel in the UI. Still planned: claim-level (per-sentence) citation and automated re-indexing on KB changes.

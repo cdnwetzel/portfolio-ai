@@ -121,11 +121,14 @@ def programmatic_scores(item: dict, sig: dict) -> dict:
             grounding = 4                       # no expectation set, but answered substantively
         else:
             grounding = 2
-        citation = 5 if sig["has_citation"] else 2
     else:
         grounding = 3 if sig["kind_pass"] else 1  # neutral for non-grounded kinds
-        citation = None
-    return {"grounding": grounding, "faithfulness": None, "citation_quality": citation,
+    # Citation is NOT scored programmatically: inline [source:] tags were deliberately
+    # removed from the prompt (the UI renders the retrieved sources deterministically),
+    # so the old has_citation proxy measured a rule that no longer exists. Only a real
+    # independent judge can score citation_quality meaningfully; programmatic mode leaves
+    # it None (never gated — see summarize_and_gate).
+    return {"grounding": grounding, "faithfulness": None, "citation_quality": None,
             "judge": "programmatic"}
 
 
