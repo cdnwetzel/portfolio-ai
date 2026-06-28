@@ -10,14 +10,13 @@ User=root
 # api-proxy can reach them at 127.0.0.1. The home server's inference services
 # are never exposed to the internet — only reachable through this tunnel.
 #   8001=reserved  8004=vLLM  8005=embeddings  8006=reranker  6333=Qdrant  8788=headroom-lib
+#   8007=faithfulness verifier — on the asrock B550 (10.0.1.115), NOT the T5810.
 #
-# Faithfulness verifier (verifier-faithfulness-layer.md §7.2): the verifier runs on a
-# SEPARATE spare box on the home LAN, not the T5810 that terminates this tunnel. Once
-# that box's LAN IP is pinned (open question #1) AND it is reachable from the tunnel's
-# home-side host, append this forward to ExecStart below (do NOT add it before the box
-# exists — an unresolvable -L makes ssh exit and kills the whole tunnel):
-#       -L 127.0.0.1:8007:<RYZEN_LAN_IP>:8007
-# then set VERIFIER_URL=http://127.0.0.1:8007 in the api-proxy unit.
+# Verifier (verifier-faithfulness-layer.md §7.2): the verifier runs on the asrock B550
+# (10.0.1.115:8007). The T5810 terminates this tunnel and shares the LAN with asrock, so
+# the -L 8007 forward below targets asrock's IP and the T5810 routes to it (confirmed
+# T5810 -> 10.0.1.115:8007 reachable). Then VERIFIER_URL=http://127.0.0.1:8007 on the
+# api-proxy unit makes the proxy's fire-and-forget /verify reach asrock.
 #
 # Per-machine config lives in /etc/default/portfolio-ai-tunnel (NOT in the repo):
 #   T5810_USER=chris
@@ -25,7 +24,7 @@ User=root
 # Create the file on the VPS once with `T5810_USER` and `T5810_HOST` set,
 # then `systemctl daemon-reload && systemctl restart portfolio-ai-tunnel.service`.
 EnvironmentFile=/etc/default/portfolio-ai-tunnel
-ExecStart=/usr/bin/ssh -N -o StrictHostKeyChecking=accept-new -o ServerAliveInterval=60 -o ServerAliveCountMax=3 -L 127.0.0.1:8001:127.0.0.1:8001 -L 127.0.0.1:8004:127.0.0.1:8004 -L 127.0.0.1:8005:127.0.0.1:8005 -L 127.0.0.1:8006:127.0.0.1:8006 -L 127.0.0.1:6333:127.0.0.1:6333 -L 127.0.0.1:8788:127.0.0.1:8788 ${T5810_USER}@${T5810_HOST}
+ExecStart=/usr/bin/ssh -N -o StrictHostKeyChecking=accept-new -o ServerAliveInterval=60 -o ServerAliveCountMax=3 -L 127.0.0.1:8001:127.0.0.1:8001 -L 127.0.0.1:8004:127.0.0.1:8004 -L 127.0.0.1:8005:127.0.0.1:8005 -L 127.0.0.1:8006:127.0.0.1:8006 -L 127.0.0.1:6333:127.0.0.1:6333 -L 127.0.0.1:8788:127.0.0.1:8788 -L 127.0.0.1:8007:10.0.1.115:8007 ${T5810_USER}@${T5810_HOST}
 Restart=always
 RestartSec=10
 StandardOutput=journal
