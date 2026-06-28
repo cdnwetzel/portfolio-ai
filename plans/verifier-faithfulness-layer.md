@@ -225,3 +225,25 @@ it).
 - **Net-new:** `home/verifier-service/` (code + unit), the judge model on the Ryzen box, the
   SQLite verdict store, the proxy fire-and-forget hook + `VERIFIER_URL`, the `-L 8007` tunnel
   forward, `home/setup-verifier.sh`, and the verifier fixtures/canary check.
+
+## 12. Eval refinements (from iChris + firm review, 2026-06-27)
+A review of `../iChris/` (`ichris/eval/*`) and the firm's monday roadmap (`bl89`, `bl278`)
+sharpened the judging design. These apply to *both* this live verifier and the offline graded
+eval in `plans/rag-improvements.md` §1.1 — same judge engine, two entry points.
+- **Independent judge (echo bias).** The judge MUST be a different model than the one that wrote
+  the answer (the 14B). The spare-box 7-8B judge already satisfies this — keep it that way; never
+  judge an answer with the model that produced it. (`bl89`: a single same-family judge "penalizes
+  assertive answers" and graded a *more* faithful version *worse*.)
+- **Multi-axis, graded 1–5, not boolean.** Beyond per-claim supported/unsupported, also emit a
+  1–5 `grounding` (and optionally `citation_correctness`) so trends are visible, not just pass/fail.
+  Stream verdicts to JSONL for distribution tracking (`ichris/eval/harness.py`, temp 0, strict JSON).
+- **Human golden set as backstop.** Multi-LLM convergence is NOT sufficient for sign-off
+  (`bl278`: only 1 of 4 LLMs caught a critical fact). Keep a ~30-question YAML golden set with a
+  rubric (accuracy/completeness/usefulness/hallucination-free); use it to validate the judge itself.
+- **Ship thresholds (when used as a gate offline).** e.g. promote only at mean ≥3.5, no axis <2.5,
+  over ≥15 evals — concrete numbers to adopt rather than invent.
+- **Prompt-version hash on every verdict.** Stamp `sha1(system_prompt)[:8]` so a faithfulness dip
+  is attributable to a prompt change vs a pipeline change (`ichris/llm/prompts.py:99`).
+- **Judge-accuracy validation (§8.1) is now non-optional**, precisely because the firm's own
+  lesson is "the eval can measure the wrong thing." The positive/negative/paraphrase/contradiction
+  fixtures gate trust in the judge before its scores are believed.
