@@ -6,7 +6,7 @@
 # it from committed source. Re-run any time to restore the index to match the repo —
 # e.g. after editing KB docs, or to recover from Qdrant loss.
 #
-# Runs the embedder on the T5810 (same all-MiniLM-L6-v2 env as the live embed-service,
+# Runs the embedder on the T5810 (same bge-base-en-v1.5 env as the live embed-service,
 # so index vectors match query vectors) as the `chris` user (model cached there).
 #
 # Usage:  ./scripts/reindex_kb.sh

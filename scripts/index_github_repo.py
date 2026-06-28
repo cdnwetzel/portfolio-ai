@@ -227,9 +227,11 @@ def index_documents(qdrant_url: str, embed_url: str, docs: List[Dict]):
 
     logger.info(f"\n=== Indexing {len(docs)} chunks to Qdrant ===")
 
-    # Load embedding model on CPU
+    # Load embedding model on CPU — MUST match the live embed-service / main indexer
+    # (bge-base-en-v1.5, 768-d). It appends to the existing `documents` collection, so a
+    # different model/dim would be rejected or corrupt search.
     logger.info("Loading embedding model...")
-    model = SentenceTransformer('all-MiniLM-L6-v2', device='cpu')
+    model = SentenceTransformer('BAAI/bge-base-en-v1.5', device='cpu')
     logger.info("✓ Model loaded")
 
     # Encode all contents

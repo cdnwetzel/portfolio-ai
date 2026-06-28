@@ -1,10 +1,10 @@
 #!/sbin/openrc-run
 # Install to /etc/init.d/embed-service (root-owned, 0755)
 # Enable: rc-update add embed-service default
-# CPU embedding service (all-MiniLM-L6-v2) on port 8005. Sibling of rerank-service (8006).
+# CPU embedding service (BAAI/bge-base-en-v1.5, 768-d) on port 8005. Sibling of rerank-service (8006).
 
 name="Embedding Service"
-description="SentenceTransformers all-MiniLM-L6-v2 FastAPI server"
+description="SentenceTransformers bge-base-en-v1.5 FastAPI server"
 
 supervisor="supervise-daemon"
 command="/home/chris/miniforge3/bin/python3"

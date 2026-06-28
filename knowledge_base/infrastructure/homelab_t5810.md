@@ -39,14 +39,14 @@
 - **Service name:** `qdrant` (OpenRC)
 - **Port:** 6333 (LAN only)
 - **Storage:** `/home/chris/qdrant-data/`
-- **Collection:** `documents` — 384-dim cosine similarity vectors
-- **Content:** ~78 points indexed from LinkedIn posts, case studies, resume, KB documents
+- **Collection:** `documents` — 768-dim cosine similarity vectors
+- **Content:** ~65 chunks indexed from LinkedIn posts, case studies, resume, KB documents
 
 ### Embedding Service
-- **Model:** `all-MiniLM-L6-v2` (sentence-transformers)
+- **Model:** `BAAI/bge-base-en-v1.5` (sentence-transformers)
 - **Device:** CPU (keeps GPU free for LLM inference)
 - **Port:** 8005 (LAN only)
-- **Dimensions:** 384-dim vectors
+- **Dimensions:** 768-dim vectors
 
 ---
 

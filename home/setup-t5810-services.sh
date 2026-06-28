@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Provision the Portfolio AI CPU services on the T5810 (Gentoo / OpenRC) from this repo:
-#   - embed-service  (all-MiniLM-L6-v2, port 8005)
+#   - embed-service  (BAAI/bge-base-en-v1.5, 768-d, port 8005)
 #   - rerank-service (bge-reranker-base, port 8006)
 # Both run as the `chris` user via supervise-daemon. Models download from HuggingFace
 # on first start (or use the existing ~/.cache if present).

@@ -1,5 +1,11 @@
 # Portfolio Polish Plan — dev.cwetzel.com
 
+> **Status (2026-06-28): largely executed / historical snapshot.** The backend items shipped
+> (bge-base embeddings, reranker, eval harness, verifier, guardrail — see `rag-improvements.md`
+> and `verifier-faithfulness-layer.md`). Embedding/UI references below that mention
+> `all-MiniLM-L6-v2` describe the *pre-upgrade* state this plan proposed changing — production is
+> now `bge-base-en-v1.5` (768-d). Frontend-polish items may be partially done.
+
 **Goal:** Transform the chat demo into a polished professional portfolio that communicates who Chris is,
 demonstrates the infrastructure he built, and leaves a strong impression on technical visitors and recruiters.
 
