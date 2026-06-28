@@ -343,9 +343,13 @@ async def websocket_chat(websocket: WebSocket):
             body = data.get("payload", {})
             messages = body.get("messages", [])
             body["stream"] = True
-            body["temperature"] = 0.35
+            # Grounded-RAG sampling: low temperature, NO presence penalty. presence_penalty
+            # punishes re-using tokens already seen, which on a factual task forces lexical
+            # novelty and causes paraphrase drift / word-substitution — the suspected cause
+            # of a "built"→"Broke" inversion in a portfolio answer. Penalties off; temp low.
+            body["temperature"] = 0.2
             body["top_p"] = 0.7
-            body["presence_penalty"] = 0.5
+            body["presence_penalty"] = 0.0
 
             # Guard: hard cap on single prompt length
             user_query = messages[-1].get("content", "") if messages else ""

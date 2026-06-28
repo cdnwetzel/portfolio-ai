@@ -4,7 +4,7 @@ const EMAIL        = 'mailto:chris@cwetzel.com'
 const REPO_URL     = 'https://github.com/cdnwetzel/portfolio-saas'
 
 const STACK = [
-  'Qwen 14B', 'vLLM', 'Qdrant', 'RAG', 'React', 'Gentoo', '2× RTX A4500'
+  'Qwen 14B', 'vLLM', 'Qdrant', 'RAG', 'React', 'Gentoo', '2× RTX A4500', 'Verifier'
 ]
 
 const HOW_IT_WORKS = [
@@ -22,6 +22,11 @@ const HOW_IT_WORKS = [
     icon: '⚡',
     title: 'Local Inference',
     desc: 'Qwen 14B runs on two RTX A4500 GPUs in my home office via tensor parallelism. No cloud GPU — owned hardware, no per-token cost.',
+  },
+  {
+    icon: '✅',
+    title: 'Faithfulness Verified',
+    desc: 'After each answer, an independent model on a second home server (Ryzen 9 / RTX 3060 Ti) scores whether every claim is grounded in the retrieved sources.',
   },
 ]
 
@@ -72,7 +77,7 @@ export default function Landing({ onStart }) {
         <p className="text-center text-xs text-gray-600 uppercase tracking-widest mb-8">
           How it works
         </p>
-        <div className="max-w-3xl mx-auto grid sm:grid-cols-3 gap-6">
+        <div className="max-w-3xl mx-auto grid sm:grid-cols-2 gap-6">
           {HOW_IT_WORKS.map(({ icon, title, desc }) => (
             <div key={title} className="bg-secondary rounded-lg p-5">
               <div className="text-2xl mb-2">{icon}</div>
