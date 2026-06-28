@@ -72,8 +72,17 @@ if [ "${CONFIRM:-0}" != "1" ]; then
 fi
 
 emerge -q sci-ml/ollama-bin
-[ -f /etc/init.d/ollama ] && { rc-update add ollama default 2>/dev/null || true; rc-service ollama start || rc-service ollama restart; } \
-  || echo "    NOTE: no /etc/init.d/ollama — start ollama however the ebuild documents."
+# GURU ollama-bin ships only a systemd unit; this box is OpenRC. Install our unit
+# (committed at home/ollama.openrc, next to this script).
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+if [ -f "${SCRIPT_DIR}/ollama.openrc" ]; then
+  cp "${SCRIPT_DIR}/ollama.openrc" /etc/init.d/ollama
+  chmod 755 /etc/init.d/ollama
+  rc-update add ollama default 2>/dev/null || true
+  rc-service ollama restart 2>/dev/null || rc-service ollama start
+else
+  echo "    WARN: ollama.openrc not found next to script — start ollama manually."
+fi
 echo "    waiting for ollama API..."
 for _ in $(seq 1 30); do curl -sf http://127.0.0.1:11434/api/tags >/dev/null 2>&1 && break; sleep 2; done
 

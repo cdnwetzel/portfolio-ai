@@ -1,0 +1,35 @@
+#!/sbin/openrc-run
+# OpenRC service for Ollama (judge model host for the faithfulness verifier).
+# The GURU sci-ml/ollama-bin package ships only a systemd unit; this box is OpenRC,
+# so we provide our own. Mirrors the systemd unit: runs `ollama serve` as the ollama
+# user on 127.0.0.1:11434. Install to /etc/init.d/ollama (0755), rc-update add.
+
+name="Ollama"
+description="Ollama LLM server (judge model for the RAG faithfulness verifier)"
+
+command="/usr/bin/ollama"
+command_args="serve"
+command_user="ollama:ollama"
+command_background="yes"
+supervisor="supervise-daemon"
+pidfile="/run/ollama.pid"
+respawn_delay=3
+respawn_max=5
+respawn_period=60
+output_log="/var/log/ollama.log"
+error_log="/var/log/ollama.log"
+
+# ollama serve needs a writable HOME (models land in $HOME/.ollama). The ollama
+# user's home is /var/lib/ollama. Bind the API to localhost only.
+export HOME="/var/lib/ollama"
+export OLLAMA_HOST="127.0.0.1:11434"
+
+depend() {
+    need net
+    after bootmisc
+}
+
+start_pre() {
+    checkpath -d -m 0750 -o ollama:ollama /var/lib/ollama
+    checkpath -f -m 0644 -o ollama:ollama /var/log/ollama.log
+}
