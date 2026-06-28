@@ -24,6 +24,7 @@ from context_manager import (
     MAX_CONTEXT_TOKENS,
 )
 from query_expansion import expand_query
+import sparse_bm25
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -67,6 +68,13 @@ RAG_RETRIEVE_LIMIT = 15   # candidates from Qdrant (bi-encoder cosine); ~3s CPU 
 RAG_TOP_K = 5             # final chunks after cross-encoder reranking
 RAG_MAX_PER_DOC = 1       # cap chunks from one source doc in the final context, so a
                           # multi-chunk doc (e.g. the resume) can't hog the top-5
+# Hybrid dense+BM25 retrieval (rag-improvements.md §2.1). OFF by default = current
+# dense-only path against the unnamed-vector collection. Turn ON *only* together with a
+# collection re-indexed via `index_with_embeddings.py --hybrid` (named dense + bm25
+# sparse vectors) — a coordinated migration. When on, candidates come from the Query
+# API (dense + sparse prefetch, RRF fusion); the cross-encoder rerank is unchanged.
+HYBRID_SEARCH = os.environ.get("HYBRID_SEARCH", "0") == "1"
+
 RAG_MIN_SCORE = 0.0       # DISABLED. The guardrail below compares the *reranker* score,
                           # but 0.35 was tuned for all-MiniLM *cosine* — a different scale.
                           # bge-reranker scores here are ~0.0-0.08, so 0.35 refused EVERY
@@ -221,19 +229,41 @@ async def search_knowledge_base(query: str, retrieve_limit: int = RAG_RETRIEVE_L
         query_embedding = embed_resp.json()["embedding"]
         logger.info(f"Query embedded ({len(query_embedding)} dims)")
 
-        # Search — pull a wide candidate set; precision comes from the reranker
-        search_resp = await _http.post(
-            f"{QDRANT_URL}/collections/documents/points/search",
-            json={"vector": query_embedding, "limit": retrieve_limit, "with_payload": True},
-            timeout=10.0
-        )
-        if search_resp.status_code != 200:
-            logger.error(f"Vector search failed: {search_resp.status_code}")
-            return []
+        # Search — pull a wide candidate set; precision comes from the reranker.
+        if HYBRID_SEARCH:
+            # Dense + BM25-sparse prefetch, fused with RRF (Qdrant Query API). Uses the
+            # ORIGINAL query for sparse terms (exact-match recall); dense uses the
+            # alias-expanded embedding. Requires a --hybrid (named-vector) collection.
+            sparse = sparse_bm25.encode_query(query)
+            body = {
+                "prefetch": [
+                    {"query": query_embedding, "using": "dense", "limit": retrieve_limit},
+                    {"query": {"indices": sparse["indices"], "values": sparse["values"]},
+                     "using": "bm25", "limit": retrieve_limit},
+                ],
+                "query": {"fusion": "rrf"},
+                "limit": retrieve_limit,
+                "with_payload": True,
+            }
+            search_resp = await _http.post(
+                f"{QDRANT_URL}/collections/documents/points/query", json=body, timeout=10.0)
+            if search_resp.status_code != 200:
+                logger.error(f"Hybrid query failed: {search_resp.status_code} {search_resp.text[:160]}")
+                return []
+            results = search_resp.json().get("result", {}).get("points", [])
+        else:
+            search_resp = await _http.post(
+                f"{QDRANT_URL}/collections/documents/points/search",
+                json={"vector": query_embedding, "limit": retrieve_limit, "with_payload": True},
+                timeout=10.0
+            )
+            if search_resp.status_code != 200:
+                logger.error(f"Vector search failed: {search_resp.status_code}")
+                return []
+            results = search_resp.json().get("result", [])
 
-        results = search_resp.json().get("result", [])
         payloads = [{**r.get("payload", {}), "score": r.get("score", 0.0)} for r in results]
-        logger.info(f"Cosine search returned {len(payloads)} candidates")
+        logger.info(f"{'Hybrid' if HYBRID_SEARCH else 'Cosine'} search returned {len(payloads)} candidates")
         return await rerank_documents(query, payloads, top_k)
 
     except Exception as e:

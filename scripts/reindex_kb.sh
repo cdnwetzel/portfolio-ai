@@ -18,18 +18,23 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 REPO_KB="${HERE}/../knowledge_base"
 REMOTE_KB="/tmp/knowledge_base"
 REMOTE_INDEXER="/tmp/reindex_indexer.py"
+REMOTE_SPARSE="/tmp/sparse_bm25.py"
 PYTHON="/home/chris/miniforge3/bin/python3"
+# HYBRID=1 builds a dense+BM25 collection (rag-improvements.md §2.1). The live proxy
+# must run with HYBRID_SEARCH=1 to query it — coordinate the two (deploy + reindex).
+HYBRID_FLAG=""; [ "${HYBRID:-0}" = "1" ] && HYBRID_FLAG="--hybrid"
 
 echo "==> Syncing committed KB -> ${T5810}:${REMOTE_KB} (--delete purges stale/removed docs)"
 rsync -avz --delete "${REPO_KB}/" "${T5810}:${REMOTE_KB}/"
 
-echo "==> Copying indexer"
-ssh "${T5810}" "rm -f ${REMOTE_INDEXER}"
+echo "==> Copying indexer (+ sparse_bm25 for hybrid)"
+ssh "${T5810}" "rm -f ${REMOTE_INDEXER} ${REMOTE_SPARSE}"
 scp -q "${HERE}/index_with_embeddings.py" "${T5810}:${REMOTE_INDEXER}"
+scp -q "${HERE}/../cloud/sparse_bm25.py"  "${T5810}:${REMOTE_SPARSE}"
 
-echo "==> Rebuilding Qdrant 'documents' collection (wipe + reindex from committed source)"
-ssh "${T5810}" "chmod -R a+r ${REMOTE_KB} ${REMOTE_INDEXER} && \
+echo "==> Rebuilding Qdrant 'documents' collection (wipe + reindex from committed source; hybrid=${HYBRID:-0})"
+ssh "${T5810}" "chmod -R a+r ${REMOTE_KB} ${REMOTE_INDEXER} ${REMOTE_SPARSE} && \
   su - chris -c '${PYTHON} ${REMOTE_INDEXER} --kb-path ${REMOTE_KB} \
-    --qdrant-url http://localhost:6333 --collection documents --wipe'"
+    --qdrant-url http://localhost:6333 --collection documents --wipe ${HYBRID_FLAG}'"
 
 echo "==> Done. Live index now matches knowledge_base/."

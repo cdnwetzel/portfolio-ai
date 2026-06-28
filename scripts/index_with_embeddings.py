@@ -23,6 +23,21 @@ except ImportError:  # pragma: no cover
 logging.basicConfig(level=logging.INFO, format='%(message)s')
 logger = logging.getLogger(__name__)
 
+def _load_sparse_module():
+    """Import sparse_bm25 (shared with the proxy). It is copied next to this indexer on
+    the T5810 by reindex_kb.sh; also try the repo's cloud/ dir for local runs."""
+    import importlib
+    here = Path(__file__).resolve().parent
+    for p in (str(here), str(here.parent / "cloud")):
+        if p not in sys.path:
+            sys.path.insert(0, p)
+    try:
+        return importlib.import_module("sparse_bm25")
+    except Exception as e:
+        logger.error(f"sparse_bm25 import failed: {e}")
+        return None
+
+
 _HEADER_RE = re.compile(r'^#{1,6}\s')
 
 
@@ -180,8 +195,13 @@ def load_documents(kb_path: str) -> List[Dict]:
 
     return docs
 
-def create_collection(qdrant_url: str, collection_name: str) -> bool:
-    """Create Qdrant collection with 768-dim vectors for semantic search."""
+def create_collection(qdrant_url: str, collection_name: str, hybrid: bool = False) -> bool:
+    """Create the Qdrant collection.
+
+    Dense-only (default): unnamed 768-d cosine vector (current production schema).
+    Hybrid (rag-improvements.md §2.1): NAMED 'dense' (768-d cosine) + a 'bm25' sparse
+    vector, for dense+sparse fusion via the Query API. NOTE: hybrid uses named vectors,
+    which the proxy must query differently — a coordinated schema migration."""
     try:
         resp = requests.get(f"{qdrant_url}/collections/{collection_name}")
         if resp.status_code == 200:
@@ -191,18 +211,19 @@ def create_collection(qdrant_url: str, collection_name: str) -> bool:
         pass
 
     try:
-        payload = {
-            "vectors": {
-                "size": 768,  # BAAI/bge-base-en-v1.5 produces 768-dim embeddings
-                "distance": "Cosine",
+        if hybrid:
+            payload = {
+                "vectors": {"dense": {"size": 768, "distance": "Cosine"}},
+                "sparse_vectors": {"bm25": {}},
             }
-        }
+        else:
+            payload = {"vectors": {"size": 768, "distance": "Cosine"}}
         resp = requests.put(f"{qdrant_url}/collections/{collection_name}", json=payload)
         if resp.status_code == 200:
-            logger.info(f"✓ Created collection '{collection_name}' with size 768")
+            logger.info(f"✓ Created collection '{collection_name}' ({'hybrid dense+bm25' if hybrid else 'dense 768'})")
             return True
         else:
-            logger.error(f"✗ Failed to create collection: {resp.status_code}")
+            logger.error(f"✗ Failed to create collection: {resp.status_code} {resp.text[:200]}")
             return False
     except Exception as e:
         logger.error(f"✗ Error creating collection: {e}")
@@ -220,11 +241,12 @@ def wipe_collection(qdrant_url: str, collection_name: str) -> None:
     except Exception as e:
         logger.error(f"✗ Error wiping collection: {e}")
 
-def index_documents(qdrant_url: str, docs: List[Dict], collection_name: str = "documents"):
-    """Index documents as chunks with semantic embeddings."""
-    logger.info(f"\n=== Indexing Documents with Semantic Embeddings ===")
+def index_documents(qdrant_url: str, docs: List[Dict], collection_name: str = "documents",
+                    hybrid: bool = False):
+    """Index documents as chunks with semantic embeddings (+ BM25 sparse vectors if hybrid)."""
+    logger.info(f"\n=== Indexing Documents ({'hybrid dense+bm25' if hybrid else 'dense'}) ===")
 
-    if not create_collection(qdrant_url, collection_name):
+    if not create_collection(qdrant_url, collection_name, hybrid=hybrid):
         return False
 
     # Load embedding model on CPU (vLLM is using GPU)
@@ -233,38 +255,46 @@ def index_documents(qdrant_url: str, docs: List[Dict], collection_name: str = "d
     model = SentenceTransformer('BAAI/bge-base-en-v1.5', device='cpu')
     logger.info("✓ Model loaded on CPU")
 
+    # Pass 1: chunk every doc. For hybrid, tokenize all chunks first to build corpus IDF.
+    sp = None
+    idf = avgdl = None
+    chunked = []  # list of (doc, [chunks])
+    for doc in docs:
+        chunks = chunk_text(doc['content'], chunk_size=400, overlap=50)
+        chunked.append((doc, chunks))
+
+    if hybrid:
+        sp = _load_sparse_module()
+        if sp is None:
+            logger.error("✗ --hybrid requested but sparse_bm25 module not importable")
+            return False
+        corpus_tokens = [sp.tokenize(c) for _, chunks in chunked for c in chunks]
+        idf, avgdl = sp.build_idf(corpus_tokens)
+        logger.info(f"✓ BM25 IDF over {len(corpus_tokens)} chunks (avgdl={avgdl:.1f})")
+
     points = []
     point_id = 0
-    total_chunks = 0
 
-    for doc in docs:
-        # Chunk the content
-        chunks = chunk_text(doc['content'], chunk_size=400, overlap=50)
-        total_chunks += len(chunks)
-
-        # Batch encode all chunks for this document
+    for doc, chunks in chunked:
         logger.info(f"Embedding {len(chunks)} chunks for {doc['title']}...")
         embeddings = model.encode(chunks, show_progress_bar=False)
 
         for chunk_idx, chunk in enumerate(chunks):
             embedding = embeddings[chunk_idx].tolist()
-
-            points.append({
-                "id": point_id,
-                "vector": embedding,  # Real 768-dim semantic vector
-                "payload": {
-                    "doc_id": doc["id"],
-                    "title": doc["title"],
-                    "content": chunk,  # Full chunk text for reference
-                    "source": doc["source"],
-                    "chunk_index": chunk_idx,
-                    "word_count": len(chunk.split()),
-                    "impressions": doc.get("impressions", 0),
-                }
-            })
+            payload = {
+                "doc_id": doc["id"], "title": doc["title"], "content": chunk,
+                "source": doc["source"], "chunk_index": chunk_idx,
+                "word_count": len(chunk.split()), "impressions": doc.get("impressions", 0),
+            }
+            if hybrid:
+                sparse = sp.encode_doc(sp.tokenize(chunk), idf, avgdl)
+                vector = {"dense": embedding, "bm25": sparse}
+            else:
+                vector = embedding
+            points.append({"id": point_id, "vector": vector, "payload": payload})
             point_id += 1
 
-        logger.info(f"  → {doc['title']}: {len(chunks)} chunks → {len(chunks) * 768} vector dims")
+        logger.info(f"  → {doc['title']}: {len(chunks)} chunks")
 
     # Upload all points
     try:
@@ -299,11 +329,14 @@ def main():
     parser.add_argument("--wipe", action="store_true",
                         help="Delete and rebuild the collection from scratch — recommended for a clean, "
                              "reproducible rebuild (clears orphan points from prior targeted re-indexes)")
+    parser.add_argument("--hybrid", action="store_true",
+                        help="Build a hybrid dense+BM25-sparse collection (named 'dense' + 'bm25' "
+                             "sparse vectors). Requires a proxy that queries via the fusion API.")
     args = parser.parse_args()
 
     logger.info(f"Qdrant URL: {args.qdrant_url}")
     logger.info(f"KB Path:    {args.kb_path}")
-    logger.info(f"Collection: {args.collection}  (wipe={args.wipe})\n")
+    logger.info(f"Collection: {args.collection}  (wipe={args.wipe}, hybrid={args.hybrid})\n")
 
     docs = load_documents(args.kb_path)
     if not docs:
@@ -315,7 +348,7 @@ def main():
     if args.wipe:
         wipe_collection(args.qdrant_url, args.collection)
 
-    if index_documents(args.qdrant_url, docs, args.collection):
+    if index_documents(args.qdrant_url, docs, args.collection, hybrid=args.hybrid):
         logger.info("\n✅ Knowledge base indexed with semantic embeddings!")
         logger.info("RAG search now uses real vector similarity — no manual weight tuning needed.")
         return 0
