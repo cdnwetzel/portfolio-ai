@@ -17,7 +17,7 @@ If you're talking to this AI right now, you're using this system. The repo conta
 | Layer | Technology | Where It Runs |
 |---|---|---|
 | Frontend | React + Vite + Tailwind CSS | Browser |
-| Edge | Nginx + FastAPI (api-proxy.py) | cwetzel.com VPS |
+| Edge | Apache (SSL/WSS) + FastAPI (api-proxy.py) | cwetzel.com VPS |
 | LLM | vLLM + Qwen2.5-Coder 14B Instruct | T5810 home server (2× A4500) |
 | Vector DB | Qdrant (hybrid: dense + BM25 sparse) | T5810 home server |
 | Embeddings | BAAI/bge-base-en-v1.5 (768-d) | T5810 home server (CPU) |

@@ -28,7 +28,7 @@ Following the **5-Gate Workflow** (psplan framework):
 User Browser
     ↓ HTTPS
 cwetzel.com Cloud Server
-├─ Nginx (SSL, reverse proxy)
+├─ Apache (SSL, reverse proxy, WSS)
 ├─ FastAPI API Proxy (port 8000)
 │  └─ Routes to T5810 via SSH tunnel
 └─ Static HTML frontend
@@ -99,7 +99,7 @@ portfolio-saas/
 │   └── vite.config.ts
 ├── cloud/                      # Cloud Ubuntu deployment
 │   ├── docker-compose.yml
-│   ├── nginx.conf
+│   ├── setup-proxy-apache.sh
 │   ├── .env.example
 │   └── deploy.sh
 ├── home/                       # Home Gentoo server config
@@ -140,7 +140,7 @@ portfolio-saas/
 
 ### Phase 4: Infrastructure
 - [ ] WireGuard tunnel (Gentoo ↔ Cloud)
-- [ ] Nginx configuration with SSL
+- [ ] Apache configuration with SSL (cloud/setup-proxy-apache.sh)
 - [ ] Docker deployment (Cloud)
 - [ ] Database migrations
 - [ ] Health checks
@@ -181,7 +181,7 @@ portfolio-saas/
 2. **src/main.py** - FastAPI application entry point
 3. **.env.example** - Environment variables template
 4. **cloud/docker-compose.yml** - Production cloud stack
-5. **cloud/nginx.conf** - Nginx reverse proxy configuration
+5. **cloud/setup-proxy-apache.sh** - Apache vhost + SSL + WSS reverse proxy setup
 6. **alembic/versions/*.py** - Database migrations
 7. **.github/workflows/deploy.yml** - GitHub Actions CI/CD
 

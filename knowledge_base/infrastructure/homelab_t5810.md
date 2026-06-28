@@ -56,17 +56,18 @@ The T5810 is a home server with LAN-only services. It's made accessible to the i
 
 ```
 User Browser → HTTPS → cwetzel.com (Ubuntu VPS)
-  Cloud: Nginx + FastAPI api-proxy (port 8000)
+  Cloud: Apache (SSL/WSS) + FastAPI api-proxy (port 8000)
     ↓ SSH Tunnel (reverse forward)
-  T5810: vLLM (8004), Qdrant (6333), Embeddings (8005)
+  T5810: vLLM (8004), Qdrant (6333), Embeddings (8005), Reranker (8006)
+    ↓ tunnel also forwards :8007 → asrock (10.0.1.115) verifier
 ```
 
 **Tunnel service:** `portfolio-ai-tunnel.service` (systemd on cloud server)
-- Forwards cloud ports 8004, 6333, 8005 → T5810 LAN
+- Forwards cloud ports 8004, 6333, 8005, 8006 → T5810 LAN; 8007 → asrock
 - Auto-restarts on disconnect
 
 **Cloud server** (`cwetzel.com`, Ubuntu):
-- Nginx (SSL termination, static serving)
+- Apache (SSL termination, static serving, WSS reverse proxy)
 - FastAPI `api-proxy.py` (port 8000)
 - Handles WebSocket connections, RAG pipeline, FOLLOWUPS injection
 
