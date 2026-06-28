@@ -1,9 +1,24 @@
 # Plan: Faithfulness Verifier Layer (self-auditing RAG)
 
-**Status:** Design / not yet built. Code deferred — this is the build spec only.
-**Date:** 2026-06-20
-**Target host:** the idle Ryzen 9 5950X / 64 GB / RTX 3060 Ti 8 GB box (NOT the T5810 — its
-A4500s are already full serving vLLM).
+**Status:** BUILT + DEPLOYED + VALIDATED (2026-06-28). Live and scoring every answer.
+**Date:** 2026-06-20 (plan) / 2026-06-28 (execution)
+**Target host:** the Ryzen 9 5950X / 64 GB / RTX 3060 Ti box — **asrock, 10.0.1.115** (NOT the
+T5810 — its A4500s are full serving vLLM).
+
+## Implementation status (2026-06-28)
+- **P1 core — DONE.** `home/verifier-service/` (`verifier.py` + pure `verifier_core.py`, 13 unit
+  tests), SQLite store, `/verify /metrics /review /health`. Judge = **Qwen2.5-7B on CPU via
+  Ollama** (independent of the 14B). Provisioned on asrock (Gentoo/OpenRC) via
+  `home/provision-verifier-asrock.sh` (GURU `sci-ml/ollama-bin`, CPU-only) + `home/ollama.openrc`.
+- **Judge accuracy (§8.1) — PASS 5/5** fixtures (faithful / hallucinated / contradicted / refusal /
+  paraphrase).
+- **P2 wire-in — DONE.** Proxy `_fire_verify` fires post-`done` (fail-open). Reached from the VPS
+  via the existing tunnel: `-L 8007:10.0.1.115:8007` (T5810 routes to asrock on the LAN);
+  `VERIFIER_URL=http://127.0.0.1:8007` on the api-proxy drop-in.
+- **P3 telemetry — live.** `/metrics` populating from real traffic; it independently corroborated
+  the hybrid revert (faithfulness rose 0.58→0.82 once hybrid was dropped).
+- **CPU not GPU:** chose CPU judging on the 5950X (post-hoc, one-at-a-time) to avoid pulling the
+  multi-GB CUDA toolkit onto the box; the 3060 Ti stays free.
 
 ---
 

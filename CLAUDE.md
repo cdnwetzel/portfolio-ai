@@ -34,21 +34,31 @@ cwetzel.com Cloud Server
 └─ Static HTML frontend
     ↓ [SSH Tunnel]
     ↓ (ai.cwetzel.com:8004)
-T5810 Home Server (Gentoo, Your Hardware)
+T5810 Home Server (Gentoo/OpenRC, Your Hardware)
 ├─ vLLM (port 8004, local LAN only)
 │  └─ Model: Qwen2.5-Coder-14B-Pscode (BF16, 16K context)
 │  └─ 2x A4500 NVLink, tensor parallel
-├─ Qdrant (port 6333, vector DB)
-├─ Embedding service (port 8005, all-MiniLM-L6-v2, CPU)
+├─ Qdrant (port 6333, vector DB — dense 768-d cosine)
+├─ Embedding service (port 8005, BAAI/bge-base-en-v1.5 768-d, CPU)
 ├─ Reranker service (port 8006, bge-reranker-base, CPU)
 └─ Knowledge base (indexed docs)
+    ↓ tunnel also forwards :8007 → asrock B550 (10.0.1.115) on the LAN
+asrock B550 Home Server (Gentoo/OpenRC)
+└─ Faithfulness verifier (port 8007, Qwen2.5-7B via Ollama, CPU)
 ```
 
-**RAG pipeline:** query → embed (8005) → Qdrant cosine top-15 → rerank to top-5
-(8006, CPU cross-encoder) → inject into prompt → vLLM stream. The reranker adds
-precision the bi-encoder cosine can't: MiniLM surfaces candidates, the cross-encoder
-picks the best 5. Runs CPU-only on the T5810's idle 256GB DDR4 — no VRAM contention
-with vLLM. Fails open (cosine top-5) if the reranker is down.
+**RAG pipeline:** query → alias-expand → embed (8005, bge-base 768-d) → Qdrant cosine
+top-15 → rerank to top-5 (8006, CPU cross-encoder, ≤1 chunk/doc) → fit to token budget
+→ vLLM stream → (out-of-band) fire-and-forget faithfulness verify (8007, asrock). The
+reranker adds precision the bi-encoder can't: cosine surfaces candidates, the
+cross-encoder picks the best 5. CPU-only on the T5810's idle 256GB DDR4 — no VRAM
+contention with vLLM. Fails open (cosine top-5) if the reranker is down; the verifier
+is fully fail-open (chat unaffected if asrock is down).
+
+A deterministic **prompt-extraction guardrail** (`cloud/guardrails.py`) refuses
+"reveal/repeat your prompt"-style attacks before the LLM. A **graded eval**
+(`scripts/eval_graded.py` + `eval/golden_set.yaml`) gates changes; a **hybrid dense+BM25**
+path exists (`HYBRID_SEARCH`) but is OFF — an A/B showed it regressed on this small KB.
 
 ## Key Features
 
@@ -154,12 +164,14 @@ portfolio-saas/
 |-------|-----------|---------|
 | **GPU Inference** | vLLM + Qwen2.5-Coder-14B-Pscode | LLM serving on 2x A4500s (T5810) |
 | **API Framework** | FastAPI + Uvicorn | Async Python proxy (cloud server) |
-| **Vector DB** | Qdrant | Semantic search + RAG retrieval (cosine top-15) |
-| **Embeddings** | all-MiniLM-L6-v2 (384-d) | Query/document → vector (CPU service, port 8005) |
-| **Reranker** | bge-reranker-base | Cross-encoder precision, cosine top-15 → top-5 (CPU, port 8006) |
-| **Frontend** | Standalone HTML + vanilla JS | Simple, no build step |
-| **Reverse Proxy** | Nginx | SSL termination, static HTML serving |
-| **Networking** | SSH Tunnel | Secure T5810 ↔ Cloud communication (LAN-only access) |
+| **Vector DB** | Qdrant | Semantic search + RAG retrieval (dense cosine top-15) |
+| **Embeddings** | BAAI/bge-base-en-v1.5 (768-d) | Query/document → vector (CPU service, port 8005) |
+| **Reranker** | bge-reranker-base | Cross-encoder precision, top-15 → top-5 (CPU, port 8006) |
+| **Faithfulness verifier** | Qwen2.5-7B via Ollama (CPU) | Out-of-band claim grounding (asrock B550, port 8007) |
+| **Eval / guardrail** | graded eval + golden set; prompt-extraction guardrail | Regression gate (`scripts/eval_graded.py`) + pre-LLM refusal (`cloud/guardrails.py`) |
+| **Frontend** | React + Vite + Tailwind | Built + rsynced to dev.cwetzel.com |
+| **Reverse Proxy** | Apache | SSL termination, static serving, WSS proxy |
+| **Networking** | SSH Tunnel | Secure VPS → T5810 → asrock (LAN-only access) |
 | **Knowledge Base** | Local filesystem | Indexed documents + case studies |
 | **Caching** | Browser localStorage | Per-session chat history |
 
@@ -189,36 +201,40 @@ portfolio-saas/
 
 ## Actual Deployment Config
 
-**On T5810 (Home Server):**
+**On T5810 (Home Server, Gentoo/OpenRC):**
 ```bash
-# vLLM Service (systemd: vllm-qwen.service)
-MODEL=qwen2.5-coder-14b-pscode
+# vLLM Service (OpenRC: pscode-vllm; config /etc/pscode/pscode.conf + /etc/conf.d/pscode-vllm)
+MODEL=qwen2.5-coder-14b-pscode   # served-model-name; base Qwen2.5-Coder-14B + pscode-prod LoRA
 PORT=8004
 TENSOR_PARALLEL_SIZE=2
-CUDA_VISIBLE_DEVICES=0,1
-GPU_MEMORY_UTILIZATION=0.93  # 0.90 was too tight for vLLM v0.14.0 KV cache; 0.95 OOM with CUDA graphs
+GPU_MEMORY_UTILIZATION=0.93  # 0.95 OOMs; 760 MiB free/A4500 — no room for spec-dec draft
 
-# Qdrant Vector DB (systemd: qdrant.service)
+# Qdrant (OpenRC), embed-service 8005 (bge-base, CPU), rerank-service 8006 (bge-reranker, CPU)
 QDRANT_PORT=6333
-STORAGE_PATH=/opt/qdrant/storage
+```
+
+**On asrock B550 (10.0.1.115, Gentoo/OpenRC):**
+```bash
+# Faithfulness verifier (OpenRC: verifier-service) + Ollama (OpenRC: ollama)
+VERIFIER_PORT=8007
+JUDGE_MODEL=qwen2.5:7b-instruct-q4_K_M   # CPU; independent of the 14B
 ```
 
 **On Cloud Server (cwetzel.com):**
 ```bash
-# API Proxy (systemd: api-proxy.service)
-VLLM_URL=http://ai.cwetzel.com:8004  # via SSH tunnel
-QDRANT_URL=http://ai.cwetzel.com:6333  # via SSH tunnel
-EMBED_URL=http://127.0.0.1:8005  # Embedding service (tunneled to T5810)
-RERANK_URL=http://127.0.0.1:8006  # Reranker service (tunneled to T5810)
+# API Proxy (systemd: api-proxy.service; Apache terminates SSL/WSS in front)
+VLLM_URL=http://127.0.0.1:8004    # via SSH tunnel
+QDRANT_URL=http://127.0.0.1:6333  # via SSH tunnel
+EMBED_URL=http://127.0.0.1:8005   # embed-service (tunneled to T5810)
+RERANK_URL=http://127.0.0.1:8006  # rerank-service (tunneled to T5810)
+VERIFIER_URL=http://127.0.0.1:8007  # verifier (tunnel → T5810 → asrock); set via systemd drop-in
+HYBRID_SEARCH=0                    # hybrid dense+BM25 built but OFF (lost A/B vs dense on this KB)
 ```
 
-**SSH Tunnel (maintains T5810 access):**
-Forwards ports 8004 (vLLM), 8005 (embeddings), 8006 (reranker), 6333 (Qdrant)
-from T5810 to the cloud server. Managed by `portfolio-ai-tunnel.service` (systemd).
-```bash
-# Cloud → T5810 forward tunnel
-# Port 8004 accessible as ai.cwetzel.com:8004 locally
-```
+**SSH Tunnel (single connection, VPS → T5810, with T5810 as jump host to asrock):**
+Forwards 8004 (vLLM), 8005 (embed), 8006 (rerank), 6333 (Qdrant) — all `127.0.0.1` on the
+T5810 — plus **8007 → 10.0.1.115:8007** (asrock verifier, routed by the T5810 over the LAN).
+Managed by `portfolio-ai-tunnel.service` (systemd on the VPS).
 
 ## Deployment Checklist
 

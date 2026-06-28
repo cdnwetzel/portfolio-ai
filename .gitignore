@@ -101,3 +101,6 @@ knowledge_base/pxx_docs/
 # Diagnostic venv (T5810) + run output
 .venv-diag/
 diagnostic-battery-results.json
+
+# Eval run artifacts (reproducible via scripts/eval_graded.py; golden_set.yaml IS tracked)
+eval/results/

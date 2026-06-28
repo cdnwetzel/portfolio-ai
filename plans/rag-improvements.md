@@ -1,7 +1,27 @@
 # Plan: RAG & Chatbot Improvements (learnings from iChris + firm review)
 
-**Status:** Design / backlog. Not yet built.
-**Date:** 2026-06-27
+**Status:** IMPLEMENTED (2026-06-28). Tier-1 + §2.2 + §2.4 are live; §2.1 was built and
+reverted on the evidence; §2.3 closed as not-viable. Details in "Implementation status".
+**Date:** 2026-06-27 (plan) / 2026-06-28 (execution)
+
+## Implementation status (2026-06-28)
+All gated by the graded eval (`scripts/eval_graded.py`, 32-Q golden set) before/after on the live endpoint.
+- **1.1 graded eval + golden set — DONE/live.** `scripts/eval_graded.py` + `eval/golden_set.yaml`
+  (programmatic signals + optional independent judge + ship thresholds). The independent judge is
+  the asrock verifier's model (≠ the 14B).
+- **1.2 query alias/expansion — DONE/live.** `cloud/query_expansion.py`, wired into search.
+- **1.3 prompt-version hash — DONE/live.** `PROMPT_VERSION` stamped on the WS `done` msg + logs.
+- **2.2 structure-aware chunking — DONE/live.** Merge-section chunker; grounding **4.55→4.82**.
+- **2.4 token budget + minimal-retry — DONE/live.** `fit_context_docs` + pre-token stream retry.
+- **2.1 hybrid dense+BM25 — BUILT, A/B-tested, REVERTED.** `cloud/sparse_bm25.py` + indexer
+  `--hybrid` + proxy `HYBRID_SEARCH` exist but are OFF: A/B showed **4.41 (hybrid) < 4.82 (dense)**
+  on this small KB (BM25 displaced strong dense matches). Kept for a future larger KB.
+- **2.3 speculative decoding — SKIPPED (not viable).** A4500s full (760 MiB free at 0.93 util);
+  draft must co-locate with target so the 3060 Ti/CPU can't help. If speed matters, 4-bit
+  quantization is the path (measurable via eval + verifier).
+- **Bonus (from eval findings):** deterministic prompt-extraction guardrail (`cloud/guardrails.py`)
+  after prompt-text hardening proved insufficient; live faithfulness verifier (see the verifier plan).
+- **Tier 3** items remain candidates (not pursued).
 **Source:** review of `../iChris/` codebase + docs, and the firm's monday.com trackers
 (iChris — Project Tracker, PS AI OS — Project Tracker). Findings attributed inline so they're
 traceable: `iChris:<path>` = built code; `mon:<id>` = monday item (roadmap/spec, may not be shipped).
