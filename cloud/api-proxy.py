@@ -66,9 +66,15 @@ COMPRESS_PROTECT_RECENT = int(os.environ.get("COMPRESS_PROTECT_RECENT", "0"))
 # MiniLM cosine is imprecise — good enough to surface candidates into the top-20,
 # not to pick the best 5. The CPU cross-encoder (T5810:8006) closes that gap.
 RAG_RETRIEVE_LIMIT = 15   # candidates from Qdrant (bi-encoder cosine); ~3s CPU rerank
-RAG_TOP_K = 5             # final chunks after cross-encoder reranking
-RAG_MAX_PER_DOC = 1       # cap chunks from one source doc in the final context, so a
-                          # multi-chunk doc (e.g. the resume) can't hog the top-5
+RAG_TOP_K = 6             # final chunks after cross-encoder reranking
+RAG_MAX_PER_DOC = 1       # cap chunks from a NON-primary source doc (diversity)
+# Adaptive depth: the single top-reranked doc may contribute up to this many chunks.
+# A focused question ("tell me about Chris's SAP work") reranks several chunks of ONE
+# case study to the top → it gets DEPTH (the rich phases/decisions/metrics already in
+# the KB) instead of one ~400-word fragment it has to pad with invention. A broad
+# question ("what has Chris built") interleaves docs in the rerank order, so the primary
+# naturally gets fewer and diversity is preserved. Self-adjusting via rerank order.
+RAG_PRIMARY_DOC_MAX = 3
 # Hybrid dense+BM25 retrieval (rag-improvements.md §2.1). OFF by default = current
 # dense-only path against the unnamed-vector collection. Turn ON *only* together with a
 # collection re-indexed via `index_with_embeddings.py --hybrid` (named dense + bm25
@@ -158,13 +164,19 @@ async def search(request: Request):
 
 
 def _cap_per_doc(ranked: list, top_k: int) -> list:
-    """Take top_k from a ranked list, allowing at most RAG_MAX_PER_DOC chunks per
-    source doc so one multi-chunk doc can't dominate the context. Backfills with
-    overflow chunks if there aren't enough distinct docs to fill top_k."""
+    """Take top_k from a ranked list. The single top-ranked doc (the primary topic) may
+    contribute up to RAG_PRIMARY_DOC_MAX chunks for depth on focused questions; every
+    OTHER doc is capped at RAG_MAX_PER_DOC for diversity. Self-adjusting: a broad query
+    interleaves docs in the rerank order, so the primary naturally gets fewer. Backfills
+    with overflow if there aren't enough distinct docs to fill top_k."""
+    if not ranked:
+        return ranked
+    primary = ranked[0].get("doc_id") or ranked[0].get("title")
     out, counts, overflow = [], {}, []
     for p in ranked:
         key = p.get("doc_id") or p.get("title")
-        if counts.get(key, 0) < RAG_MAX_PER_DOC:
+        cap = RAG_PRIMARY_DOC_MAX if key == primary else RAG_MAX_PER_DOC
+        if counts.get(key, 0) < cap:
             out.append(p)
             counts[key] = counts.get(key, 0) + 1
             if len(out) == top_k:
