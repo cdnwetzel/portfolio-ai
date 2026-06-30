@@ -115,7 +115,7 @@ Vulnerability: VMware ESXi management interface (port 443) exposed to internet
 Corrective action:
   1. Updated ESXi to version 7.0 (out of support, tested first)
   2. Changed default administrator password to 25-character random
-  3. Added firewall rule: Allow port 443 only from bastion host 10.0.1.50
+  3. Added firewall rule: Allow port 443 only from an internal bastion host
   4. Disabled all other admin services (SSH, etc.) on internet side
   5. Enabled vCenter audit logging for all admin access
   6. Tested: External scan shows port 443 closed from internet, admin access only from bastion
@@ -145,7 +145,7 @@ Ongoing: Monthly scan of management interfaces from external perspective
 ```
 Firewall review, Q2 2024
 
-Rule: Allow 206.52.103.x (external) → 192.168.1.50 (internal) port 3389 (RDP)
+Rule: Allow <external IP> (external) → <internal host> (internal) port 3389 (RDP)
 Purpose: Support client XYZ remote access (VPN tunnel)
 Status: Client updated to use VPN → remove rule? 
 Investigation: Client still has legacy RDP access configured, not in use

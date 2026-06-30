@@ -10,10 +10,10 @@ User=root
 # api-proxy can reach them at 127.0.0.1. The home server's inference services
 # are never exposed to the internet — only reachable through this tunnel.
 #   8001=reserved  8004=vLLM  8005=embeddings  8006=reranker  6333=Qdrant  8788=headroom-lib
-#   8007=faithfulness verifier — on the asrock B550 (10.0.1.115), NOT the T5810.
+#   8007=faithfulness verifier — on the asrock B550 (home LAN), NOT the T5810.
 #
 # Verifier (verifier-faithfulness-layer.md §7.2): the verifier runs on the asrock B550
-# (10.0.1.115:8007). The T5810 terminates this tunnel and shares the LAN with asrock, so
+# (asrock:8007). The T5810 terminates this tunnel and shares the LAN with asrock, so
 # the -L 8007 forward below targets asrock's IP and the T5810 routes to it (confirmed
 # T5810 -> 10.0.1.115:8007 reachable). Then VERIFIER_URL=http://127.0.0.1:8007 on the
 # api-proxy unit makes the proxy's fire-and-forget /verify reach asrock.

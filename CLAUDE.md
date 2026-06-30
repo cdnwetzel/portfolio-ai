@@ -42,7 +42,7 @@ T5810 Home Server (Gentoo/OpenRC, Your Hardware)
 ├─ Embedding service (port 8005, BAAI/bge-base-en-v1.5 768-d, CPU)
 ├─ Reranker service (port 8006, bge-reranker-base, CPU)
 └─ Knowledge base (indexed docs)
-    ↓ tunnel also forwards :8007 → asrock B550 (10.0.1.115) on the LAN
+    ↓ tunnel also forwards :8007 → asrock B550 (home LAN) NOT the T5810
 asrock B550 Home Server (Gentoo/OpenRC)
 └─ Faithfulness verifier (port 8007, Qwen2.5-7B via Ollama, CPU)
 ```
@@ -213,7 +213,7 @@ GPU_MEMORY_UTILIZATION=0.93  # 0.95 OOMs; 760 MiB free/A4500 — no room for spe
 QDRANT_PORT=6333
 ```
 
-**On asrock B550 (10.0.1.115, Gentoo/OpenRC):**
+**On asrock B550 (home LAN, Gentoo/OpenRC):**
 ```bash
 # Faithfulness verifier (OpenRC: verifier-service) + Ollama (OpenRC: ollama)
 VERIFIER_PORT=8007
@@ -233,7 +233,7 @@ HYBRID_SEARCH=0                    # hybrid dense+BM25 built but OFF (lost A/B v
 
 **SSH Tunnel (single connection, VPS → T5810, with T5810 as jump host to asrock):**
 Forwards 8004 (vLLM), 8005 (embed), 8006 (rerank), 6333 (Qdrant) — all `127.0.0.1` on the
-T5810 — plus **8007 → 10.0.1.115:8007** (asrock verifier, routed by the T5810 over the LAN).
+T5810 — plus **8007 → asrock:8007** (verifier, routed by the T5810 over the LAN).
 Managed by `portfolio-ai-tunnel.service` (systemd on the VPS).
 
 ## Deployment Checklist

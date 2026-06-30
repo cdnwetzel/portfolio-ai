@@ -27,23 +27,31 @@
 
 ---
 
-## Second GPU Node — asrock B550 (Faithfulness Verifier)
+## Two Distinct GPU Machines — Do Not Conflate
 
-The GPU home lab is **two machines**, not one. Alongside the T5810, an **ASRock B550** box
-runs the out-of-band faithfulness verifier for the chat:
-- **CPU:** AMD Ryzen 9 5950X (16C/32T), 64 GB DDR4-3200
-- **GPU:** NVIDIA RTX 3060 Ti (8 GB) — the judge currently runs on CPU, so the card stays free
+The GPU home lab is **two separate machines with different hardware**:
+
+- **T5810** (primary AI server): Dell Precision, **Xeon E5-2699v4 (22C/44T)**, **two RTX A4500
+  GPUs joined by an NVLink bridge**. Runs vLLM inference serving the Qwen 14B model.
+- **asrock B550** (verifier node): **AMD Ryzen 9 5950X (16C/32T), 64 GB**, **a single RTX 3060
+  Ti (8 GB)**. Runs the out-of-band faithfulness verifier.
+
+The **A4500 NVLink pair belongs to the T5810**; the **single 3060 Ti belongs to the asrock B550**.
+They are not the same box, and their CPUs differ (Intel Xeon vs AMD Ryzen 9). Never attribute one
+machine's GPU or CPU to the other.
+
+### asrock B550 — verifier node
 - **OS:** Gentoo Linux / OpenRC
 - **Role:** hosts `verifier-service` (port 8007) + Ollama serving **Qwen2.5-7B** as an
-  *independent* faithfulness judge — deliberately a different model than the 14B, to avoid
-  self-grading bias. After every answer, the cloud proxy fire-and-forgets the answer + its
-  retrieved chunks here; the judge scores whether each claim is supported by the sources.
-  Fail-open: if this box is down, the chat is unaffected.
-- **Reachability:** LAN `10.0.1.115`; reached from the cloud VPS through the *same* SSH tunnel
-  that terminates on the T5810 — the T5810 routes port 8007 to asrock over the home LAN.
+  *independent* faithfulness judge — a different model than the 14B, to avoid self-grading bias.
+  The judge runs on **CPU** (the Ryzen 9), so the 3060 Ti stays free. After every answer, the
+  cloud proxy fire-and-forgets the answer + its retrieved chunks here; the judge scores whether
+  each claim is supported. Fail-open: if this box is down, the chat is unaffected.
+- **Reachability:** reached from the cloud VPS through the *same* SSH tunnel that terminates on
+  the T5810 — the T5810 routes port 8007 to the asrock box over the home LAN.
 
-So generation runs on the T5810 (A4500 pair) and continuous grounding-verification runs on the
-asrock B550 — two GPU boxes, one home lab.
+So generation runs on the **T5810 (Xeon + A4500 pair)** and continuous grounding-verification runs
+on the **asrock B550 (Ryzen 9 + 3060 Ti)** — two distinct GPU boxes, one home lab.
 
 ---
 
@@ -82,7 +90,7 @@ User Browser → HTTPS → cwetzel.com (Ubuntu VPS)
   Cloud: Apache (SSL/WSS) + FastAPI api-proxy (port 8000)
     ↓ SSH Tunnel (reverse forward)
   T5810: vLLM (8004), Qdrant (6333), Embeddings (8005), Reranker (8006)
-    ↓ tunnel also forwards :8007 → asrock (10.0.1.115) verifier
+    ↓ tunnel also forwards :8007 → asrock verifier (home LAN)
 ```
 
 **Tunnel service:** `portfolio-ai-tunnel.service` (systemd on cloud server)
