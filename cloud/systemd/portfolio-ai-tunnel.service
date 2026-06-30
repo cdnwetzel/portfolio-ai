@@ -15,7 +15,7 @@ User=root
 # Verifier (verifier-faithfulness-layer.md §7.2): the verifier runs on the asrock B550
 # (asrock:8007). The T5810 terminates this tunnel and shares the LAN with asrock, so
 # the -L 8007 forward below targets asrock's IP and the T5810 routes to it (confirmed
-# T5810 -> 10.0.1.115:8007 reachable). Then VERIFIER_URL=http://127.0.0.1:8007 on the
+# T5810 -> asrock:8007 reachable over the LAN). Then VERIFIER_URL=http://127.0.0.1:8007 on the
 # api-proxy unit makes the proxy's fire-and-forget /verify reach asrock.
 #
 # Per-machine config lives in /etc/default/portfolio-ai-tunnel (NOT in the repo):
