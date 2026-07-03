@@ -104,3 +104,6 @@ diagnostic-battery-results.json
 
 # Eval run artifacts (reproducible via scripts/eval_graded.py; golden_set.yaml IS tracked)
 eval/results/
+
+# Regenerable Qdrant export snapshots (rerun scripts/export_qdrant_md.py)
+exports/
