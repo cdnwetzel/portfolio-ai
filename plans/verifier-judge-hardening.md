@@ -73,6 +73,14 @@ swap now forces a flag even in an otherwise high-scoring answer.
 ## Deferred, on purpose (separate tasks)
 - **Extraction widening** — isolate compound claims like "both the NVIDIA and AMD GPUs" so
   they get judged. Noisy; do AFTER a measured baseline on the tighter rubric.
+  **MEASURED 2026-07-05 (why it's still deferred):** shipped an atomization instruction in
+  `build_judge_messages` alongside the rubric and ran it on the live 7B judge. Result: it
+  caught the compound case BUT produced two false positives on faithful answers
+  (`faithful_fully_covered` 0.75, `true_crossmachine_fact_with_evidence` 0.5) — the exact
+  false-unsupported inversion. Reverted. #6 rubric alone is 8/8 clean on fixtures. Extraction
+  needs a decomposition that splits conjunctions WITHOUT over-splitting faithful multi-fact
+  sentences (or a stronger judge). Acceptance test: `compound_claim_split_one_false` must
+  flag while `faithful_fully_covered` and `true_crossmachine_fact_with_evidence` stay clean.
 - **Enforcement wiring** — the proxy discards the verifier's return value; a flagged verdict
   is a log row nobody reads. Most urgent operationally and architecturally separate. Minimum
   viable: surface "this answer has a flagged claim" as a non-blocking UI footnote. Does not

@@ -313,13 +313,18 @@ async def _stream_completion(websocket: WebSocket, body: dict) -> tuple[str, boo
     return full_response, got_token
 
 
-async def _fire_verify(request_id: str, query: str, answer: str, evidence_docs: list) -> None:
+async def _fire_verify(request_id: str, query: str, answer: str, evidence_docs: list,
+                       websocket: "WebSocket | None" = None) -> None:
     """Fire-and-forget faithfulness verification (verifier plan §7.1). Runs AFTER the
     answer is delivered; swallows every error so it can never affect the chat. No-op
     unless VERIFIER_URL is configured. `evidence_docs` is the WIDE reranked candidate set
     (VERIFIER_EVIDENCE_LIMIT), deliberately decoupled from the generator's per-doc-capped
     context so the judge can verify facts the generator's slice omitted. The verifier
-    strips FOLLOWUPS and skips refusals server-side, so we pass the raw answer + chunks."""
+    strips FOLLOWUPS and skips refusals server-side, so we pass the raw answer + chunks.
+
+    Enforcement (non-blocking): when the verdict is FLAGGED and the socket is still open,
+    push a {type:"verdict"} message so the UI can surface it. The answer has already been
+    delivered; this never blocks or alters it. A flag becomes visible, not silent."""
     if not VERIFIER_URL or _http is None:
         return
     try:
@@ -328,11 +333,20 @@ async def _fire_verify(request_id: str, query: str, answer: str, evidence_docs: 
              "content": d.get("content", "")}
             for d in evidence_docs
         ]
-        await _http.post(
+        resp = await _http.post(
             f"{VERIFIER_URL}/verify",
             json={"request_id": request_id, "query": query, "answer": answer, "chunks": chunks},
             timeout=VERIFIER_TIMEOUT,
         )
+        if websocket is not None and resp.status_code == 200:
+            verdict = resp.json()
+            if verdict.get("flagged"):
+                # metadata only (red-lines.md #2): id + score + flag, no content.
+                await websocket.send_json({
+                    "type": "verdict", "request_id": request_id, "flagged": True,
+                    "faithfulness": verdict.get("faithfulness"),
+                    "n_contradicted": verdict.get("n_contradicted"),
+                })
     except Exception as e:
         # red-lines.md #2: metadata only, never query/answer content.
         logger.debug(f"verifier fire-and-forget failed (non-fatal): {e!r}")
@@ -521,7 +535,7 @@ async def websocket_chat(websocket: WebSocket):
                 # Out-of-band faithfulness check (verifier plan §7.1): post-`done`,
                 # fire-and-forget, no-op unless VERIFIER_URL is set. Never blocks.
                 asyncio.create_task(
-                    _fire_verify(request_id, user_query, full_response, evidence_docs)
+                    _fire_verify(request_id, user_query, full_response, evidence_docs, websocket)
                 )
 
     except Exception as e:
