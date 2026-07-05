@@ -19,6 +19,17 @@
 - q: "What GPUs does Chris run on his home server?"
   kind: grounded
   expect_substrings: ["A4500"]
+# Regression: 2026-07 live failure. The model grounded on homelab_t5810.md and still
+# invented "40 GB of storage" (aggregate VRAM mislabeled) and "both the NVIDIA and AMD
+# GPUs" (the asrock's Ryzen 9 is a CPU). forbid_substrings makes those a hard fail.
+- q: "Tell me about the GPU home lab setup"
+  kind: grounded
+  expect_substrings: ["A4500", "T5810"]
+  forbid_substrings: ["gb of storage", "amd gpu", "both the nvidia and amd"]
+- q: "What GPU is in the verifier box?"
+  kind: grounded
+  expect_substrings: ["3060"]
+  forbid_substrings: ["amd gpu", "a4500"]
 - q: "How does this chat system work end to end?"
   kind: grounded
   expect_substrings: ["RAG", "Qdrant", "rerank"]

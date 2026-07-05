@@ -56,6 +56,7 @@ export function useChat() {
     let assistantText = ''
     let pendingSources = []
     let settled = false
+    let verdictTimer = null
     const settle = () => { settled = true }
 
     ws.onopen = () => {
@@ -100,21 +101,40 @@ export function useChat() {
         } else if (data.type === 'done') {
           settle()
           const { content: clean, suggestions: sugs } = parseFollowups(assistantText)
-          if (clean !== assistantText) {
-            // content = cleaned (for display); raw = full text with FOLLOWUPS
-            // (sent back as history to keep the model emitting chips on later turns).
-            setMessages(prev => {
-              const next = [...prev]
-              const last = next[next.length - 1]
-              if (last?.role === 'assistant') {
-                next[next.length - 1] = { ...last, content: clean, raw: assistantText, sources: pendingSources }
+          // Stamp the message with its request_id so a later out-of-band verdict can
+          // be matched to THIS message, not just "the last one" (multi-turn safe).
+          // content = cleaned (for display); raw = full text with FOLLOWUPS (sent back
+          // as history to keep the model emitting chips on later turns).
+          setMessages(prev => {
+            const next = [...prev]
+            const last = next[next.length - 1]
+            if (last?.role === 'assistant') {
+              next[next.length - 1] = {
+                ...last,
+                content: clean !== assistantText ? clean : last.content,
+                raw: assistantText,
+                sources: pendingSources,
+                requestId: data.request_id,
               }
-              return next
-            })
-          }
+            }
+            return next
+          })
           setSuggestions(sugs)
           setStatus('idle')
-          ws.close()
+          // The faithfulness verifier runs AFTER the answer. Keep the socket open
+          // briefly to receive a {type:"verdict"}; close on verdict or short timeout.
+          // Non-blocking — the answer is already complete and usable.
+          verdictTimer = setTimeout(() => { try { ws.close() } catch { /* noop */ } }, 9000)
+        } else if (data.type === 'verdict') {
+          if (data.flagged && data.request_id) {
+            setMessages(prev => prev.map(m =>
+              m.requestId === data.request_id
+                ? { ...m, flagged: true, faithfulness: data.faithfulness }
+                : m
+            ))
+          }
+          clearTimeout(verdictTimer)
+          try { ws.close() } catch { /* noop */ }
         } else if (data.type === 'error') {
           settle()
           const msg = data.message || ''
@@ -131,6 +151,7 @@ export function useChat() {
     }
 
     ws.onclose = (ev) => {
+      if (verdictTimer) { clearTimeout(verdictTimer); verdictTimer = null }
       if (!settled) {
         settle()
         if (ev.code === 1006) setError('connection_lost')

@@ -45,5 +45,35 @@
        "content": "Backend services bind to localhost on the T5810; the cloud server reaches them only through an SSH reverse tunnel with key-based authentication."}
     ],
     "expected": {"verdict_type": "judged", "flagged": false}
+  },
+  {
+    "name": "category_swap_vram_as_storage",
+    "query": "Tell me about the GPU home lab setup",
+    "answer": "The two RTX A4500 GPUs each have 20 GB of GDDR6 memory and 40 GB of storage. [source: infrastructure]",
+    "chunks": [
+      {"title": "Homelab T5810", "source": "infrastructure",
+       "content": "2x NVIDIA RTX A4500, 20 GB GDDR6 VRAM per card (40 GB aggregate across the pair). This is video memory (VRAM), not disk storage; the A4500 has no onboard storage."}
+    ],
+    "expected": {"verdict_type": "judged", "flagged": true}
+  },
+  {
+    "name": "role_swap_cpu_as_gpu",
+    "query": "What hardware runs the verifier?",
+    "answer": "It leverages both the NVIDIA and AMD GPUs on the asrock box. [source: infrastructure]",
+    "chunks": [
+      {"title": "Homelab T5810", "source": "infrastructure",
+       "content": "The asrock B550 verifier node has an AMD Ryzen 9 5950X CPU (16C/32T) and a single NVIDIA RTX 3060 Ti GPU. The Ryzen 9 is a CPU, not a GPU."}
+    ],
+    "expected": {"verdict_type": "judged", "flagged": true}
+  },
+  {
+    "name": "true_crossmachine_fact_with_evidence",
+    "query": "What runs the out-of-band verification?",
+    "answer": "The asrock box has an AMD Ryzen 9 5950X and a single RTX 3060 Ti, and it runs the out-of-band faithfulness verification. [source: infrastructure]",
+    "chunks": [
+      {"title": "Homelab T5810", "source": "infrastructure",
+       "content": "asrock B550 verifier node: AMD Ryzen 9 5950X (16C/32T), 64 GB RAM, a single RTX 3060 Ti (8 GB). Runs the out-of-band faithfulness verifier."}
+    ],
+    "expected": {"verdict_type": "judged", "flagged": false}
   }
 ]

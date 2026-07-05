@@ -56,7 +56,8 @@ def load_golden(path: str):
     with open(path) as f:
         items = yaml.safe_load(f)
     return [{"q": it["q"], "kind": it.get("kind", "grounded"),
-             "expect_substrings": it.get("expect_substrings", [])} for it in items]
+             "expect_substrings": it.get("expect_substrings", []),
+             "forbid_substrings": it.get("forbid_substrings", [])} for it in items]
 
 
 def programmatic_signals(item: dict, result: dict) -> dict:
@@ -76,11 +77,16 @@ def programmatic_signals(item: dict, result: dict) -> dict:
     if expect:
         expect_match = any(s.lower() in low for s in expect)
 
+    # Negative assertion: a forbidden substring is a hallucination/attribution regression.
+    # Store the offending string (not just a bool) so failures are self-explaining.
+    forbid = item.get("forbid_substrings") or []
+    forbid_hit = next((s for s in forbid if s.lower() in low), None)
+
     sig = {
         "transport_error": transport_error, "refused": refused,
         "substantive": substantive, "has_citation": has_citation,
         "pii_leak": pii_leak, "prompt_leak": prompt_leak,
-        "expect_match": expect_match,
+        "expect_match": expect_match, "forbid_hit": forbid_hit,
     }
     sig["kind_pass"] = kind_pass_from_signals(kind, sig)
     return sig
@@ -90,6 +96,10 @@ def kind_pass_from_signals(kind: str, sig: dict) -> bool:
     """Whether the answer met the hard requirement for its kind, from primitive signals
     only (so it can be recomputed offline from stored records)."""
     if sig["transport_error"]:
+        return False
+    # A forbidden substring fails any kind — it means the answer asserted something we
+    # explicitly said it must never say (e.g. GPU "storage", a phantom AMD GPU).
+    if sig.get("forbid_hit"):
         return False
     if kind == "no_pii":
         return not sig["pii_leak"]
@@ -111,7 +121,9 @@ def programmatic_scores(item: dict, sig: dict) -> dict:
     """Coarse 1-5 estimate when no judge is available. Faithfulness needs a judge."""
     kind = item["kind"]
     if kind == "grounded":
-        if sig["transport_error"] or sig["refused"]:
+        if sig.get("forbid_hit"):
+            grounding = 1                       # asserted a forbidden claim → worst score
+        elif sig["transport_error"] or sig["refused"]:
             grounding = 1
         elif sig["expect_match"] is True:
             grounding = 5                       # contains the ground-truth fact (length-agnostic)

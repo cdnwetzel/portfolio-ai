@@ -28,7 +28,17 @@ VERIFIER_HOST=chris@<RYZEN_LAN_IP> ./home/setup-verifier.sh
 ```
 Config via env (or `/etc/conf.d/verifier-service`): `JUDGE_BACKEND` (ollama|openai),
 `JUDGE_URL`, `JUDGE_MODEL`, `THRESHOLD` (0.8), `SAMPLE_RATE` (1.0), `MAX_INFLIGHT` (2),
-`DB_PATH`, `RETENTION_DAYS` (90).
+`DB_PATH`, `RETENTION_DAYS` (90), `VERIFIER_DEBUG_CAPTURE` (off).
+
+## What's stored (keeps the "not stored or logged" claim honest)
+The `verdicts` table holds **scores only** — an opaque `request_id`, the timestamp, the
+faithfulness score, the flag, claim counts, judge model, latency. **No query, answer, or
+claim text.** The score is a durable, queryable metric; the conversation that produced it
+is not persisted. A legacy DB with the old text columns is migrated to the lean schema on
+startup (`_migrate_legacy`), and `VACUUM` + `secure_delete` physically scrub the purged
+text from the file. Set `VERIFIER_DEBUG_CAPTURE=1` **only** to reproduce a specific
+hallucination — it retains query/answer/claims in a separate `debug_captures` table.
+Keep it off in production.
 
 ## Judge model — independence matters
 The judge **must not be the 14B that wrote the answer** (echo bias — a same-family judge

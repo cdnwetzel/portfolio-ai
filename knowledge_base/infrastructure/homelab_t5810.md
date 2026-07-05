@@ -7,7 +7,9 @@
 **Connectivity:** 300 Mbps fiber (Comcast Business)
 
 ### GPU Configuration
-- **2× NVIDIA RTX A4500** (20 GB GDDR6 each, 40 GB total)
+- **2× NVIDIA RTX A4500** — 20 GB GDDR6 VRAM per card (40 GB aggregate across the pair;
+  no single card has more than 20 GB). This is video memory (VRAM), not disk storage — the
+  A4500 has no onboard storage.
 - **NVLink bridge:** NV4 topology (4-link bridge) — 56 GB/s per direction, 112 GB/s aggregate. Required for tensor-parallel vLLM TP=2; without NVLink, CUDA sees two isolated GPUs
 - **Usable VRAM:** ~19,190 MiB per card after ECC overhead
 - **Power:** Dell 825W internal PSU (primary) + external Corsair ATX 3.0 1000W PSU via SATA sync/trigger board for GPU supplemental power

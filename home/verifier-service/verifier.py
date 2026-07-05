@@ -24,6 +24,10 @@ Env config:
   MAX_INFLIGHT      default 2    (bounded judge concurrency on one GPU)
   DB_PATH           default ~/verifier/verdicts.db
   RETENTION_DAYS    default 90   (rows older than this are pruned on write)
+  VERIFIER_DEBUG_CAPTURE  default off. When 1/true, retain query+answer+claims in a
+                    SEPARATE debug_captures table to reproduce a specific hallucination.
+                    Production keeps this OFF: the verdicts table then holds only an
+                    opaque request_id + scores, and no conversation text is stored.
 """
 import asyncio
 import json
@@ -56,33 +60,76 @@ SAMPLE_RATE = float(os.getenv("SAMPLE_RATE", "1.0"))
 MAX_INFLIGHT = int(os.getenv("MAX_INFLIGHT", "2"))
 DB_PATH = os.path.expanduser(os.getenv("DB_PATH", "~/verifier/verdicts.db"))
 RETENTION_DAYS = int(os.getenv("RETENTION_DAYS", "90"))
+# Off by default. When enabled, the query/answer/claims are retained in a SEPARATE
+# debug_captures table (never in the verdicts row) so a specific hallucination can be
+# reproduced. Kept OFF in production so the verdicts table is scores-only and the public
+# "conversations are not stored or logged" claim stays literally true.
+DEBUG_CAPTURE = os.getenv("VERIFIER_DEBUG_CAPTURE", "").lower() in ("1", "true", "yes", "on")
 
 _sem = asyncio.Semaphore(MAX_INFLIGHT)
 _http: httpx.AsyncClient | None = None
 
+# Lean verdict row: scores keyed by an opaque request_id. NO query/answer/claims text.
+# The score is a durable, queryable metric; the content that produced it is not stored.
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS verdicts (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  ts TEXT, request_id TEXT, query TEXT, answer TEXT,
+  ts TEXT, request_id TEXT,
   verdict_type TEXT, n_claims INT, n_supported INT, n_unsupported INT,
   n_contradicted INT, faithfulness REAL, flagged INT,
-  claims_json TEXT, judge_model TEXT, latency_s REAL
+  judge_model TEXT, latency_s REAL
 );
 CREATE INDEX IF NOT EXISTS idx_verdicts_ts ON verdicts(ts);
 CREATE INDEX IF NOT EXISTS idx_verdicts_flagged ON verdicts(flagged);
+-- Opt-in only (VERIFIER_DEBUG_CAPTURE=1). Correlates to verdicts by request_id.
+CREATE TABLE IF NOT EXISTS debug_captures (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  ts TEXT, request_id TEXT, query TEXT, answer TEXT, claims_json TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_debug_ts ON debug_captures(ts);
 """
+
+# The legacy schema stored query/answer/claims_json in the verdicts row. On startup we
+# migrate in place: copy ONLY the score columns to the lean table and drop the old one,
+# which also purges historically stored conversation text.
+LEAN_COLS = ("id", "ts", "request_id", "verdict_type", "n_claims", "n_supported",
+             "n_unsupported", "n_contradicted", "faithfulness", "flagged",
+             "judge_model", "latency_s")
 
 
 def _db():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
+    # Scrub freed pages on delete so pruned/migrated rows don't linger in the file.
+    conn.execute("PRAGMA secure_delete=ON")
     return conn
+
+
+def _migrate_legacy(conn):
+    """If the verdicts table still carries the old text columns, rebuild it lean.
+    Copies score columns only (drops query/answer/claims_json), purging stored text."""
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(verdicts)").fetchall()}
+    if not cols or not ({"query", "answer", "claims_json"} & cols):
+        return  # fresh install, or already lean
+    logger.warning("migrating verdicts to lean schema (purging stored query/answer/claims text)")
+    conn.executescript("DROP INDEX IF EXISTS idx_verdicts_ts; DROP INDEX IF EXISTS idx_verdicts_flagged;")
+    conn.execute("ALTER TABLE verdicts RENAME TO verdicts_legacy")
+    conn.executescript(SCHEMA)  # create the lean verdicts table (+ indexes + debug table)
+    keep = ", ".join(LEAN_COLS)
+    conn.execute(f"INSERT INTO verdicts ({keep}) SELECT {keep} FROM verdicts_legacy")
+    conn.execute("DROP TABLE verdicts_legacy")
+    conn.commit()
+    # DROP frees the pages but leaves the bytes on disk until the file is rewritten.
+    # VACUUM rebuilds the file so the purged conversation text is physically gone.
+    conn.execute("VACUUM")
+    conn.commit()
 
 
 def _init_db():
     Path(DB_PATH).parent.mkdir(parents=True, exist_ok=True)
     with closing(_db()) as conn:
-        conn.executescript(SCHEMA)
+        _migrate_legacy(conn)       # rebuild lean + purge text if this is a legacy DB
+        conn.executescript(SCHEMA)  # fresh installs; ensure debug table + indexes exist
         conn.commit()
 
 
@@ -130,21 +177,30 @@ async def _call_judge(messages: list[dict]) -> str:
 
 def _store(rec: dict):
     with closing(_db()) as conn:
+        # Scores only. The query/answer/claims in `rec` are NOT persisted here.
         conn.execute(
-            """INSERT INTO verdicts (ts, request_id, query, answer, verdict_type,
+            """INSERT INTO verdicts (ts, request_id, verdict_type,
                n_claims, n_supported, n_unsupported, n_contradicted, faithfulness,
-               flagged, claims_json, judge_model, latency_s)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (rec["ts"], rec.get("request_id"), rec["query"], rec["answer"],
-             rec["verdict_type"], rec.get("n_claims", 0), rec.get("n_supported", 0),
+               flagged, judge_model, latency_s)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+            (rec["ts"], rec.get("request_id"), rec["verdict_type"],
+             rec.get("n_claims", 0), rec.get("n_supported", 0),
              rec.get("n_unsupported", 0), rec.get("n_contradicted", 0),
              rec.get("faithfulness"), int(rec.get("flagged", 0)),
-             json.dumps(rec.get("claims", [])), rec.get("judge_model"),
-             rec.get("latency_s")),
+             rec.get("judge_model"), rec.get("latency_s")),
         )
+        # Opt-in only: retain content in a separate table for reproducing a bad answer.
+        if DEBUG_CAPTURE:
+            conn.execute(
+                "INSERT INTO debug_captures (ts, request_id, query, answer, claims_json) VALUES (?,?,?,?,?)",
+                (rec["ts"], rec.get("request_id"), rec.get("query", ""),
+                 rec.get("answer", ""), json.dumps(rec.get("claims", []))),
+            )
         # prune old rows on write (cheap retention)
         cutoff = (datetime.utcnow() - timedelta(days=RETENTION_DAYS)).isoformat()
         conn.execute("DELETE FROM verdicts WHERE ts < ?", (cutoff,))
+        if DEBUG_CAPTURE:
+            conn.execute("DELETE FROM debug_captures WHERE ts < ?", (cutoff,))
         conn.commit()
 
 
@@ -224,12 +280,19 @@ async def review(limit: int = 20):
         rows = conn.execute(
             "SELECT * FROM verdicts WHERE flagged = 1 ORDER BY id DESC LIMIT ?",
             (limit,)).fetchall()
-    out = []
-    for r in rows:
-        d = dict(r)
-        d["claims"] = json.loads(d.pop("claims_json") or "[]")
-        out.append(d)
-    return {"count": len(out), "flagged": out}
+        out = [dict(r) for r in rows]
+        # Content is available only when opt-in debug capture is enabled; otherwise the
+        # review queue is scores + request_id (reproduce the id to see what was said).
+        if DEBUG_CAPTURE:
+            for d in out:
+                cap = conn.execute(
+                    "SELECT query, answer, claims_json FROM debug_captures "
+                    "WHERE request_id = ? ORDER BY id DESC LIMIT 1",
+                    (d.get("request_id"),)).fetchone()
+                if cap:
+                    d["query"], d["answer"] = cap["query"], cap["answer"]
+                    d["claims"] = json.loads(cap["claims_json"] or "[]")
+    return {"count": len(out), "flagged": out, "debug_capture": DEBUG_CAPTURE}
 
 
 @app.get("/health")

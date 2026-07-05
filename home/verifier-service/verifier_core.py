@@ -98,9 +98,17 @@ def compute_verdict(claims: List[Dict], threshold: float) -> Dict:
 JUDGE_SYSTEM = (
     "You are a strict faithfulness auditor for a retrieval-augmented chat. Judge ONLY "
     "whether each factual claim in the ANSWER is supported by the numbered SOURCE CHUNKS. "
-    "Use NO outside knowledge. supported = stated or clearly entailed by a chunk; "
-    "contradicted = a chunk states the opposite; unsupported = not found in any chunk "
-    "(even if plausibly true). A paraphrase of a chunk's fact is still supported."
+    "Use NO outside knowledge.\n"
+    "supported = a chunk states the claim or clearly entails it with the SAME entities, "
+    "roles, units, and categories.\n"
+    "contradicted = a chunk states something incompatible with the claim, INCLUDING a "
+    "changed category, unit, role, or grouping. The following are contradicted, NOT "
+    "supported: calling GPU memory or VRAM 'storage'; calling a CPU a GPU or a GPU a CPU; "
+    "reporting a per-item figure as an aggregate or an aggregate as per-item; attributing "
+    "one machine's CPU, GPU, or memory to another machine.\n"
+    "unsupported = not found in any chunk (even if plausibly true).\n"
+    "A faithful paraphrase that preserves the entities, roles, units, and categories is "
+    "still supported; a paraphrase that changes any of them is contradicted, not supported."
 )
 
 

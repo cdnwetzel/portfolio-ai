@@ -145,6 +145,12 @@ const ChatWindow = forwardRef(({ messages, status, suggestions, error, onSuggest
                   </ReactMarkdown>
                 )}
                 {msg.role === 'assistant' && <SourceBlock sources={msg.sources} />}
+                {msg.role === 'assistant' && msg.flagged && (
+                  <div className="mt-2 pt-2 border-t border-amber-600/30 flex items-start gap-1.5 text-xs text-amber-400/90">
+                    <span aria-hidden="true">⚠</span>
+                    <span>A claim in this answer was flagged by the faithfulness check for review.</span>
+                  </div>
+                )}
               </div>
             </div>
 
