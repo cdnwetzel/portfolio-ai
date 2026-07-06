@@ -104,6 +104,23 @@ unaffected (0.148 / 263 answers at close). If the narrow residual ever needs clo
 Approach #2 (two-pass: holistic pass A + conjunction-only pass B) or a stronger judge
 (Approach #3) remain open — see `plans/` #7 close notes; both cost more than the gap is
 worth today.
+
+### Revisit trigger (reconfirmed 2026-07-06 — accept-the-gap holds)
+Reopen on **evidence, not theory**. Triggers: a sustained `flagged_rate` drift, OR a real
+chunk-silent false half riding below threshold in a *live* answer (seen via
+`VERIFIER_DEBUG_CAPTURE`). Absent that, do not build — the gap is narrow, low-severity, and
+out-of-band (monitoring, not gating).
+
+When it does trigger, the order of attempts (cheapest first):
+1. **Deterministic conjunction-splitter** in `verifier_core.py` — split obvious "X and Y"
+   compounds into atoms *before* judging, no LLM call, no paraphrase risk, ~zero cost. Try this
+   first; it likely captures most of the recall the residual needs.
+2. **True two-CALL separation** (NOT the four single-prompt variants — those are refuted here):
+   Pass A decomposer sees ONLY the answer (never the chunks, so it *structurally cannot* flip a
+   paraphrase to unsupported); Pass B = the unchanged, proven 9/9 rubric. This is the one option
+   the measured variants did not test, and the only reason accept-the-gap is a *judgment* call
+   rather than settled. Cost: 2 judge calls; risk: 7B decomposer over-split → escalates to
+   Tier 2 (distill + QLoRA). Only worth it if #1 is insufficient AND the gap is provably biting.
 - **Enforcement wiring** — the proxy discards the verifier's return value; a flagged verdict
   is a log row nobody reads. Most urgent operationally and architecturally separate. Minimum
   viable: surface "this answer has a flagged claim" as a non-blocking UI footnote. Does not
