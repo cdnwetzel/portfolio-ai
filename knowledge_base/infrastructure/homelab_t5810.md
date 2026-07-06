@@ -11,7 +11,7 @@
   no single card has more than 20 GB). This is video memory (VRAM), not disk storage — the
   A4500 has no onboard storage.
 - **NVLink bridge:** NV4 topology (4-link bridge) — 56 GB/s per direction, 112 GB/s aggregate. Required for tensor-parallel vLLM TP=2; without NVLink, CUDA sees two isolated GPUs
-- **Usable VRAM:** ~19,190 MiB per card after ECC overhead
+- **Usable VRAM:** 20,470 MiB per card — the full ~20 GB is available because ECC is **disabled** (a deliberate trade-off that reclaims the ~1.25 GB/card ECC overhead — ~2.5 GB total across the pair — for vLLM's KV cache)
 - **Power:** Dell 825W internal PSU (primary) + external Corsair ATX 3.0 1000W PSU via SATA sync/trigger board for GPU supplemental power
 
 ### CPU & Memory
