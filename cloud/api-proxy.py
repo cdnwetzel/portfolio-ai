@@ -164,6 +164,33 @@ async def search(request: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/api/retrieve")
+async def retrieve(request: Request):
+    """Text-in / grounded-chunks-out retrieval — the reusable RAG seam for non-UI callers
+    (e.g. the portfolio-rag MCP server for OpenClaw). Runs the SAME embed → search → rerank →
+    per-doc-cap pipeline as the chat, minus generation. Unlike /api/search (raw vector in), this
+    takes a plain string. Metadata-only logging (red-lines.md #2)."""
+    try:
+        body = await request.json()
+        query = (body.get("query") or "").strip()
+        k = int(body.get("k", RAG_TOP_K))
+        if not query:
+            return JSONResponse({"chunks": []})
+        # Deterministic prompt-extraction guard — same defense as the chat path.
+        if is_prompt_extraction(query):
+            logger.info("retrieve: refused prompt-extraction attempt")
+            return JSONResponse({"chunks": []})
+        context_docs, _ = await search_knowledge_base(query, top_k=k)
+        chunks = [{"title": d.get("title"), "source": d.get("source"),
+                   "content": d.get("content", ""), "score": round(d.get("score", 0.0), 4)}
+                  for d in context_docs]
+        logger.info(f"retrieve: returned {len(chunks)} chunks")   # count only, never content
+        return JSONResponse({"chunks": chunks})
+    except Exception as e:
+        logger.error(f"Retrieve error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 def _cap_per_doc(ranked: list, top_k: int) -> list:
     """Take top_k from a ranked list, allowing at most RAG_MAX_PER_DOC chunks per
     source doc so one multi-chunk doc can't dominate the context. Backfills with

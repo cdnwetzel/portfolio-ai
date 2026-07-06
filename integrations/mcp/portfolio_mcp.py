@@ -12,20 +12,17 @@ Tools:
       hardened pipeline via the public WS (reusing run_diagnostic_battery.ask): grounding
       system prompt, prompt-extraction guardrail, dense retrieval + rerank, out-of-band
       verifier (fires server-side), FOLLOWUPS. Returns {answer, sources}. Zero proxy change.
-  portfolio_search(question, k=5)            → raw grounded chunks (expand → embed → Qdrant →
-      rerank) for an agent that wants to reason over facts itself. LAN microservices.
+  portfolio_search(question, k=5)            → raw grounded chunks via cwdotcom's /api/retrieve
+      seam (embed → dense search → rerank → per-doc cap, server-side) for an agent to reason over.
   portfolio_verify(question, answer, chunks) → faithfulness check via the asrock judge.
 
 The tool LOGIC lives in plain async functions (importable/testable with no `mcp` dep). The
 MCP transport is a guarded wrapper so this file imports fine for tests even without the SDK.
 
-Env (all optional; defaults suit the Mac Mini on the home LAN):
-  CWDOTCOM_WS_URL   default wss://dev.cwetzel.com/ws/chat   (public; works on/off-LAN)
-  EMBED_URL         default http://10.0.1.125:8005
-  QDRANT_URL        default http://10.0.1.125:6333
-  RERANK_URL        default http://10.0.1.125:8006
-  VERIFIER_URL      default http://10.0.1.115:8007
-  QDRANT_COLLECTION default documents
+Env (all optional):
+  CWDOTCOM_WS_URL        default wss://dev.cwetzel.com/ws/chat        (portfolio_answer)
+  CWDOTCOM_RETRIEVE_URL  default https://dev.cwetzel.com/api/retrieve (portfolio_search)
+  VERIFIER_URL           default http://10.0.1.115:8007              (portfolio_verify; LAN)
 """
 import asyncio
 import os
@@ -38,16 +35,13 @@ import httpx
 # --- reuse cwdotcom internals (this file lives at <repo>/integrations/mcp/) ---
 _REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_REPO / "scripts"))
-sys.path.insert(0, str(_REPO / "cloud"))
 from run_diagnostic_battery import ask          # WS client: string -> {answer, sources, ...}
-from query_expansion import expand_query        # pure recall booster (alias groups)
 
 WS_URL       = os.environ.get("CWDOTCOM_WS_URL", "wss://dev.cwetzel.com/ws/chat")
-EMBED_URL    = os.environ.get("EMBED_URL",   "http://10.0.1.125:8005").rstrip("/")
-QDRANT_URL   = os.environ.get("QDRANT_URL",  "http://10.0.1.125:6333").rstrip("/")
-RERANK_URL   = os.environ.get("RERANK_URL",  "http://10.0.1.125:8006").rstrip("/")
-VERIFIER_URL = os.environ.get("VERIFIER_URL","http://10.0.1.115:8007").rstrip("/")
-COLLECTION   = os.environ.get("QDRANT_COLLECTION", "documents")
+# Grounded-chunks REST seam on the VPS proxy. embed/rerank bind 127.0.0.1 on the T5810
+# (localhost-only), so search goes through the public endpoint, not the LAN microservices.
+RETRIEVE_URL = os.environ.get("CWDOTCOM_RETRIEVE_URL", "https://dev.cwetzel.com/api/retrieve").rstrip("/")
+VERIFIER_URL = os.environ.get("VERIFIER_URL", "http://10.0.1.115:8007").rstrip("/")
 
 _FOLLOWUPS_RE = re.compile(r"\n*(?:FOLLOWUPS\s*:|\*\*Follow-?ups?:?\*\*).*", re.IGNORECASE | re.DOTALL)
 
@@ -70,34 +64,12 @@ async def answer_tool(question: str) -> dict:
 
 
 async def search_tool(question: str, k: int = 5) -> dict:
-    """Raw grounded chunks: expand → embed → Qdrant dense search (top-15) → rerank (top-k).
-    Mirrors cwdotcom's retrieval; talks to the LAN microservices (no proxy/tunnel needed)."""
-    embed_q = expand_query(question)
-    async with httpx.AsyncClient(timeout=15.0) as http:
-        e = await http.post(f"{EMBED_URL}/embed", json={"text": embed_q})
-        e.raise_for_status()
-        vector = e.json()["embedding"]
-        s = await http.post(f"{QDRANT_URL}/collections/{COLLECTION}/points/search",
-                            json={"vector": vector, "limit": 15, "with_payload": True})
-        s.raise_for_status()
-        hits = [h.get("payload", {}) for h in s.json().get("result", [])]
-        if not hits:
-            return {"chunks": []}
-        docs = [h.get("content", "") for h in hits]
-        rr = await http.post(f"{RERANK_URL}/rerank",
-                            json={"query": question, "documents": docs, "top_k": k})
-        rr.raise_for_status()
-        ranked = rr.json().get("results", [])
-    chunks, seen = [], set()
-    for item in ranked:
-        h = hits[item["index"]]
-        doc_id = h.get("doc_id") or h.get("title")
-        if doc_id in seen:                       # one chunk per source doc (mirrors the proxy)
-            continue
-        seen.add(doc_id)
-        chunks.append({"title": h.get("title"), "source": h.get("source"),
-                       "content": h.get("content", ""), "score": round(item.get("score", 0.0), 4)})
-    return {"chunks": chunks}
+    """Raw grounded chunks via cwdotcom's REST retrieval seam (expand → embed → dense search →
+    rerank → per-doc cap, all server-side, guardrailed). Text in, chunks out."""
+    async with httpx.AsyncClient(timeout=30.0) as http:
+        r = await http.post(RETRIEVE_URL, json={"query": question, "k": k})
+        r.raise_for_status()
+        return {"chunks": r.json().get("chunks", [])}
 
 
 async def verify_tool(question: str, answer: str, chunks: list) -> dict:
