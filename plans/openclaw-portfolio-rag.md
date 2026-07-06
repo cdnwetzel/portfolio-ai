@@ -66,25 +66,40 @@ metadata-only logging (red line #2). Deploy via `cloud/deploy.sh`; gate on `scri
   `CWDOTCOM_RETRIEVE_URL` / LAN service hosts, `VERIFIER_URL`.
 - Logs metadata only (mirror cwdotcom). Loopback-bound.
 
-## openclaw-setup side — mechanism identified (per `config/openclaw.annotated.jsonc`, OpenClaw 2026.6.11)
-The MCP path is OpenClaw's **`mcporter`** skill (`skills.entries.mcporter`, currently
-`enabled: false`). OpenClaw uses a **"two-switch" idiom** (module enabled + its config/gate open —
-same pattern as the Brave web-search plugin). So the wiring is:
-1. **Enable + configure `mcporter`** to launch/connect our stdio server — flip
-   `skills.entries.mcporter.enabled → true` and add its server-registration block pointing at
-   `python .../portfolio_mcp.py`. *The exact mcporter server-config schema is the one remaining
-   node unknown* — resolve via `openclaw`'s mcporter docs / `openclaw config` on the Mac Mini
-   (version-match 2026.6.11). Everything else about the config is now known.
-2. **`bootstrap.sh`:** add a step that fetches the MCP server (clone cwdotcom or pip-install) and
-   renders the mcporter entry into the template — so a fresh Mac gets it in one command, matching
-   the repo's existing template→`~/.openclaw/openclaw.json` render flow.
-3. **Access stays locked down by existing config:** the WhatsApp `allowFrom`/`groupAllowFrom` and
-   `commands.ownerAllowFrom` already pin everything to `__OWNER_PHONE__`; `nodes.denyCommands` blocks
-   device actions. The portfolio-rag skill inherits that posture — nothing new to harden.
-4. **Steering snippet** (skill description / agent guidance): "For anything about Chris Wetzel's
-   work, homelab, projects, or this AI system, call `portfolio_answer` and relay its answer +
-   sources; do not answer from your own knowledge." (Mirror the two-switch discipline: the skill is
-   present but only *does* something for portfolio-scoped questions.)
+## OpenClaw side — RESOLVED + DEPLOYED on the node (2026-07-06, OpenClaw 2026.6.11)
+The registration path is the **first-class `openclaw mcp` command** (writes `mcp.servers`), NOT the
+mcporter skill. `openclaw mcp add <name> --command <cmd> --arg <a> --cwd <dir> --env K=V` probes the
+server, then saves it. **Done on `Chriss-Mac-mini`:**
+```
+openclaw mcp add portfolio-rag \
+  --command ~/ai/cwdotcom/integrations/mcp/.venv/bin/python \
+  --arg    ~/ai/cwdotcom/integrations/mcp/portfolio_mcp.py \
+  --cwd    ~/ai/cwdotcom/integrations/mcp \
+  --env    CWDOTCOM_WS_URL=wss://dev.cwetzel.com/ws/chat
+```
+- Node prereqs verified: cwdotcom present at `~/ai/cwdotcom`; a `.venv` (py3.14) with
+  `mcp`+`websockets`+`httpx`; `portfolio_answer` returns grounded answers on the node.
+- `openclaw mcp probe portfolio-rag` → **3 tools exposed**; `openclaw mcp reload` applied.
+- Access inherits existing posture: WhatsApp `allowFrom`/`commands.ownerAllowFrom` pin to
+  `__OWNER_PHONE__`; `nodes.denyCommands` blocks device actions. Nothing new to harden.
+- Reversible: `openclaw mcp unset portfolio-rag`.
+
+### Two findings from the node that gate "done"
+1. **Steering is REQUIRED.** An `openclaw agent --local` turn on a portfolio question called `exec`,
+   NOT `portfolio_answer` — the base 14B won't route to the tool on the description alone. Need a
+   steering snippet (agent/system guidance): *"For anything about Chris Wetzel's work, homelab,
+   projects, or this AI system, call `portfolio_answer` and relay its `answer` + `sources`; do not
+   answer from your own knowledge."* Also confirm the **gateway/WhatsApp** agent (not just `--local`)
+   has the tool loaded after `mcp reload`.
+2. **`portfolio_search` needs the `POST /api/retrieve` seam.** embed(8005)/rerank(8006) bind
+   `127.0.0.1` on the T5810 (localhost-only) → NOT LAN-reachable from the Mac Mini (verified: embed
+   `000`, while Qdrant 6333 and verifier 8007 are `200`). So the direct-LAN `search_tool` can't work
+   from the node; it must call a public `POST /api/retrieve` on the VPS proxy (which reaches
+   embed/rerank via the tunnel at 127.0.0.1). `portfolio_answer` + `portfolio_verify` are unaffected.
+
+### `openclaw-setup` codification (fast follow)
+Fold the `openclaw mcp add` (or `mcp set '<json>'`) step + a `.venv`/deps install into `bootstrap.sh`
+so a fresh Mac reproduces it; keep the JSON entry in the template flow.
 
 ## Security / posture (non-negotiable)
 - **Personal scope only.** Portfolio = public content. NEVER wire the firm's `psaios`/client data
