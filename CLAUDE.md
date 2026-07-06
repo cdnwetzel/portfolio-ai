@@ -10,7 +10,7 @@
 ## Project Overview
 
 This is a single-tenant portfolio RAG chat built on personal infrastructure (2x A4500 GPUs +
-300 Mbps fiber) — a professional-portfolio showcase, not a revenue-generating SaaS product. The
+~400 Mbps symmetric Verizon FIOS) — a professional-portfolio showcase, not a revenue-generating SaaS product. The
 original multi-tenant SaaS vision (below) was scoped down; the SaaS scaffold is archived on
 `legacy/saas-scaffold`.
 

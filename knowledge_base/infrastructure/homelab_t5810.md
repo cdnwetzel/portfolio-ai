@@ -4,7 +4,7 @@
 
 **Machine:** Dell Precision T5810 Workstation
 **Location:** Home office, Trenton, NJ
-**Connectivity:** 300 Mbps fiber (Comcast Business)
+**Connectivity:** Verizon FIOS symmetric fiber (~386↓ / 439↑ Mbps measured)
 
 ### GPU Configuration
 - **2× NVIDIA RTX A4500** — 20 GB GDDR6 VRAM per card (40 GB aggregate across the pair;
@@ -85,7 +85,10 @@ on the **asrock B550 (Ryzen 9 + 3060 Ti)** — two distinct GPU boxes, one home 
 
 ## Cloud Architecture (T5810 ↔ cwetzel.com)
 
-The T5810 is a home server with LAN-only services. It's made accessible to the internet via a persistent SSH tunnel from the cloud server:
+The T5810 is a home server with LAN-only services. The home internet uplink is **Verizon FIOS**
+symmetric fiber (measured ~386↓ / 439↑ Mbps on a local NJ node) — the high, symmetric upload is
+what makes hosting inference from home practical, comfortably carrying the SSH-tunnelled traffic.
+The T5810 is made accessible to the internet via a persistent SSH tunnel from the cloud server:
 
 ```
 User Browser → HTTPS → cwetzel.com (Ubuntu VPS)
