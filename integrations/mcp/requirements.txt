@@ -1,0 +1,5 @@
+# Portfolio-RAG MCP server deps. Install into the python that OpenClaw's mcporter launches
+# (on the Mac Mini): pip install -r requirements.txt
+mcp>=1.0          # MCP stdio server (FastMCP) — only needed to RUN as a server
+websockets>=12    # portfolio_answer: WS client to cwdotcom's public /ws/chat
+httpx>=0.27       # portfolio_search / portfolio_verify: HTTP to the LAN services
