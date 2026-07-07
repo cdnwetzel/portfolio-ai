@@ -93,8 +93,12 @@ def _build_server():
     @mcp.tool()
     async def portfolio_answer(question: str) -> dict:
         """Answer a question about Chris Wetzel's documented work, homelab, projects, or this AI
-        system — GROUNDED in his knowledge base (not the model's own knowledge). Use this for
-        any portfolio question and relay `answer` + `sources` verbatim; do not embellish."""
+        system — GROUNDED in his knowledge base. Call this for ANY such question.
+
+        RELAY THE RETURNED `answer` FIELD VERBATIM plus its `sources`. Do NOT rewrite, summarize,
+        expand, reorder, paraphrase, or add connecting statements of your own. The `answer` is
+        already complete and fact-checked by a grounded pipeline; re-synthesizing it risks
+        introducing errors (e.g. conflating which components a bridge/link connects). Send it as-is."""
         return await answer_tool(question)
 
     @mcp.tool()
