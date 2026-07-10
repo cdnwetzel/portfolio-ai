@@ -20,10 +20,18 @@ Key design points (hard-won, see plan §12):
 Dependencies: websockets (already needed by selftest), PyYAML. The judge call uses
 stdlib urllib so no extra HTTP dep is required.
 
+Reaching the judge: the 7B judge is served by Ollama on the verifier box, bound to that box's
+localhost (port 11434). Port 8007 is the verifier's own FastAPI service — it speaks /verify, NOT
+/v1/chat/completions, so pointing --judge-url at it will not work. From a workstation, forward
+Ollama over the jump host, and pick a LOCAL port that is not already serving your own Ollama —
+otherwise you will silently grade against the wrong model and call it a baseline:
+
+    ssh -f -N -J root@ai.cwetzel.com -L 11500:127.0.0.1:11434 chris@<verifier-host>
+
 Usage:
     python3 scripts/eval_graded.py --url wss://dev.cwetzel.com/ws/chat
-    python3 scripts/eval_graded.py --judge-url http://127.0.0.1:8007/v1/chat/completions \
-                                   --judge-model qwen2.5-7b-instruct
+    python3 scripts/eval_graded.py --judge-url http://127.0.0.1:11500/v1/chat/completions \
+                                   --judge-model qwen2.5:7b-instruct-q4_K_M
     python3 scripts/eval_graded.py --out eval/results/run.jsonl
 """
 import argparse
