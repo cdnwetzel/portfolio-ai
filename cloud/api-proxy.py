@@ -77,8 +77,13 @@ COMPRESS_PROTECT_RECENT = int(os.environ.get("COMPRESS_PROTECT_RECENT", "0"))
 # RANKING only: rerank_documents() returns indices, so the LLM still receives full chunks.
 RAG_RETRIEVE_LIMIT = 15   # candidates from Qdrant (bi-encoder cosine); ~3s CPU rerank
 RAG_TOP_K = 5             # final chunks after cross-encoder reranking
-RAG_MAX_PER_DOC = 1       # cap chunks from one source doc in the final context, so a
-                          # multi-chunk doc (e.g. the resume) can't hog the top-5
+# Cap chunks from one source doc in the final context, so a multi-chunk doc (e.g. the resume)
+# can't hog the top-5. Raised 1 -> 2 on evidence: scripts/compare_retrieval.py over the golden
+# set's expect_substrings scored 19/20 at max_per_doc=1 and 20/20 at 2, for essentially the same
+# evidence size (median 11,549 vs 11,792 chars). The one recovered question is AVD: its answer
+# lives in the same doc's rank-1 AND rank-3 chunks, and the =1 cap discarded rank-3 even though
+# rank-1 lacked the literal. Env-overridable so it can be tuned/reverted without a redeploy.
+RAG_MAX_PER_DOC = int(os.environ.get("RAG_MAX_PER_DOC", "2"))
 VERIFIER_EVIDENCE_LIMIT = 15  # chunks handed to the out-of-band verifier: the full
                           # reranked candidate set, decoupled from the generator's
                           # per-doc-capped context. The judge doesn't generate prose, so

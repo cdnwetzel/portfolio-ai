@@ -37,7 +37,7 @@ asrock B550 (Gentoo/OpenRC)
 ```
 
 **RAG pipeline:** query → alias-expand → embed (8005, bge-base 768-d) → Qdrant cosine top-15 →
-rerank to top-5 (8006, CPU cross-encoder, ≤1 chunk/doc) → fit to token budget → vLLM stream →
+rerank to top-5 (8006, CPU cross-encoder, ≤2 chunks/doc) → fit to token budget → vLLM stream →
 (out-of-band) fire-and-forget faithfulness verify (8007).
 
 The reranker adds precision the bi-encoder can't: cosine surfaces candidates, the cross-encoder
@@ -64,9 +64,10 @@ payload (`api-proxy.py:234`), so the LLM always receives whole chunks.
 `top_k` recovers zero questions. So a `v2-m3` upgrade would buy latency we now print under every
 answer, for noise. Declined on evidence, as with hybrid BM25. Do not reopen without new data.
 
-The one miss is caused by **`RAG_MAX_PER_DOC=1`**, not truncation: for the AVD question the rank-3
-chunk contains "AVD" inside its first 498 tokens but is discarded because rank-1 came from the same
-doc. `max_per_doc=2` gives 20/20 at ~zero evidence cost (11,549 vs 11,792 median chars).
+The single retrieval miss was caused by **the per-doc cap**, not truncation: for the AVD question
+the rank-3 chunk contains "AVD" inside its first 498 tokens but was discarded because rank-1 came
+from the same doc. **`RAG_MAX_PER_DOC` is now 2** (was 1), which gives 20/20 at ~zero evidence cost
+(11,549 vs 11,792 median chars). It is env-overridable.
 
 ## Key Features
 
@@ -185,9 +186,10 @@ metadata only (`red-lines.md` #2). Where `.cursorrules` and `red-lines.md` disag
 
 **The knowledge base must not contain real internal IP addresses.** Public hostnames are fine.
 
-**Retrieval returns ≤1 chunk per source doc** (`RAG_MAX_PER_DOC`). A fact isolated in one chunk may
-not surface for a differently-phrased query, so put a corrected fact in the chunk whose topic
-matches the likely question — or duplicate it — and verify live with several phrasings.
+**Retrieval returns ≤2 chunks per source doc** (`RAG_MAX_PER_DOC`, env-overridable). A fact isolated
+in one chunk may still not surface for a differently-phrased query, so put a corrected fact in the
+chunk whose topic matches the likely question — or duplicate it — and verify live with several
+phrasings.
 
 **Don't hand-patch the Qdrant index.** Rebuild it from the committed KB with `./scripts/reindex_kb.sh`.
 
