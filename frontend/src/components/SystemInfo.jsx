@@ -6,6 +6,7 @@ const STACK = [
   { label: 'Inference',  value: 'vLLM (tensor parallel)' },
   { label: 'Context',    value: '16 384 tokens' },
   { label: 'Vector DB',  value: 'Qdrant (dense cosine)' },
+  { label: 'Knowledge base', value: '18 docs · ~60 chunks' },
   { label: 'Embeddings', value: 'bge-base-en-v1.5 (768-d)' },
   { label: 'Reranker',   value: 'bge-reranker-base (CPU)' },
   { label: 'Verifier',   value: 'Qwen2.5-7B judge · 3060 Ti box (asrock)' },

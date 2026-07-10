@@ -115,6 +115,8 @@ export function useChat() {
                 raw: assistantText,
                 sources: pendingSources,
                 requestId: data.request_id,
+                // metadata-only per-message telemetry (durations + token count)
+                metrics: data.timing ? { ...data.timing, completion: data.tokens?.completion } : null,
               }
             }
             return next

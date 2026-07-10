@@ -20,6 +20,7 @@ from context_manager import (
     inject_system_prompt,
     prompt_too_long,
     fit_context_docs,
+    count_tokens,
     MAX_PROMPT_CHARS,
     MAX_CONTEXT_TOKENS,
 )
@@ -313,12 +314,16 @@ async def search_knowledge_base(query: str, retrieve_limit: int = RAG_RETRIEVE_L
         return [], []
 
 
-async def _stream_completion(websocket: WebSocket, body: dict) -> tuple[str, bool]:
+async def _stream_completion(websocket: WebSocket, body: dict) -> tuple[str, bool, dict]:
     """Stream one vLLM chat completion to the websocket.
-    Returns (full_response, got_token). Raises on transport failure so the caller
-    can decide whether to retry."""
+    Returns (full_response, got_token, meta), where meta is metadata-only telemetry
+    {ttft_ms, generation_ms, completion_tokens} — durations + counts, never content
+    (red-lines.md #2). Raises on transport failure so the caller can decide whether to retry."""
     full_response = ""
     got_token = False
+    t_start = time.perf_counter()
+    ttft_ms = None
+    completion_tokens = 0
     async with _http.stream(
         "POST", f"{VLLM_URL}/v1/chat/completions", json=body, timeout=120.0
     ) as response:
@@ -327,9 +332,15 @@ async def _stream_completion(websocket: WebSocket, body: dict) -> tuple[str, boo
                 continue
             try:
                 chunk = json.loads(line[6:])
+                # vLLM's final chunk may carry token usage — prefer it when present.
+                usage = chunk.get("usage")
+                if isinstance(usage, dict) and usage.get("completion_tokens"):
+                    completion_tokens = usage["completion_tokens"]
                 if chunk.get("choices"):
                     delta_content = chunk["choices"][0].get("delta", {}).get("content", "")
                     if delta_content:
+                        if not got_token:
+                            ttft_ms = int((time.perf_counter() - t_start) * 1000)
                         got_token = True
                     full_response += delta_content
                     await websocket.send_json({"type": "chunk", "data": chunk})
@@ -337,7 +348,12 @@ async def _stream_completion(websocket: WebSocket, body: dict) -> tuple[str, boo
                 pass
             except Exception as chunk_error:
                 logger.error(f"Chunk error: {chunk_error}")
-    return full_response, got_token
+    generation_ms = int((time.perf_counter() - t_start) * 1000)
+    # Fallback token count if vLLM didn't report usage (lightweight estimate; no content leaves here).
+    if not completion_tokens and full_response:
+        completion_tokens = count_tokens(full_response)
+    meta = {"ttft_ms": ttft_ms, "generation_ms": generation_ms, "completion_tokens": completion_tokens}
+    return full_response, got_token, meta
 
 
 async def _fire_verify(request_id: str, query: str, answer: str, evidence_docs: list,
@@ -435,7 +451,9 @@ async def websocket_chat(websocket: WebSocket):
             if len(messages) < before:
                 logger.info(f"History compacted: {before} → {len(messages)} messages")
 
+            _t_retr = time.perf_counter()
             context_docs, evidence_docs = await search_knowledge_base(user_query)
+            retrieval_ms = int((time.perf_counter() - _t_retr) * 1000)
             # red-lines.md #2: never log query content. Metadata only.
             logger.info(f"RAG: {len(context_docs)} docs retrieved ({len(user_query)}-char query)")
             for i, doc in enumerate(context_docs, 1):
@@ -529,9 +547,10 @@ async def websocket_chat(websocket: WebSocket):
             # is the right remedy. If a token already streamed, we never retry (would
             # duplicate visible output); we surface the partial answer instead.
             full_response, got_token, last_error = "", False, None
+            stream_meta = {}
             for attempt in (1, 2):
                 try:
-                    full_response, got_token = await _stream_completion(websocket, body)
+                    full_response, got_token, stream_meta = await _stream_completion(websocket, body)
                     last_error = None
                     break
                 except Exception as stream_error:
@@ -557,8 +576,14 @@ async def websocket_chat(websocket: WebSocket):
                 else:
                     logger.info("Response: GROUNDED")
                 request_id = uuid.uuid4().hex
-                await websocket.send_json({"type": "done", "prompt_version": PROMPT_VERSION,
-                                           "request_id": request_id})
+                await websocket.send_json({
+                    "type": "done", "prompt_version": PROMPT_VERSION, "request_id": request_id,
+                    # metadata-only telemetry (durations + counts, no content — red-lines.md #2)
+                    "timing": {"retrieval_ms": retrieval_ms,
+                               "ttft_ms": stream_meta.get("ttft_ms"),
+                               "generation_ms": stream_meta.get("generation_ms")},
+                    "tokens": {"completion": stream_meta.get("completion_tokens")},
+                })
                 # Out-of-band faithfulness check (verifier plan §7.1): post-`done`,
                 # fire-and-forget, no-op unless VERIFIER_URL is set. Never blocks.
                 asyncio.create_task(

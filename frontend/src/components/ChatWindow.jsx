@@ -104,6 +104,35 @@ const SourceBlock = ({ sources }) => {
   )
 }
 
+// Subtle per-message performance footer — turns "runs on my own GPUs" into a shown fact.
+// Fed by metadata-only timing/token counts on the `done` message (no content).
+const MetricsFooter = ({ metrics }) => {
+  if (!metrics) return null
+  const { retrieval_ms, ttft_ms, generation_ms, completion } = metrics
+  const parts = []
+  // User-perceived time to first token = RAG retrieval + model prefill (not prefill alone).
+  if (ttft_ms != null) {
+    parts.push(`${(((retrieval_ms || 0) + ttft_ms) / 1000).toFixed(1)}s to first token`)
+  }
+  // Decode throughput = completion tokens over the streaming window (excludes prefill).
+  const streamMs = (generation_ms != null && ttft_ms != null)
+    ? Math.max(1, generation_ms - ttft_ms) : generation_ms
+  if (streamMs && completion) parts.push(`${(completion / (streamMs / 1000)).toFixed(1)} tok/s`)
+  if (retrieval_ms != null && generation_ms != null) {
+    parts.push(`${((retrieval_ms + generation_ms) / 1000).toFixed(1)}s total`)
+  }
+  if (parts.length === 0) return null
+  return (
+    <div
+      className="mt-2 text-[11px] text-gray-500 flex items-center gap-1"
+      title="Generated live on Chris's own hardware — 2× RTX A4500 (T5810)"
+    >
+      <span aria-hidden="true">⚡</span>
+      <span>{parts.join(' · ')}</span>
+    </div>
+  )
+}
+
 const ChatWindow = forwardRef(({ messages, status, suggestions, error, onSuggestion, onRetry }, ref) => {
   return (
     <div className="space-y-4 p-4">
@@ -145,6 +174,7 @@ const ChatWindow = forwardRef(({ messages, status, suggestions, error, onSuggest
                   </ReactMarkdown>
                 )}
                 {msg.role === 'assistant' && <SourceBlock sources={msg.sources} />}
+                {msg.role === 'assistant' && <MetricsFooter metrics={msg.metrics} />}
                 {msg.role === 'assistant' && msg.flagged && (
                   <div className="mt-2 pt-2 border-t border-amber-600/30 flex items-start gap-1.5 text-xs text-amber-400/90">
                     <span aria-hidden="true">⚠</span>
