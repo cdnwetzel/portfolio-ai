@@ -64,8 +64,12 @@ COMPRESS_TARGET_RATIO = float(os.environ.get("COMPRESS_TARGET_RATIO", "0.5"))
 COMPRESS_PROTECT_RECENT = int(os.environ.get("COMPRESS_PROTECT_RECENT", "0"))
 
 # RAG retrieval: pull a wide candidate set via cosine, then rerank to the best few.
-# MiniLM cosine is imprecise — good enough to surface candidates into the top-20,
+# bge-base cosine is imprecise — good enough to surface candidates into the top-15,
 # not to pick the best 5. The CPU cross-encoder (T5810:8006) closes that gap.
+# NOTE: that cross-encoder caps its (query, chunk) pair at 512 tokens — an XLM-RoBERTa
+# architectural limit, not a tunable — while the indexer's 400-word chunks tokenize to a
+# ~640-token median. So the reranker scores most chunks on their first ~75%. It affects
+# RANKING only: rerank_documents() returns indices, so the LLM still receives full chunks.
 RAG_RETRIEVE_LIMIT = 15   # candidates from Qdrant (bi-encoder cosine); ~3s CPU rerank
 RAG_TOP_K = 5             # final chunks after cross-encoder reranking
 RAG_MAX_PER_DOC = 1       # cap chunks from one source doc in the final context, so a
