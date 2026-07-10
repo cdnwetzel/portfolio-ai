@@ -82,6 +82,9 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--collections", nargs="+", required=True, help="Qdrant collections to compare")
     ap.add_argument("--top-k", nargs="+", type=int, default=[5], help="top-k values to score")
+    ap.add_argument("--max-per-doc", type=int, default=2,
+                    help="chunks allowed from one source doc, matching the proxy's RAG_MAX_PER_DOC "
+                         "(default 2 — the deployed value)")
     ap.add_argument("--retrieve-limit", type=int, default=15, help="candidates pulled before rerank")
     ap.add_argument("--qdrant-url", default="http://127.0.0.1:6333")
     ap.add_argument("--embed-url", default="http://127.0.0.1:8005")
@@ -109,7 +112,7 @@ def main():
             cands = search(args.qdrant_url, coll, vec, args.retrieve_limit)
             ranked = rerank(args.rerank_url, it["q"], cands)
             for k in args.top_k:
-                text = " ".join(d["content"] for d in cap_per_doc(ranked, k)).lower()
+                text = " ".join(d["content"] for d in cap_per_doc(ranked, k, args.max_per_doc)).lower()
                 found = [s for s in it["expect_substrings"] if s.lower() in text]
                 if len(found) == len(it["expect_substrings"]):
                     hits[k] += 1
