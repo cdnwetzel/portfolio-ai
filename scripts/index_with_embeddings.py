@@ -242,8 +242,14 @@ def wipe_collection(qdrant_url: str, collection_name: str) -> None:
         logger.error(f"✗ Error wiping collection: {e}")
 
 def index_documents(qdrant_url: str, docs: List[Dict], collection_name: str = "documents",
-                    hybrid: bool = False):
-    """Index documents as chunks with semantic embeddings (+ BM25 sparse vectors if hybrid)."""
+                    hybrid: bool = False, chunk_size: int = 400, overlap: int = 50):
+    """Index documents as chunks with semantic embeddings (+ BM25 sparse vectors if hybrid).
+
+    chunk_size is in WORDS. The default 400 was chosen for the bi-encoder, which has no length
+    limit worth worrying about; note it tokenizes to a ~640-token median, while the cross-encoder
+    reranker truncates each (query, chunk) pair at 512 tokens. Exposed so a parallel collection can
+    be built at a different size and compared, rather than guessed at.
+    """
     logger.info(f"\n=== Indexing Documents ({'hybrid dense+bm25' if hybrid else 'dense'}) ===")
 
     if not create_collection(qdrant_url, collection_name, hybrid=hybrid):
@@ -260,7 +266,7 @@ def index_documents(qdrant_url: str, docs: List[Dict], collection_name: str = "d
     idf = avgdl = None
     chunked = []  # list of (doc, [chunks])
     for doc in docs:
-        chunks = chunk_text(doc['content'], chunk_size=400, overlap=50)
+        chunks = chunk_text(doc['content'], chunk_size=chunk_size, overlap=overlap)
         chunked.append((doc, chunks))
 
     if hybrid:
@@ -329,6 +335,11 @@ def main():
     parser.add_argument("--wipe", action="store_true",
                         help="Delete and rebuild the collection from scratch — recommended for a clean, "
                              "reproducible rebuild (clears orphan points from prior targeted re-indexes)")
+    parser.add_argument("--chunk-size", type=int, default=400,
+                        help="Chunk size in WORDS (default: 400). The reranker truncates a "
+                             "(query, chunk) pair at 512 tokens; 400 words is a ~640-token median.")
+    parser.add_argument("--overlap", type=int, default=50,
+                        help="Chunk overlap in words (default: 50)")
     parser.add_argument("--hybrid", action="store_true",
                         help="Build a hybrid dense+BM25-sparse collection (named 'dense' + 'bm25' "
                              "sparse vectors). Requires a proxy that queries via the fusion API.")
@@ -348,7 +359,8 @@ def main():
     if args.wipe:
         wipe_collection(args.qdrant_url, args.collection)
 
-    if index_documents(args.qdrant_url, docs, args.collection, hybrid=args.hybrid):
+    if index_documents(args.qdrant_url, docs, args.collection, hybrid=args.hybrid,
+                       chunk_size=args.chunk_size, overlap=args.overlap):
         logger.info("\n✅ Knowledge base indexed with semantic embeddings!")
         logger.info("RAG search now uses real vector similarity — no manual weight tuning needed.")
         return 0
