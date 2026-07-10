@@ -1,7 +1,7 @@
 const GITHUB_URL   = 'https://github.com/cdnwetzel'
 const LINKEDIN_URL = 'https://linkedin.com/in/chris-wetzel'
 const EMAIL        = 'mailto:chris@cwetzel.com'
-const REPO_URL     = 'https://github.com/cdnwetzel/portfolio-saas'
+const REPO_URL     = 'https://github.com/cdnwetzel/portfolio-ai'
 
 const GitHubIcon = () => (
   <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">

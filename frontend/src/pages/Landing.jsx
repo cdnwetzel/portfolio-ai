@@ -1,7 +1,7 @@
 const GITHUB_URL   = 'https://github.com/cdnwetzel'
 const LINKEDIN_URL = 'https://linkedin.com/in/chris-wetzel'
 const EMAIL        = 'mailto:chris@cwetzel.com'
-const REPO_URL     = 'https://github.com/cdnwetzel/portfolio-saas'
+const REPO_URL     = 'https://github.com/cdnwetzel/portfolio-ai'
 
 const STACK = [
   'Qwen 14B', 'vLLM', 'Qdrant', 'RAG', 'React', 'Gentoo', '2× RTX A4500', 'Verifier'
