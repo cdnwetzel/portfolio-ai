@@ -179,6 +179,9 @@ QDRANT_URL=http://127.0.0.1:6333    # via SSH tunnel
 EMBED_URL=http://127.0.0.1:8005     # embed-service (tunneled to T5810)
 RERANK_URL=http://127.0.0.1:8006    # rerank-service (tunneled to T5810)
 VERIFIER_URL=http://127.0.0.1:8007  # verifier (tunnel → T5810 → asrock); set via systemd drop-in
+VERIFY_MIN_SCORE=0.002              # skip the verifier when top rerank score < this (off-topic gate,
+                                    # verify_gate.py). Calibrated 2026-07-14: off-topic clusters at ~0,
+                                    # on-topic ≥0.0046. Code default 0.0 (disabled); enabled via env here.
 HYBRID_SEARCH=0                     # hybrid dense+BM25 built but OFF (lost its A/B)
 ```
 

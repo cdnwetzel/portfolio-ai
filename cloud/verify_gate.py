@@ -14,21 +14,25 @@ def should_verify(top_score: float | None, threshold: float) -> bool:
     """True if the top retrieval score passes the relevance threshold.
 
     Args:
-        top_score: The rerank score of the highest-scoring evidence chunk (0.0–0.08 range
-                   for bge-reranker), or None/0.0 if no chunks were retrieved.
-        threshold: Minimum score to consider evidence relevant enough to judge.
-                   Calibrated empirically from golden_set.yaml distributions.
+        top_score: The rerank (bge-reranker-base) score of the highest-scoring evidence chunk,
+                   or None/0.0 if no chunks were retrieved. Measured distribution (2026-07-14,
+                   golden_set + off-topic probes against the live index): on-topic top-scores
+                   span ~0.005–0.995 (median ~0.40); off-topic cluster tightly at ~0 (max 0.017).
+                   NOT the "0.0–0.08" once assumed — the scores use nearly the full 0–1 range.
+        threshold: Minimum score to consider evidence relevant enough to judge. Production runs
+                   VERIFY_MIN_SCORE=0.002, chosen to gate the clear off-topic cluster (scores ~0)
+                   with zero on-topic false-skips (lowest measured on-topic top-score was 0.0046).
 
     Returns:
         False when top_score is None/missing or below threshold (skip verification).
         True when top_score meets or exceeds threshold (proceed with judge call).
 
     Example:
-        >>> should_verify(0.06, 0.05)
+        >>> should_verify(0.40, 0.002)   # typical on-topic
         True
-        >>> should_verify(0.02, 0.05)
+        >>> should_verify(0.0003, 0.002) # typical off-topic
         False
-        >>> should_verify(None, 0.05)
+        >>> should_verify(None, 0.002)
         False
     """
     return top_score is not None and top_score >= threshold
