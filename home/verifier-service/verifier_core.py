@@ -108,7 +108,13 @@ JUDGE_SYSTEM = (
     "one machine's CPU, GPU, or memory to another machine.\n"
     "unsupported = not found in any chunk (even if plausibly true).\n"
     "A faithful paraphrase that preserves the entities, roles, units, and categories is "
-    "still supported; a paraphrase that changes any of them is contradicted, not supported."
+    "still supported; a paraphrase that changes any of them is contradicted, not supported.\n"
+    "Attribution equivalence: this knowledge base is Chris Wetzel's own portfolio, so "
+    "'Chris', 'his', 'the system', 'this system', 'the portfolio', and 'the firm' all "
+    "refer to the same owner. A claim saying 'Chris runs X' and a chunk saying 'the "
+    "system runs X' differ only in owner phrasing, which is NOT a changed entity. This "
+    "equivalence covers owner phrasing ONLY — machine components (CPU, GPU, OS, memory), "
+    "units, and categories remain subject to the strict rules above."
 )
 
 
