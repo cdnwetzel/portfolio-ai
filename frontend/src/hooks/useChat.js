@@ -11,6 +11,30 @@ const log = DEBUG ? console.log.bind(console) : () => {}
 // (Retained malformed blocks poisoned follow-ups on the 2nd+ turn.)
 const FOLLOWUPS_MARKER = /\n?\s*FOLLOWUPS:/gi
 
+// How long to hold the socket open post-`done` for the out-of-band verdict.
+// Sized for the 14B judge on the RTX 5060 Ti (~10–20s) with headroom, and to
+// outlast the proxy's own VERIFIER_TIMEOUT (20s) — a shorter window silently
+// drops late verdicts, which makes the Tier 2 judge upgrade look broken.
+// Was 9000 (fit the 7B's 6.5s median).
+const VERDICT_WINDOW_MS = 25000
+
+// Chat history persistence (browser localStorage). CLAUDE.md documents this as
+// "Browser localStorage — per-session; nothing persisted server-side". All access
+// is try/catch'd: in private mode or with storage disabled, every operation no-ops
+// and the chat works exactly as before — just without persistence.
+const STORAGE_KEY = 'portfolio_chat_messages'
+
+function loadMessages() {
+  try {
+    const stored = localStorage.getItem(STORAGE_KEY)
+    if (!stored) return []
+    const parsed = JSON.parse(stored)
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    return []
+  }
+}
+
 function parseFollowups(content) {
   const marks = [...content.matchAll(FOLLOWUPS_MARKER)]
   if (marks.length === 0) return { content, suggestions: [] }
@@ -40,7 +64,7 @@ function parseFollowups(content) {
 }
 
 export function useChat() {
-  const [messages, setMessages] = useState([])
+  const [messages, setMessages] = useState(loadMessages)
   const [status, setStatus] = useState('idle') // 'idle' | 'searching' | 'generating'
   const [suggestions, setSuggestions] = useState([])
   const [error, setError] = useState(null)   // null | 'connection_lost' | 'server_error'
@@ -124,9 +148,9 @@ export function useChat() {
           setSuggestions(sugs)
           setStatus('idle')
           // The faithfulness verifier runs AFTER the answer. Keep the socket open
-          // briefly to receive a {type:"verdict"}; close on verdict or short timeout.
+          // briefly to receive a {type:"verdict"}; close on verdict or timeout.
           // Non-blocking — the answer is already complete and usable.
-          verdictTimer = setTimeout(() => { try { ws.close() } catch { /* noop */ } }, 9000)
+          verdictTimer = setTimeout(() => { try { ws.close() } catch { /* noop */ } }, VERDICT_WINDOW_MS)
         } else if (data.type === 'verdict') {
           if (data.flagged && data.request_id) {
             setMessages(prev => prev.map(m =>
@@ -180,6 +204,23 @@ export function useChat() {
     openConnection(lastPayloadRef.current)
   }, [openConnection])
 
+  // Persist history on every change. Quota/private-mode failures no-op (logged at
+  // debug level) — the chat keeps working for the session, just without persistence.
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(messages))
+    } catch (e) {
+      log('localStorage write failed; history not persisted this session', e)
+    }
+  }, [messages])
+
+  const clearChat = useCallback(() => {
+    setMessages([])
+    setSuggestions([])
+    setError(null)
+    try { localStorage.removeItem(STORAGE_KEY) } catch { /* storage unavailable */ }
+  }, [])
+
   // Mobile Safari: detect WS drop when tab re-foregrounds
   useEffect(() => {
     const onVisibility = () => {
@@ -196,5 +237,5 @@ export function useChat() {
     return () => document.removeEventListener('visibilitychange', onVisibility)
   }, [status])
 
-  return { messages, status, suggestions, error, sendMessage, retry }
+  return { messages, status, suggestions, error, sendMessage, retry, clearChat }
 }
