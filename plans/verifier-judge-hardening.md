@@ -36,7 +36,7 @@ judge writes no prose, so more chunks only reduce false-unsupported and add cont
 surface). Widening the *generator's* context is the risky one and stays behind the eval
 (that is generator `_cap_per_doc`, tracked separately in the faithfulness plan, NOT here).
 
-## The coherent diff (implemented, uncommitted)
+## The coherent diff (implemented, deployed — verifier live on the asrock, `home/verifier-service/`)
 
 **A. Rubric — `home/verifier-service/verifier_core.py` (`JUDGE_SYSTEM`).**
 Removed the blanket "a paraphrase is still supported" clause. Now: `supported` requires the

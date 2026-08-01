@@ -28,7 +28,7 @@ If you're talking to this AI right now, you're using this system. The repo conta
 | Vector DB | Qdrant (dense cosine, 768-d) | T5810 home server |
 | Embeddings | BAAI/bge-base-en-v1.5 (768-d) | T5810 home server (CPU) |
 | Reranker | bge-reranker-base (cross-encoder) | T5810 home server (CPU) |
-| Faithfulness verifier | Qwen2.5-7B-Instruct (Ollama, CPU) | asrock B550 home server |
+| Faithfulness verifier | Qwen2.5-14B-Instruct (Ollama, RTX 5060 Ti) | asrock B550 home server |
 | Tunnel | SSH reverse forward (VPS → T5810 → asrock) | VPS ↔ home LAN |
 
 ---
@@ -192,7 +192,7 @@ Browser ──HTTPS/WSS──> cwetzel.com VPS (FastAPI proxy)
 
 **How the VPS reaches two home boxes through one tunnel.** The tunnel is a single SSH connection from the VPS that terminates on the T5810. Each forwarded port resolves its target *from the T5810's side*: ports 8004/6333/8005/8006 point at `127.0.0.1` (services on the T5810 itself), while port 8007 points at the asrock box's LAN address. So the T5810 doubles as the jump host — the VPS never needs a separate link to asrock; it rides the same tunnel, and the T5810 routes the verifier traffic across the home LAN. Nothing on either home server is exposed to the public internet.
 
-**What the verifier does.** After every answer is delivered, the proxy fire-and-forgets `(question, answer, retrieved chunks)` to the verifier on asrock. A separate judge model (Qwen2.5-7B on CPU — deliberately a *different* model than the 14B that wrote the answer, to avoid self-grading bias) decides, per claim, whether it is **supported**, **unsupported**, or **contradicted** by the retrieved chunks, and records a faithfulness score. This is out-of-band: it never blocks, delays, or rewrites the answer, and if asrock is down the chat is completely unaffected (the verdict simply isn't recorded). It turns "the answer is grounded" from a hope into a continuously measured signal, and flags drift for review.
+**What the verifier does.** After every answer is delivered, the proxy fire-and-forgets `(question, answer, retrieved chunks)` to the verifier on asrock. A separate judge model (Qwen2.5-14B-Instruct on the RTX 5060 Ti — deliberately a *different variant* than the 14B-Coder that wrote the answer, to avoid self-grading bias) decides, per claim, whether it is **supported**, **unsupported**, or **contradicted** by the retrieved chunks, and records a faithfulness score. This is out-of-band: it never blocks, delays, or rewrites the answer, and if asrock is down the chat is completely unaffected (the verdict simply isn't recorded). It turns "the answer is grounded" from a hope into a continuously measured signal, and flags drift for review.
 
 **Offline evaluation.** Separately from the live verifier, a graded eval harness (`scripts/eval_graded.py`) runs a ~30-question human-authored golden set through the live pipeline and scores grounding/faithfulness, with ship thresholds — the regression gate used before changes go live. A lightweight self-test also runs as a deploy gate and an hourly canary.
 

@@ -33,23 +33,28 @@
 **Consequence:** Model theft, competitive disadvantage, security vulnerability  
 **Enforcement:** API responses contain only sanitized text, no metadata
 
+### 6. NEVER index private contact information in the knowledge base
+**Consequence:** PII exposed to every anonymous visitor, privacy violation, reputational damage  
+**Enforcement:** KB review before every reindex; the golden set's `no_pii` questions gate phone-number leaks in answers  
+**Documented exception:** the contact emails in `knowledge_base/RESUME.md` (`cwe@thepslawfirm.com`, `chris@cwetzel.com`) are indexed **intentionally** — they are public contact info (firm staff directory, this site's own landing page) and the right vector for professional inquiries. Policy: public contact info may be indexed; phone numbers, SSNs, private addresses, and any third party's personal data may not. If any PII is indexed, this entry must document why.
+
 ---
 
 ## Data Integrity & Quality
 
-### 6. NEVER skip data validation on user input
+### 7. NEVER skip data validation on user input
 **Consequence:** SQL injection, prompt injection, malformed inference  
 **Enforcement:** Pydantic schema validation on all POST/PUT endpoints
 
-### 7. NEVER allow train/validation/test data to overlap (if fine-tuning)
+### 8. NEVER allow train/validation/test data to overlap (if fine-tuning)
 **Consequence:** Inflated metrics, model fails in production, wasted weeks  
 **Enforcement:** Data split logic validated with hash-based deduplication
 
-### 8. NEVER deploy a model version without ≥ 10 passing unit tests
+### 9. NEVER deploy a model version without ≥ 10 passing unit tests
 **Consequence:** Silent failures, degraded UX, customer churn  
 **Enforcement:** CI/CD blocks deployment if test coverage < 80% or any test fails
 
-### 9. NEVER rely on a single accuracy metric (F1, BLEU, ROUGE, etc.)
+### 10. NEVER rely on a single accuracy metric (F1, BLEU, ROUGE, etc.)
 **Consequence:** Optimization gaming, poor real-world performance  
 **Enforcement:** Test suite includes multiple metrics + qualitative review of 10 samples
 
@@ -57,27 +62,27 @@
 
 ## Infrastructure & Reliability
 
-### 10. NEVER run inference without request timeouts
+### 11. NEVER run inference without request timeouts
 **Consequence:** Zombie requests, resource exhaustion, service hangs  
 **Enforcement:** FastAPI timeout=60s on all inference endpoints
 
-### 11. NEVER expose database connection strings in logs or error messages
+### 12. NEVER expose database connection strings in logs or error messages
 **Consequence:** Credential leak, unauthorized database access  
 **Enforcement:** Exception handlers sanitize database errors before returning to client
 
-### 12. NEVER rely on a single GPU without failover mechanism
+### 13. NEVER rely on a single GPU without failover mechanism
 **Consequence:** Single point of failure, complete service outage  
 **Enforcement:** Health checks detect GPU memory errors; fallback to cloud inference mode
 
-### 13. NEVER allow unbounded query lengths (prompt size) on inference
+### 14. NEVER allow unbounded query lengths (prompt size) on inference
 **Consequence:** OOM errors, denial-of-service, service crash  
 **Enforcement:** Input validation enforces max_tokens=8192 on requests
 
-### 14. NEVER skip SSL/TLS on production endpoints
+### 15. NEVER skip SSL/TLS on production endpoints
 **Consequence:** Man-in-the-middle attacks, credential interception  
 **Enforcement:** HSTS headers enforced; Nginx redirects HTTP → HTTPS
 
-### 15. NEVER commit model weights, large datasets, or checkpoints to git
+### 16. NEVER commit model weights, large datasets, or checkpoints to git
 **Consequence:** Repository bloat, slow clones, storage exhaustion  
 **Enforcement:** `.gitignore` enforces; pre-commit hook blocks `.pth`, `.safetensors`, `.bin` files
 
@@ -85,23 +90,23 @@
 
 ## Operational & Business
 
-### 16. NEVER deploy without monitoring and alerting configured
+### 17. NEVER deploy without monitoring and alerting configured
 **Consequence:** Silent failures, undetected degradation, lost revenue  
 **Enforcement:** Health checks + Prometheus metrics required before production push
 
-### 17. NEVER charge a customer without validated payment confirmation from Stripe
+### 18. NEVER charge a customer without validated payment confirmation from Stripe
 **Consequence:** Revenue tracking broken, customer disputes, accounting errors  
 **Enforcement:** Webhook signature validation on all Stripe events
 
-### 18. NEVER use production customer data for benchmarking or debugging
+### 19. NEVER use production customer data for benchmarking or debugging
 **Consequence:** Privacy violation, data exposure, compliance breach  
 **Enforcement:** Use anonymized test fixtures; audit logs track all data access
 
-### 19. NEVER release a version without updating CHANGELOG or version tag
+### 20. NEVER release a version without updating CHANGELOG or version tag
 **Consequence:** Lost deployment history, difficult debugging, compliance audit failure  
 **Enforcement:** Release script requires version bump + git tag before push
 
-### 20. NEVER skip database backups
+### 21. NEVER skip database backups
 **Consequence:** Data loss, complete service downtime, unrecoverable customer data  
 **Enforcement:** Automated daily backups to S3; restore test monthly
 
@@ -109,23 +114,23 @@
 
 ## Code Quality & Collaboration
 
-### 21. NEVER merge code without at least 1 code review
+### 22. NEVER merge code without at least 1 code review
 **Consequence:** Silent bugs, security vulnerabilities, technical debt  
 **Enforcement:** GitHub branch protection requires review approval
 
-### 22. NEVER commit code with `# TODO`, `# FIXME`, or `# HACK` without a ticket
+### 23. NEVER commit code with `# TODO`, `# FIXME`, or `# HACK` without a ticket
 **Consequence:** Deferred bugs, lost context, technical debt accumulation  
 **Enforcement:** Linter warns; code review enforces ticket linkage
 
-### 23. NEVER change database schema without an Alembic migration
+### 24. NEVER change database schema without an Alembic migration
 **Consequence:** Rollback failures, data loss, downtime  
 **Enforcement:** Migration script is required for any schema change; `alembic upgrade head` must succeed
 
-### 24. NEVER use hardcoded environment variables or magic numbers
+### 25. NEVER use hardcoded environment variables or magic numbers
 **Consequence:** Configuration errors, difficult debugging, non-portable code  
 **Enforcement:** All config via .env or pydantic Settings; no string literals > 3 chars in code
 
-### 25. NEVER skip testing for edge cases (empty input, max size, concurrent requests)
+### 26. NEVER skip testing for edge cases (empty input, max size, concurrent requests)
 **Consequence:** Production bugs, customer-facing failures  
 **Enforcement:** Test checklist includes: null, empty string, max_tokens, 100 concurrent reqs
 
@@ -133,23 +138,23 @@
 
 ## Documentation & Knowledge
 
-### 26. NEVER deploy without updating README.md
+### 27. NEVER deploy without updating README.md
 **Consequence:** Onboarding delays, operational knowledge lost, hard to reproduce  
 **Enforcement:** Code review checklist requires README update for new features
 
-### 27. NEVER ship a new API endpoint without OpenAPI/Swagger documentation
+### 28. NEVER ship a new API endpoint without OpenAPI/Swagger documentation
 **Consequence:** Clients can't use the API, support burden, API abuse  
 **Enforcement:** Endpoint must be accessible at `/docs`; docstring required
 
-### 28. NEVER change critical logic without documenting the "why"
+### 29. NEVER change critical logic without documenting the "why"
 **Consequence:** Future engineers misunderstand decision; tech debt  
 **Enforcement:** ADR (Architecture Decision Record) for all major changes
 
-### 29. NEVER suppress warnings in type checking (mypy, pyright)
+### 30. NEVER suppress warnings in type checking (mypy, pyright)
 **Consequence:** Type safety compromised, runtime errors missed  
 **Enforcement:** Linter configured with `strict: true`; `# type: ignore` requires comment
 
-### 30. NEVER delete a red-line without consensus from the tech team
+### 31. NEVER delete a red-line without consensus from the tech team
 **Consequence:** Gradual standard degradation, loss of safety rails  
 **Enforcement:** Red-lines reviewed quarterly; any removal requires written justification
 

@@ -3,11 +3,11 @@ Faithfulness verifier service (verifier-faithfulness-layer.md).
 
 Out-of-band, fail-open judge: for each completed chat answer it scores whether each
 claim is supported by the chunks that were actually retrieved, stores a verdict, and
-exposes rolling metrics + a review queue. Runs on the spare Ryzen/3060 Ti box, NOT
+exposes rolling metrics + a review queue. Runs on the spare Ryzen/RTX 5060 Ti box, NOT
 the T5810. Never sits in the user's response path.
 
 Mirrors the home/rerank-service pattern (FastAPI + OpenRC). Judge model is pluggable:
-Ollama (default, low-friction on one 8 GB card) or any OpenAI-compatible endpoint.
+Ollama (default, low-friction on one 16 GB card) or any OpenAI-compatible endpoint.
 
 Env config:
   VERIFIER_BIND     default 127.0.0.1 (localhost-only). Set to the box's LAN IP
@@ -16,14 +16,15 @@ Env config:
                     (Distinct from setup-verifier.sh's VERIFIER_HOST, which is the SSH target.)
   VERIFIER_PORT     default 8007
   JUDGE_BACKEND     "ollama" (default) | "openai"
-  JUDGE_NUM_CTX     12288 (default). Ollama serves at 4096 unless told otherwise and
-                    truncates silently; only honored on the ollama backend.
+  JUDGE_NUM_CTX     16384 (default). Ollama serves at 4096 unless told otherwise and
+                    truncates silently; only honored on the ollama backend. Must be in
+                    lockstep with OLLAMA_CONTEXT_LENGTH on the Ollama side.
   JUDGE_KEEP_ALIVE  30m (default). Ollama evicts idle models after 5m; an idle site
                     then pays a cold load on nearly every verify.
   JUDGE_TIMEOUT     120s (default) for the judge HTTP call. Warm calls are ~6.5s.
   JUDGE_URL         ollama: http://127.0.0.1:11434/api/chat
                     openai: http://127.0.0.1:11434/v1/chat/completions (or any)
-  JUDGE_MODEL       default qwen2.5:7b-instruct-q4_K_M
+  JUDGE_MODEL       default qwen2.5:14b-instruct-q4_k_m (upgraded from 7B, Tier 2)
   THRESHOLD         default 0.8  (faithfulness below this flags)
   SAMPLE_RATE       default 1.0  (verify everything; <1.0 samples under load)
   MAX_INFLIGHT      default 2    (bounded judge concurrency on one GPU)
@@ -59,10 +60,10 @@ logger = logging.getLogger("verifier")
 
 JUDGE_BACKEND = os.getenv("JUDGE_BACKEND", "ollama").lower()
 JUDGE_URL = os.getenv("JUDGE_URL", "http://127.0.0.1:11434/api/chat")
-JUDGE_MODEL = os.getenv("JUDGE_MODEL", "qwen2.5:7b-instruct-q4_K_M")
+JUDGE_MODEL = os.getenv("JUDGE_MODEL", "qwen2.5:14b-instruct-q4_k_m")
 # Ollama's own default is 4096 and it truncates silently — see _call_judge(). Real prompts
 # measured up to 10,214 tokens; the model supports 32768.
-JUDGE_NUM_CTX = int(os.getenv("JUDGE_NUM_CTX", "12288"))
+JUDGE_NUM_CTX = int(os.getenv("JUDGE_NUM_CTX", "16384"))
 # Ollama evicts an idle model after 5 minutes by default (399 reloads observed in one log).
 # A portfolio site is idle most of the time, so nearly every verify paid a cold load — which
 # is what a 60s client timeout was actually recording, not a slow judge. Warm calls are ~6.5s.
@@ -179,7 +180,7 @@ async def _call_judge(messages: list[dict]) -> str:
     """Call the judge model; return raw text content. Raises on transport error.
 
     num_ctx is set EXPLICITLY. Ollama defaults to a 4096-token window regardless of what the
-    model supports (qwen2.5:7b-instruct reports 32768), and silently truncates anything longer:
+    model supports (qwen2.5:14b-instruct reports 32768), and silently truncates anything longer:
 
         msg="truncating input prompt" limit=4096 prompt=8345 keep=4 new=4095
 

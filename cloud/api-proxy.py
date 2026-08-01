@@ -27,6 +27,7 @@ from context_manager import (
 from query_expansion import expand_query
 from guardrails import is_prompt_extraction, EXTRACTION_REFUSAL
 from verify_gate import should_verify
+from rate_limit import ConnectionRateLimiter, client_ip_from_headers
 import sparse_bm25
 
 logging.basicConfig(level=logging.INFO)
@@ -51,7 +52,8 @@ VERIFIER_TIMEOUT = float(os.environ.get("VERIFIER_TIMEOUT", "20.0"))
 # evidence chunk scores below this threshold, the retrieved chunks are too off-topic to
 # make a faithfulness judgment meaningful — skip verification entirely to avoid false-positive
 # flags on non-KB answers. Default 0.0 (gate disabled) — calibrate empirically before enabling.
-# See plans/write-the-full-plan-cached-grove.md for calibration method against golden_set.yaml.
+# See cloud/verify_gate.py's docstring for the calibration method and the measured
+# score distributions (2026-07-14, golden_set.yaml + off-topic probes).
 VERIFY_MIN_SCORE = float(os.environ.get("VERIFY_MIN_SCORE", "0.0"))
 # Optional input-token compression via the headroom-lib service on T5810,
 # reached via the existing portfolio-ai-tunnel ssh -L forward. Default
@@ -145,6 +147,11 @@ PROMPT_VERSION = "p1-" + hashlib.sha1((SYSTEM_PREFIX + SYSTEM_SUFFIX).encode()).
 # Persistent client — avoids TCP hand-shake overhead on every request
 _http: httpx.AsyncClient | None = None
 
+# Per-IP connection limit for /ws/chat (see rate_limit.py): 1 open chat per IP,
+# localhost bypassed. Anonymous unthrottled access is the site's one DoS vector —
+# a single scripted loop pins the 14B vLLM and starves every real visitor.
+_rate_limiter = ConnectionRateLimiter(max_concurrent_per_ip=1)
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global _http
@@ -165,6 +172,24 @@ app.add_middleware(
 @app.get("/health")
 async def health():
     return {"status": "ok", "timestamp": datetime.utcnow().isoformat()}
+
+
+# api-proxy restarts on every deploy, so process start ≈ deploy time.
+_DEPLOYED_AT = datetime.utcnow().isoformat() + "Z"
+
+
+@app.get("/api/system-info")
+async def system_info():
+    """Live values for the landing-page SystemInfo panel. Counts/GPU come from
+    systemd env (KB_DOC_COUNT, KB_CHUNK_COUNT, VERIFIER_GPU) so a KB rebuild or
+    the Tier 2 asrock GPU swap updates the panel without a code change; the
+    defaults are today's real values so the endpoint stays honest even unset."""
+    return {
+        "docs": int(os.environ.get("KB_DOC_COUNT", "27")),
+        "chunks": int(os.environ.get("KB_CHUNK_COUNT", "62")),
+        "verifier_gpu": os.environ.get("VERIFIER_GPU", "RTX 5060 Ti"),
+        "deployed_at": _DEPLOYED_AT,
+    }
 
 @app.post("/api/search")
 async def search(request: Request):
@@ -419,6 +444,28 @@ async def _fire_verify(request_id: str, query: str, answer: str, evidence_docs: 
 @app.websocket("/ws/chat")
 async def websocket_chat(websocket: WebSocket):
     """WebSocket: real-time chat streaming with RAG"""
+    # Per-IP concurrency limit, enforced BEFORE accept so the client gets a real
+    # HTTP 429 during the handshake (websockets clients surface it as an HTTP
+    # error, not an opaque close). Behind Apache the peer is always 127.0.0.1,
+    # so the effective IP comes from X-Forwarded-For (see rate_limit.py).
+    client_ip = client_ip_from_headers(
+        dict(websocket.headers),
+        websocket.client.host if websocket.client else None,
+    )
+    if not _rate_limiter.try_acquire(client_ip):
+        logger.info(f"rate limit: rejected duplicate /ws/chat connection from {client_ip}")
+        denial = JSONResponse(
+            status_code=429,
+            content={"detail": "Another chat is in progress from this IP. "
+                               "Close it and try again in a moment."},
+        )
+        # Uvicorn's websockets-legacy handshake serializer adds its own
+        # Content-Length when it writes the denial response; leaving the one
+        # JSONResponse set would emit the header twice and strict WS clients
+        # (python-websockets, browsers) reject the response as malformed.
+        del denial.headers["content-length"]
+        await websocket.send_denial_response(denial)
+        return
     await websocket.accept()
     logger.info(f"WebSocket connected from {websocket.client}")
 
@@ -620,6 +667,7 @@ async def websocket_chat(websocket: WebSocket):
     except Exception as e:
         logger.error(f"WebSocket error: {e}")
     finally:
+        _rate_limiter.release(client_ip)
         try:
             await websocket.close()
         except Exception as close_error:

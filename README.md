@@ -26,7 +26,7 @@ T5810 Home Server (Gentoo Linux)
   └─ bge-reranker-base — CPU cross-encoder reranker, port 8006
             ↓ same tunnel, routed over the home LAN
 asrock B550 (Gentoo Linux)
-  └─ Qwen2.5-7B via Ollama — faithfulness verifier on an RTX 3060 Ti, port 8007
+  └─ Qwen2.5-14B-Instruct via Ollama — faithfulness verifier on an RTX 5060 Ti, port 8007
 ```
 
 **Key properties:**
@@ -34,7 +34,7 @@ asrock B550 (Gentoo Linux)
 - Streaming via WebSocket — tokens appear as generated, no polling
 - Follow-up suggestion chips — model appends a `FOLLOWUPS:[...]` block; frontend parses and strips it, shows as clickable chips
 - Context management — 4K char per-prompt cap, 24K char sliding window history
-- Out-of-band faithfulness check — a separate 7B judge on a second machine grades whether each answer's claims are grounded in the retrieved context; fails open, so chat is unaffected if it's down
+- Out-of-band faithfulness check — a separate 14B-Instruct judge on a second machine grades whether each answer's claims are grounded in the retrieved context; fails open, so chat is unaffected if it's down
 - Regression-gated — a graded eval over a golden question set (`scripts/eval_graded.py`) runs before deploy, and a deterministic guardrail refuses prompt-extraction attempts before they reach the LLM
 - Zero cloud GPU cost — owned A4500 NVLink pair handles inference
 
@@ -51,7 +51,7 @@ asrock B550 (Gentoo Linux)
 | Vector DB | Qdrant (dense cosine, 768-d) |
 | Embeddings | BAAI/bge-base-en-v1.5 (768-d, CPU) |
 | Reranker | BAAI/bge-reranker-base (CPU cross-encoder) |
-| Faithfulness verifier | Qwen2.5-7B via Ollama (RTX 3060 Ti, separate host) |
+| Faithfulness verifier | Qwen2.5-14B-Instruct via Ollama (RTX 5060 Ti, separate host) |
 | Inference hardware | Dell Precision T5810, 2× NVIDIA RTX A4500 (NVLink) |
 | OS | Gentoo Linux (custom kernel, OpenRC) |
 | Networking | SSH tunnel (VPS → home) |

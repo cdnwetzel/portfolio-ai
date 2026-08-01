@@ -6,7 +6,7 @@ import SystemInfo from '../components/SystemInfo'
 import { useChat } from '../hooks/useChat'
 
 export default function Chat() {
-  const { messages, status, suggestions, error, sendMessage, retry } = useChat()
+  const { messages, status, suggestions, error, sendMessage, retry, clearChat } = useChat()
   const messagesEndRef = useRef(null)
 
   useEffect(() => {
@@ -38,9 +38,19 @@ export default function Chat() {
             status={status}
             placeholder="Ask about infrastructure, AI systems, startup work…"
           />
-          <p className="text-center text-xs text-gray-600 mt-2">
-            Conversations are not stored or logged · Running on owned hardware · No cloud GPU
-          </p>
+          <div className="flex items-center justify-center gap-3 mt-2">
+            <p className="text-center text-xs text-gray-600">
+              Chat history stays in your browser · Nothing stored or logged server-side · No cloud GPU
+            </p>
+            {messages.length > 0 && (
+              <button
+                onClick={clearChat}
+                className="text-xs text-gray-600 hover:text-gray-300 underline transition shrink-0"
+              >
+                Clear chat
+              </button>
+            )}
+          </div>
         </div>
       </div>
 

@@ -20,7 +20,7 @@ Key design points (hard-won, see plan §12):
 Dependencies: websockets (already needed by selftest), PyYAML. The judge call uses
 stdlib urllib so no extra HTTP dep is required.
 
-Reaching the judge: the 7B judge is served by Ollama on the verifier box, bound to that box's
+Reaching the judge: the judge is served by Ollama on the verifier box, bound to that box's
 localhost (port 11434). Port 8007 is the verifier's own FastAPI service — it speaks /verify, NOT
 /v1/chat/completions, so pointing --judge-url at it will not work. From a workstation, forward
 Ollama over the jump host, and pick a LOCAL port that is not already serving your own Ollama —
@@ -31,7 +31,7 @@ otherwise you will silently grade against the wrong model and call it a baseline
 Usage:
     python3 scripts/eval_graded.py --url wss://dev.cwetzel.com/ws/chat
     python3 scripts/eval_graded.py --judge-url http://127.0.0.1:11500/v1/chat/completions \
-                                   --judge-model qwen2.5:7b-instruct-q4_K_M
+                                   --judge-model qwen2.5:14b-instruct-q4_k_m
     python3 scripts/eval_graded.py --out eval/results/run.jsonl
 """
 import argparse
@@ -78,6 +78,9 @@ def programmatic_signals(item: dict, result: dict) -> dict:
     refused = any(m in low for m in FALLBACK_MARKERS)
     substantive = len(answer) >= MIN_GROUNDED_CHARS
     has_citation = bool(CITATION_RE.search(answer))
+    # PII policy (red-lines.md #6): phone numbers are NEVER acceptable in answers;
+    # the public contact emails in RESUME.md are intentional, so email is NOT a leak
+    # signal. The golden set's contact question asserts the email IS offered.
     pii_leak = bool(PHONE_RE.search(answer))
     prompt_leak = any(m in low for m in PROMPT_LEAK_MARKERS)
     expect = item.get("expect_substrings") or []

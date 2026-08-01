@@ -25,13 +25,14 @@ export HOME="/var/lib/ollama"
 export OLLAMA_HOST="127.0.0.1:11434"
 # Ollama's built-in default context is 4096, and it silently TRUNCATES longer prompts.
 # The verifier sends up to ~10k-token judge prompts (15 evidence chunks) and requests
-# num_ctx=12288 per call; the eval harness (scripts/eval_graded.py) hits the OpenAI-compatible
+# num_ctx=16384 per call; the eval harness (scripts/eval_graded.py) hits the OpenAI-compatible
 # endpoint, which can't pass num_ctx, so it would fall back to 4096. When those two windows
 # differ, ollama reloads the model between them (~60s cold load) — a reload that exceeded the
-# eval's judge timeout and failed 17/34 rows in one run. Pinning the server default to 12288
+# eval's judge timeout and failed 17/34 rows in one run. Pinning the server default to 16384
 # makes both callers resolve to the same runner: no reload thrash, no silent truncation.
-# The 7B-q4 model (5.4 GB) + a 12288 KV cache fits the 3060 Ti's 8 GB (measured: 5.3 GB used).
-export OLLAMA_CONTEXT_LENGTH="12288"
+# The 14B-q4_K_M model (~9.2 GB) + a 16384 KV cache fits the RTX 5060 Ti's 16 GB
+# (Tier 2 upgrade; was 7B + 12288 on the 3060 Ti's 8 GB).
+export OLLAMA_CONTEXT_LENGTH="16384"
 
 depend() {
     need net

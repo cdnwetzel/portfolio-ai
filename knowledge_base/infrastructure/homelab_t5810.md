@@ -36,25 +36,26 @@ The GPU home lab is **two separate machines with different hardware**:
 
 - **T5810** (primary AI server): Dell Precision, **Xeon E5-2699v4 (22C/44T)**, **two RTX A4500
   GPUs joined by an NVLink bridge**. Runs vLLM inference serving the Qwen 14B model.
-- **asrock B550** (verifier node): **AMD Ryzen 9 5950X (16C/32T), 64 GB**, **a single RTX 3060
-  Ti (8 GB)**. Runs the out-of-band faithfulness verifier.
+- **asrock B550** (verifier node): **AMD Ryzen 9 5950X (16C/32T), 64 GB**, **a single RTX 5060
+  Ti (16 GB)**. Runs the out-of-band faithfulness verifier.
 
-The **A4500 NVLink pair belongs to the T5810**; the **single 3060 Ti belongs to the asrock B550**.
+The **A4500 NVLink pair belongs to the T5810**; the **single 5060 Ti belongs to the asrock B550**.
 They are not the same box, and their CPUs differ (Intel Xeon vs AMD Ryzen 9). Never attribute one
 machine's GPU or CPU to the other.
 
 ### asrock B550 — verifier node
 - **OS:** Gentoo Linux / OpenRC
-- **Role:** hosts `verifier-service` (port 8007) + Ollama serving **Qwen2.5-7B** as an
-  *independent* faithfulness judge — a different model than the 14B, to avoid self-grading bias.
-  The judge runs on **CPU** (the Ryzen 9), so the 3060 Ti stays free. After every answer, the
+- **Role:** hosts `verifier-service` (port 8007) + Ollama serving **Qwen2.5-14B-Instruct** as an
+  *independent* faithfulness judge — a different variant than the 14B-Coder that writes answers,
+  to avoid self-grading bias.
+  The judge runs on the **RTX 5060 Ti** (GPU). After every answer, the
   cloud proxy fire-and-forgets the answer + its retrieved chunks here; the judge scores whether
   each claim is supported. Fail-open: if this box is down, the chat is unaffected.
 - **Reachability:** reached from the cloud VPS through the *same* SSH tunnel that terminates on
   the T5810 — the T5810 routes port 8007 to the asrock box over the home LAN.
 
 So generation runs on the **T5810 (Xeon + A4500 pair)** and continuous grounding-verification runs
-on the **asrock B550 (Ryzen 9 + 3060 Ti)** — two distinct GPU boxes, one home lab.
+on the **asrock B550 (Ryzen 9 + RTX 5060 Ti)** — two distinct GPU boxes, one home lab.
 
 ---
 

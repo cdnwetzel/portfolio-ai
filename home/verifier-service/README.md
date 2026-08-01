@@ -5,7 +5,7 @@ scores whether every claim is supported by the chunks that were actually retriev
 stores a verdict, and exposes rolling metrics + a review queue. See the full spec:
 [`plans/verifier-faithfulness-layer.md`](../../plans/verifier-faithfulness-layer.md).
 
-**Target host:** the spare Ryzen 9 5950X / RTX 3060 Ti box — **not** the T5810 (its
+**Target host:** the spare Ryzen 9 5950X / RTX 5060 Ti box — **not** the T5810 (its
 A4500s are full serving vLLM). Mirrors the `home/rerank-service/` pattern.
 
 ## Files
@@ -20,8 +20,8 @@ A4500s are full serving vLLM). Mirrors the `home/rerank-service/` pattern.
 
 ## Setup
 ```bash
-# On the spare box: pull the judge model (Ollama, low-friction on one 8 GB card)
-ollama pull qwen2.5:7b-instruct-q4_K_M
+# On the spare box: pull the judge model (Ollama, low-friction on one 16 GB card)
+ollama pull qwen2.5:14b-instruct-q4_k_m
 
 # From the repo root (SSH access to the box):
 VERIFIER_HOST=chris@<RYZEN_LAN_IP> ./home/setup-verifier.sh

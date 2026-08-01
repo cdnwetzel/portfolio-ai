@@ -79,8 +79,9 @@ For each completed chat response it receives `(query, answer, chunks)` and:
   answer (e.g., a code-generation request) still gets irrelevant KB chunks from Qdrant's top-K and
   gets judged against them, scoring "unsupported" and flagging even though the question was never
   KB-answerable. Mitigated by a relevance gate (`cloud/verify_gate.py`) that skips verification when
-  the top retrieval score is below `VERIFY_MIN_SCORE` (default 0.0, gate disabled until calibrated) —
-  see `plans/write-the-full-plan-cached-grove.md` for the calibration method.
+  the top retrieval score is below `VERIFY_MIN_SCORE` — calibrated 2026-07-14 against the
+  golden set + off-topic probes and enabled at 0.002 (method and measured score
+  distributions are documented in the `cloud/verify_gate.py` docstring).
 - **Claim decomposition is imperfect** — compound/hedged sentences split unevenly; scores are
   approximate. Use trends + flags, not 3-decimal precision.
 - **Throughput-bounded.** One 8 GB GPU judges ~1 response at a time; under concurrent load,

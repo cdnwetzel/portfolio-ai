@@ -1,3 +1,5 @@
+import useSystemInfo from '../hooks/useSystemInfo'
+
 const GITHUB_URL   = 'https://github.com/cdnwetzel'
 const LINKEDIN_URL = 'https://linkedin.com/in/chris-wetzel'
 const EMAIL        = 'mailto:chris@cwetzel.com'
@@ -7,7 +9,7 @@ const STACK = [
   'Qwen 14B', 'vLLM', 'Qdrant', 'RAG', 'React', 'Gentoo', '2× RTX A4500', 'Verifier'
 ]
 
-const HOW_IT_WORKS = [
+const HOW_IT_WORKS = (verifierGpu) => [
   {
     icon: '🗂',
     title: 'Knowledge Base',
@@ -26,11 +28,15 @@ const HOW_IT_WORKS = [
   {
     icon: '✅',
     title: 'Faithfulness Verified',
-    desc: 'After each answer, an independent model on a second home server (Ryzen 9 / RTX 3060 Ti) scores whether every claim is grounded in the retrieved sources.',
+    desc: `After each answer, an independent model on a second home server (Ryzen 9 / ${verifierGpu}) scores whether every claim is grounded in the retrieved sources.`,
   },
 ]
 
 export default function Landing({ onStart }) {
+  // Live verifier GPU from /api/system-info; today's real value as fallback so
+  // the copy is never wrong (and never shows a placeholder) mid-load.
+  const info = useSystemInfo()
+  const verifierGpu = info?.verifier_gpu ?? 'RTX 5060 Ti'
   return (
     <div className="min-h-screen bg-primary flex flex-col">
       {/* Hero */}
@@ -78,7 +84,7 @@ export default function Landing({ onStart }) {
           How it works
         </p>
         <div className="max-w-3xl mx-auto grid sm:grid-cols-2 gap-6">
-          {HOW_IT_WORKS.map(({ icon, title, desc }) => (
+          {HOW_IT_WORKS(verifierGpu).map(({ icon, title, desc }) => (
             <div key={title} className="bg-secondary rounded-lg p-5">
               <div className="text-2xl mb-2">{icon}</div>
               <h3 className="font-semibold text-white mb-1">{title}</h3>
@@ -99,7 +105,7 @@ export default function Landing({ onStart }) {
         </div>
 
         <p className="text-center text-xs text-gray-700 mt-6">
-          Conversations are not stored or logged · Running on owned hardware · No cloud GPU
+          Chat history stays in your browser — nothing is stored or logged server-side · Running on owned hardware · No cloud GPU
         </p>
       </div>
     </div>

@@ -33,7 +33,7 @@ T5810 Home Server (Gentoo/OpenRC)
 └─ Knowledge base (indexed docs)
     ↓ the same tunnel forwards :8007 → asrock B550 over the home LAN
 asrock B550 (Gentoo/OpenRC)
-└─ Faithfulness verifier (port 8007) — Qwen2.5-7B via Ollama, RTX 3060 Ti
+└─ Faithfulness verifier (port 8007) — Qwen2.5-14B-Instruct via Ollama, RTX 5060 Ti
 ```
 
 **RAG pipeline:** query → alias-expand → embed (8005, bge-base 768-d) → Qdrant cosine top-15 →
@@ -84,7 +84,7 @@ same doc. **`RAG_MAX_PER_DOC` is now 2** (env-overridable), which gives 20/20 at
   documented" rather than inventing, and the UI shows the exact source chunks it used.
 - **Owned GPU inference** — vLLM on 2x A4500s with tensor parallelism. Zero cloud GPU cost.
 - **Edge/compute split** — cloud frontend for latency, home GPUs for compute, joined by one SSH tunnel.
-- **Out-of-band faithfulness verification** — an independent 7B judge on a separate machine grades
+- **Out-of-band faithfulness verification** — an independent 14B-Instruct judge on a separate machine grades
   whether an answer's claims are grounded, without ever blocking the response.
 - **Per-message telemetry** — time-to-first-token, decode throughput and total latency under each
   answer (metadata only, never content).
@@ -130,7 +130,7 @@ cwdotcom/
 | **Vector DB** | Qdrant | Dense cosine retrieval, top-15 candidates |
 | **Embeddings** | BAAI/bge-base-en-v1.5 (768-d) | Query/document → vector (CPU, port 8005) |
 | **Reranker** | bge-reranker-base | Cross-encoder precision, top-15 → top-5 (CPU, port 8006) |
-| **Faithfulness verifier** | Qwen2.5-7B via Ollama (RTX 3060 Ti) | Out-of-band claim grounding (asrock, port 8007) |
+| **Faithfulness verifier** | Qwen2.5-14B-Instruct via Ollama (RTX 5060 Ti) | Out-of-band claim grounding (asrock, port 8007) |
 | **Eval / guardrail** | graded eval + golden set; prompt-extraction guardrail | Regression gate + pre-LLM refusal |
 | **Frontend** | React + Vite + Tailwind | Built + rsynced to dev.cwetzel.com |
 | **Reverse proxy** | Apache | SSL termination, static serving, WSS proxy |
@@ -166,8 +166,9 @@ QDRANT_PORT=6333
 ```bash
 # Faithfulness verifier (OpenRC: verifier-service) + Ollama (OpenRC: ollama)
 VERIFIER_PORT=8007
-JUDGE_MODEL=qwen2.5:7b-instruct-q4_K_M   # on the 3060 Ti; independent of the 14B
-JUDGE_NUM_CTX=12288                      # ollama defaults to 4096 and truncates silently
+JUDGE_MODEL=qwen2.5:14b-instruct-q4_k_m  # on the RTX 5060 Ti; independent variant of the 14B
+JUDGE_NUM_CTX=16384                      # ollama defaults to 4096 and truncates silently
+OLLAMA_CONTEXT_LENGTH=16384              # lockstep with JUDGE_NUM_CTX (ollama-side window)
 JUDGE_KEEP_ALIVE=30m                     # ollama evicts idle models after 5m
 ```
 
@@ -197,6 +198,11 @@ cited from live code. The one that catches people: **never log query or response
 metadata only (`red-lines.md` #2). Where `.cursorrules` and `red-lines.md` disagree, red-lines wins.
 
 **The knowledge base must not contain real internal IP addresses.** Public hostnames are fine.
+
+**PII policy (red-lines.md #6):** the contact emails in the KB (`cwe@thepslawfirm.com`,
+`chris@cwetzel.com` in `RESUME.md`) are indexed **intentionally** — public contact info, the
+right vector for professional inquiries. Phone numbers, SSNs, private addresses and any third
+party's personal data are excluded. If PII is ever indexed, the red-line must document why.
 
 **Retrieval returns ≤2 chunks per source doc** (`RAG_MAX_PER_DOC`, env-overridable). A fact isolated
 in one chunk may still not surface for a differently-phrased query, so put a corrected fact in the

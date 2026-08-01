@@ -23,7 +23,7 @@ Machines don't drift silently because changes are committed. If I rebuild the T5
 |---|---|---|
 | **T5810** | Dell Precision, 2× RTX A4500 (NVLink), Xeon E5-2699v4 (22C/44T) | Active — AI inference (vLLM), primary GPU server |
 | **OptiPlex 3090 SFF** | Dell OptiPlex 3090 SFF, RTX A1000 (8GB) | Active — secondary GPU workstation |
-| **ASRock B550** (AMD build) | Ryzen 9 5950X (Zen 3, 16C/32T), 64GB DDR4-3200, RTX 3060 Ti, Intel AX200 WiFi, I225-V 2.5GbE | Active — heavy compile and parallel workloads; also hosts the portfolio chat's out-of-band faithfulness verifier (Qwen2.5-7B on CPU via Ollama, port 8007), reached from the VPS through the T5810 tunnel |
+| **ASRock B550** (AMD build) | Ryzen 9 5950X (Zen 3, 16C/32T), 64GB DDR4-3200, RTX 5060 Ti 16GB, Intel AX200 WiFi, I225-V 2.5GbE | Active — heavy compile and parallel workloads; also hosts the portfolio chat's out-of-band faithfulness verifier (Qwen2.5-14B on GPU via Ollama, port 8007), reached from the VPS through the T5810 tunnel |
 | **Dell XPS 15 9510** | Intel Core i7-11800H (Tiger Lake H), NVIDIA RTX 3050 Ti (Optimus/PRIME) | Active — dev laptop, hybrid GPU |
 | **Beelink MINI S** | Intel Jasper Lake / Tremont, no AVX/AVX2 | Active — always-on low-power tasks |
 | **Surface Pro 6** | Intel 8th-gen, Marvell 88W8897 WiFi, 2736×1824 PixelSense | Active — portable dev, HiDPI setup |

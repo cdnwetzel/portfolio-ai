@@ -10,6 +10,13 @@ WorkingDirectory=/opt/api-proxy
 # Runs cloud/api-proxy.py, deployed to /opt/api-proxy/main.py (see cloud/deploy.sh).
 ExecStart=/usr/bin/python3 -m uvicorn main:app --host 127.0.0.1 --port 8000 --log-level info
 
+# Landing-page SystemInfo panel, served at /api/system-info. Update KB_DOC_COUNT /
+# KB_CHUNK_COUNT after a KB rebuild (scripts/reindex_kb.sh). VERIFIER_GPU tracks the
+# asrock judge GPU (swapped RTX 3060 Ti -> RTX 5060 Ti, Tier 2, 2026-07-28).
+Environment=KB_DOC_COUNT=27
+Environment=KB_CHUNK_COUNT=62
+Environment=VERIFIER_GPU=RTX 5060 Ti
+
 Restart=always
 RestartSec=5
 StandardOutput=journal
