@@ -221,6 +221,21 @@ export function useChat() {
     try { localStorage.removeItem(STORAGE_KEY) } catch { /* storage unavailable */ }
   }, [])
 
+  const stopGeneration = useCallback(() => {
+    // CONNECTING counts too — the user can stop during 'searching', before the
+    // socket finishes opening. Close code 1000 marks it as a deliberate stop
+    // (onclose treats only 1006 as an error, so no false 'connection_lost').
+    const ws = wsRef.current
+    if (ws && ws.readyState !== WebSocket.CLOSING && ws.readyState !== WebSocket.CLOSED) {
+      try {
+        ws.close(1000, 'user_stopped')
+      } catch (e) {
+        log('error closing WebSocket', e)
+      }
+    }
+    setStatus('idle')
+  }, [])
+
   // Mobile Safari: detect WS drop when tab re-foregrounds
   useEffect(() => {
     const onVisibility = () => {
@@ -237,5 +252,5 @@ export function useChat() {
     return () => document.removeEventListener('visibilitychange', onVisibility)
   }, [status])
 
-  return { messages, status, suggestions, error, sendMessage, retry, clearChat }
+  return { messages, status, suggestions, error, sendMessage, retry, clearChat, stopGeneration }
 }

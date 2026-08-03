@@ -76,6 +76,7 @@ const CodeBlock = ({ className, children }) => {
 
 const SourceBlock = ({ sources }) => {
   const [open, setOpen] = useState(false)
+  const [hoveredIdx, setHoveredIdx] = useState(null)
   if (!sources || sources.length === 0) return null
   return (
     <div className="mt-2 pt-2 border-t border-gray-600/50">
@@ -89,13 +90,28 @@ const SourceBlock = ({ sources }) => {
       {open && (
         <ul className="mt-2 space-y-2 text-xs text-gray-400">
           {sources.map((s, i) => (
-            <li key={i} className="bg-gray-800/50 rounded p-2">
-              <div className="flex justify-between gap-2 text-gray-300">
-                <span className="font-medium truncate">{s.title || 'Unknown'}</span>
-                <span className="shrink-0 text-gray-500">{s.score !== undefined ? s.score.toFixed(3) : ''}</span>
+            <li
+              key={i}
+              className="bg-gray-800/50 hover:bg-gray-800 rounded p-2 transition cursor-default"
+              onMouseEnter={() => setHoveredIdx(i)}
+              onMouseLeave={() => setHoveredIdx(null)}
+            >
+              <div className="flex items-start justify-between gap-2">
+                <div className="flex-1">
+                  <div className="font-medium text-gray-200 truncate">{s.title || 'Unknown'}</div>
+                  {s.source && <div className="text-gray-500 text-[11px] truncate mt-0.5">{s.source}</div>}
+                </div>
+                {hoveredIdx === i && s.score !== undefined && (
+                  <div className="text-gray-500 text-[10px] shrink-0 whitespace-nowrap" title="Relevance score">
+                    {(s.score * 100).toFixed(0)}%
+                  </div>
+                )}
               </div>
-              {s.source && <div className="text-gray-500 truncate">{s.source}</div>}
-              {s.snippet && <div className="mt-1 text-gray-400 line-clamp-2">{s.snippet}</div>}
+              {s.snippet && (
+                <div className="mt-1.5 text-gray-400 line-clamp-2 text-[11px] leading-relaxed">
+                  "{s.snippet}"
+                </div>
+              )}
             </li>
           ))}
         </ul>

@@ -6,18 +6,32 @@ import SystemInfo from '../components/SystemInfo'
 import { useChat } from '../hooks/useChat'
 
 export default function Chat() {
-  const { messages, status, suggestions, error, sendMessage, retry, clearChat } = useChat()
+  const { messages, status, suggestions, error, sendMessage, retry, clearChat, stopGeneration } = useChat()
   const messagesEndRef = useRef(null)
+  const containerRef = useRef(null)
 
+  // Auto-scroll only if near bottom or newly generating
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages, status])
+    if (status === 'generating' || status === 'searching') {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+    }
+  }, [status])
+
+  // Scroll on new messages only if already near bottom
+  useEffect(() => {
+    if (!containerRef.current) return
+    const { scrollTop, scrollHeight, clientHeight } = containerRef.current
+    const isNearBottom = scrollHeight - scrollTop - clientHeight < 200
+    if (isNearBottom) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+    }
+  }, [messages])
 
   return (
     <div className="h-screen flex flex-col bg-primary">
       <Header />
 
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex-1 overflow-y-auto" ref={containerRef}>
         <div className="max-w-4xl mx-auto">
           <ChatWindow
             messages={messages}
@@ -37,6 +51,7 @@ export default function Chat() {
             onSend={sendMessage}
             status={status}
             placeholder="Ask about infrastructure, AI systems, startup work…"
+            onStop={stopGeneration}
           />
           <div className="flex items-center justify-center gap-3 mt-2">
             <p className="text-center text-xs text-gray-600">
