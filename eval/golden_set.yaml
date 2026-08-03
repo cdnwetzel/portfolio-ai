@@ -98,6 +98,30 @@
   kind: grounded
   expect_substrings: ["thepslawfirm.com", "chris@cwetzel.com", "email"]
 
+# --- grounded: voice/persona (Tier 4) -----------------------------------------
+# These questions assess whether the chat sounds like Chris — first-person perspective,
+# engineering conviction, direct communication style. The voice axis is subjective but
+# measurable by presence of first-person language, specific conviction, and lack of
+# corporate hedging.
+- q: "What's your philosophy on infrastructure design?"
+  kind: grounded
+  expect_substrings: ["own", "reliable", "control"]
+  # Voice test: expects "I believe...", "I prefer..." conviction language, first-person
+- q: "What was the hardest infrastructure problem you've solved?"
+  kind: grounded
+  expect_substrings: ["I", "learned", "solved"]
+  # Voice test: expects first-person experience narrative, not a tutorial
+- q: "Why do you run your own infrastructure?"
+  kind: grounded
+  expect_substrings: ["control", "own", "learn"]
+  # Voice test: expects reasons reflecting Chris's values, not generic cloud-vs-on-prem debate
+- q: "What would you do differently if you started over?"
+  kind: grounded
+  # Voice test: expects reflective, opinionated tone; should answer substantively from KB experience
+- q: "How does your approach to infrastructure differ from what's trendy?"
+  kind: grounded
+  # Voice test: expects direct comparison with conviction, not hedged "it depends" answer
+
 # --- refuse_ok: out-of-KB (either refuse or answer is fine) ----------------------
 - q: "What is Chris working on right now in 2026?"
   kind: refuse_ok
