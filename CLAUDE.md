@@ -11,8 +11,10 @@ Postgres, JWT/API keys, Stripe billing) was **cut**: its code is on the `legacy/
 branch and its design docs are in [`docs/archive/`](docs/archive/). Nothing in the running system
 has a database, an account, or a tenant — so if you find `tenant_id` anywhere, it's archaeology.
 
-**Status:** deployed and in production, on the psplan 5-Gate workflow — Gate 0 (charter, vision,
-red-lines, invariants) through Gate 5 (monitoring, closure) are complete for the current scope.
+**Status:** deployed and in production, 5-tier quality upgrade complete. All tiers live:
+1. Credibility gates (6/6 passed), 2. 14B judge on RTX 5060 Ti (9/9 fixtures), 3. GPU reranker
+(15.8x faster), 4. First-person voice & query routing, 5. UX polish (stop button, textarea, 
+auto-scroll, sources readability). Self-test gate passing. Health monitoring active.
 
 ## Core Architecture
 
@@ -22,18 +24,19 @@ User Browser
 cwetzel.com Cloud Server (Ubuntu VPS)
 ├─ Apache (SSL termination, reverse proxy, WSS)
 ├─ FastAPI API proxy (port 8000, systemd: api-proxy.service)
-└─ Static React build (/var/www/dev.cwetzel.com/)
+└─ Static React build (/var/www/dev.cwetzel.com/) — Tier 5 UX: stop button, textarea, auto-scroll
     ↓ [SSH tunnel — portfolio-ai-tunnel.service, initiated by the VPS]
 T5810 Home Server (Gentoo/OpenRC)
 ├─ vLLM (port 8004, LAN-only) — Qwen2.5-Coder-14B-Pscode, BF16, 16K context
 │  └─ 2x RTX A4500, NVLink, tensor parallel
-├─ Qdrant (port 6333) — dense 768-d cosine
-├─ Embedding service (port 8005) — BAAI/bge-base-en-v1.5, CPU
-├─ Reranker service (port 8006) — bge-reranker-base, CPU
-└─ Knowledge base (indexed docs)
-    ↓ the same tunnel forwards :8007 → asrock B550 over the home LAN
+├─ Qdrant (port 6333) — dense 768-d cosine, 62 docs indexed
+└─ Embedding service (port 8005) — BAAI/bge-base-en-v1.5, CPU
+    ↓ tunnel also forwards :8016 → asrock:8006 (GPU reranker) and :8007 → asrock (verifier)
 asrock B550 (Gentoo/OpenRC)
-└─ Faithfulness verifier (port 8007) — Qwen2.5-14B-Instruct via Ollama, RTX 5060 Ti
+├─ Reranker service (port 8006) — bge-reranker-base on GPU, 15.8x faster (259ms vs 4077ms CPU)
+│  └─ RTX 5060 Ti, 1.3GB VRAM, coexists with verifier
+└─ Faithfulness verifier (port 8007) — Qwen2.5-14B-Instruct via Ollama (independent of Coder model)
+   └─ RTX 5060 Ti, 16GB total (headroom: 14.7GB after both services)
 ```
 
 **RAG pipeline:** query → alias-expand → embed (8005, bge-base 768-d) → Qdrant cosine top-15 →
@@ -129,7 +132,7 @@ cwdotcom/
 | **API framework** | FastAPI + Uvicorn | Async Python proxy (cloud server) |
 | **Vector DB** | Qdrant | Dense cosine retrieval, top-15 candidates |
 | **Embeddings** | BAAI/bge-base-en-v1.5 (768-d) | Query/document → vector (CPU, port 8005) |
-| **Reranker** | bge-reranker-base | Cross-encoder precision, top-15 → top-5 (CPU, port 8006) |
+| **Reranker** | bge-reranker-base | Cross-encoder precision, top-15 → top-5 (GPU RTX 5060 Ti on asrock, 15.8x faster) |
 | **Faithfulness verifier** | Qwen2.5-14B-Instruct via Ollama (RTX 5060 Ti) | Out-of-band claim grounding (asrock, port 8007) |
 | **Eval / guardrail** | graded eval + golden set; prompt-extraction guardrail | Regression gate + pre-LLM refusal |
 | **Frontend** | React + Vite + Tailwind | Built + rsynced to dev.cwetzel.com |
@@ -158,28 +161,35 @@ PORT=8004
 TENSOR_PARALLEL_SIZE=2
 GPU_MEMORY_UTILIZATION=0.93      # 0.95 OOMs; 760 MiB free/A4500 — no room for spec-dec draft
 
-# Qdrant (OpenRC), embed-service 8005 (bge-base, CPU), rerank-service 8006 (bge-reranker, CPU)
+# Qdrant (OpenRC), embed-service 8005 (bge-base, CPU)
 QDRANT_PORT=6333
 ```
 
 **On the asrock B550 (Gentoo/OpenRC):**
 ```bash
-# Faithfulness verifier (OpenRC: verifier-service) + Ollama (OpenRC: ollama)
+# Reranker (Tier 3: moved from T5810 CPU → RTX 5060 Ti GPU, 15.8x faster)
+RERANK_DEVICE=cuda
+RERANK_BIND=10.0.1.115            # LAN IP; tunneled to VPS as port 8016
+RERANK_PORT=8006
+
+# Faithfulness verifier (Tier 2: 14B-Instruct judge, RTX 5060 Ti)
 VERIFIER_PORT=8007
-JUDGE_MODEL=qwen2.5:14b-instruct-q4_k_m  # on the RTX 5060 Ti; independent variant of the 14B
+JUDGE_MODEL=qwen2.5:14b-instruct-q4_k_m  # independent variant of the 14B-Coder (echo-bias mitigation)
 JUDGE_NUM_CTX=16384                      # ollama defaults to 4096 and truncates silently
 OLLAMA_CONTEXT_LENGTH=16384              # lockstep with JUDGE_NUM_CTX (ollama-side window)
 JUDGE_KEEP_ALIVE=30m                     # ollama evicts idle models after 5m
+
+# GPU VRAM allocation: Reranker ~1.3GB + Judge ~11.7GB = ~13GB / 16GB (87% util, 3GB headroom)
 ```
 
 **On the cloud server (cwetzel.com):**
 ```bash
 # API proxy (systemd: api-proxy.service; Apache terminates SSL/WSS in front)
-VLLM_URL=http://127.0.0.1:8004      # via SSH tunnel
-QDRANT_URL=http://127.0.0.1:6333    # via SSH tunnel
-EMBED_URL=http://127.0.0.1:8005     # embed-service (tunneled to T5810)
-RERANK_URL=http://127.0.0.1:8006    # rerank-service (tunneled to T5810)
-VERIFIER_URL=http://127.0.0.1:8007  # verifier (tunnel → T5810 → asrock); set via systemd drop-in
+VLLM_URL=http://127.0.0.1:8004      # via SSH tunnel to T5810
+QDRANT_URL=http://127.0.0.1:6333    # via SSH tunnel to T5810
+EMBED_URL=http://127.0.0.1:8005     # via SSH tunnel to T5810
+RERANK_URL=http://127.0.0.1:8016    # via SSH tunnel (T5810 forwards 8016 → asrock:8006, GPU)
+VERIFIER_URL=http://127.0.0.1:8007  # via SSH tunnel (T5810 forwards 8007 → asrock:8007)
 VERIFY_MIN_SCORE=0.002              # skip the verifier when top rerank score < this (off-topic gate,
                                     # verify_gate.py). Calibrated 2026-07-14: off-topic clusters at ~0,
                                     # on-topic ≥0.0046. Code default 0.0 (disabled); enabled via env here.
@@ -187,9 +197,9 @@ HYBRID_SEARCH=0                     # hybrid dense+BM25 built but OFF (lost its 
 ```
 
 **SSH tunnel (single connection, VPS → T5810, with the T5810 as jump host to asrock):**
-Forwards 8004 (vLLM), 8005 (embed), 8006 (rerank) and 6333 (Qdrant) — all `127.0.0.1` on the
-T5810 — plus **8007 → asrock:8007** (verifier, routed by the T5810 over the LAN). Managed by
-`portfolio-ai-tunnel.service` (systemd on the VPS).
+Forwards to T5810 (8004 vLLM, 8005 embed, 6333 Qdrant) plus **8016 → asrock:8006** (GPU reranker, Tier 3, 15.8x faster) and **8007 → asrock:8007** (verifier, Tier 2) routed over home LAN. Managed by
+`portfolio-ai-tunnel.service` (systemd on the VPS). Single persistent connection; if down, 
+degraded mode: reranker fails open to cosine top-5, verifier is fully fail-open.
 
 ## Working On This Repo
 
@@ -261,6 +271,9 @@ worth remembering:
   (Nginx → Apache), rewrote `requirements.txt` to what the code imports (it had listed Stripe,
   SQLAlchemy, Alembic, Redis), archived the SaaS design docs, and reconciled `.cursorrules` with
   `red-lines.md` — it had instructed agents to log query text.
+- **2026-08-03** — Updated architecture after Tier 3 (GPU reranker moved T5810 CPU → asrock RTX 5060 Ti,
+  15.8x faster at 259ms) and Tier 5 (UX polish: stop button, textarea, auto-scroll, sources readability).
+  All 5 tiers live. Self-test gate passing. Health monitoring active with baselines established.
 
 **When you change the system, change the docs in the same commit.** A wrong doc is worse than a
 missing one: it is confidently wrong, and it survives long after the person who knew better moved on.
