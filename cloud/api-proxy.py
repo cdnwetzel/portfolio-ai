@@ -21,6 +21,7 @@ from context_manager import (
     prompt_too_long,
     fit_context_docs,
     count_tokens,
+    estimate_answer_length,
     MAX_PROMPT_CHARS,
     MAX_CONTEXT_TOKENS,
 )
@@ -543,10 +544,11 @@ async def websocket_chat(websocket: WebSocket):
                 continue
 
             # Sliding window: drop oldest user/assistant pairs when history is too large
+            # Tier 4: preserve recent turns for multi-turn coherence ("As I mentioned...")
             before = len(messages)
-            messages = compact_history_by_tokens(messages)
+            messages = compact_history_by_tokens(messages, keep_recent=4)
             if len(messages) < before:
-                logger.info(f"History compacted: {before} → {len(messages)} messages")
+                logger.info(f"History compacted: {before} → {len(messages)} messages (kept recent 4 turns)")
 
             _t_retr = time.perf_counter()
             context_docs, evidence_docs = await search_knowledge_base(user_query)
@@ -624,6 +626,11 @@ async def websocket_chat(websocket: WebSocket):
                     logger.warning(f"Headroom compress failed ({e!r}); falling back to uncompressed")
 
             body["messages"] = messages
+
+            # Tier 4: Adaptive answer length based on query complexity
+            adaptive_max_tokens = estimate_answer_length(user_query)
+            body["max_tokens"] = adaptive_max_tokens
+            logger.info(f"Adaptive max_tokens: {adaptive_max_tokens} for {len(user_query)}-char query")
 
             # Send sources to frontend for citation rendering.
             sources = [

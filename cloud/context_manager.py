@@ -82,19 +82,39 @@ def count_tokens(text: str) -> int:
     return max(1, len(text) // 4)
 
 
-def compact_history_by_tokens(messages: list, max_tokens: Optional[int] = None) -> list:
+def compact_history_by_tokens(messages: list, max_tokens: Optional[int] = None, keep_recent: int = 4) -> list:
     """Drop oldest user/assistant pairs until history fits within a token budget.
 
     Preserves the system message at index 0 if present.
+    Also preserves at least `keep_recent` recent user/assistant turns for multi-turn coherence.
+
+    Args:
+        messages: list of message dicts with 'role' and 'content'
+        max_tokens: token budget (default: 1/3 of MAX_CONTEXT_TOKENS)
+        keep_recent: minimum number of recent turns to preserve (default: 4)
     """
     if max_tokens is None:
         max_tokens = MAX_CONTEXT_TOKENS // 3
 
     messages = list(messages)
     total = sum(count_tokens(m.get("content", "")) for m in messages)
-    while total > max_tokens and len(messages) > 2:
+
+    # Determine how many message pairs to preserve at the end
+    # (system message + keep_recent * 2 for user/assistant pairs, minimally)
+    min_keep_idx = 0
+    if messages and messages[0].get("role") == "system":
+        min_keep_idx = 1
+
+    # Calculate the minimum number of messages to keep (system + recent turns)
+    # Each recent turn is typically 2 messages (user + assistant)
+    recent_keep_count = min(keep_recent * 2, len(messages) - min_keep_idx)
+    min_keep_idx = max(1 if messages and messages[0].get("role") == "system" else 0,
+                       len(messages) - recent_keep_count)
+
+    # Drop oldest messages until we fit the budget, but never drop below min_keep_idx
+    while total > max_tokens and len(messages) > min_keep_idx + 1:
         start = 1 if messages[0].get("role") == "system" else 0
-        if start + 1 >= len(messages):
+        if start >= len(messages) - 1:
             break
         removed = messages.pop(start)
         total -= count_tokens(removed.get("content", ""))
@@ -174,3 +194,28 @@ def fit_context_docs(
             break
 
     return selected
+
+
+def estimate_answer_length(query: str) -> int:
+    """Estimate appropriate max_tokens for an answer based on query length/complexity.
+
+    Short questions get short answers to avoid verbose responses.
+    Long questions get more tokens for thorough explanation.
+
+    Args:
+        query: the user's question
+
+    Returns:
+        Recommended max_tokens for generation
+    """
+    query_words = len(query.split())
+
+    if query_words <= 5:
+        # Very short question: "What GPU?" -> brief answer (256 tokens ~100-150 words)
+        return 256
+    elif query_words <= 15:
+        # Medium question: "Tell me about the AVD migration" -> substantial answer (1024 tokens ~400-500 words)
+        return 1024
+    else:
+        # Long/complex question -> full answer with details (2048 tokens ~800-1000 words)
+        return 2048
