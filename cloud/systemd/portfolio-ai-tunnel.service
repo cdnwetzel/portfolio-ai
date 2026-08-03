@@ -30,7 +30,7 @@ User=root
 # has the literal; adopting this version requires adding VERIFIER_HOST to /etc/default FIRST —
 # an empty value yields `-L 127.0.0.1:8007::8007`, and ssh will refuse to start the tunnel.
 EnvironmentFile=/etc/default/portfolio-ai-tunnel
-ExecStart=/usr/bin/ssh -N -o StrictHostKeyChecking=accept-new -o ServerAliveInterval=60 -o ServerAliveCountMax=3 -L 127.0.0.1:8001:127.0.0.1:8001 -L 127.0.0.1:8004:127.0.0.1:8004 -L 127.0.0.1:8005:127.0.0.1:8005 -L 127.0.0.1:8006:127.0.0.1:8006 -L 127.0.0.1:6333:127.0.0.1:6333 -L 127.0.0.1:8788:127.0.0.1:8788 -L 127.0.0.1:8007:${VERIFIER_HOST}:8007 ${T5810_USER}@${T5810_HOST}
+ExecStart=/usr/bin/ssh -N -o StrictHostKeyChecking=accept-new -o ServerAliveInterval=60 -o ServerAliveCountMax=3 -L 127.0.0.1:8001:127.0.0.1:8001 -L 127.0.0.1:8004:127.0.0.1:8004 -L 127.0.0.1:8005:127.0.0.1:8005 -L 127.0.0.1:8006:127.0.0.1:8006 -L 127.0.0.1:6333:127.0.0.1:6333 -L 127.0.0.1:8788:127.0.0.1:8788 -L 127.0.0.1:8007:${VERIFIER_HOST}:8007 -L 127.0.0.1:8016:${RERANK_HOST}:8006 ${T5810_USER}@${T5810_HOST}
 Restart=always
 RestartSec=10
 StandardOutput=journal

@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 VLLM_URL   = os.environ.get("VLLM_URL", "http://127.0.0.1:8004")
 QDRANT_URL = "http://127.0.0.1:6333"
 EMBED_URL  = "http://127.0.0.1:8005"
-RERANK_URL = "http://127.0.0.1:8006"
+RERANK_URL = os.environ.get("RERANK_URL", "http://127.0.0.1:8016")  # Tier 3: GPU reranker on asrock via tunnel 8016
 # Optional out-of-band faithfulness verifier (verifier-faithfulness-layer.md §7).
 # Default empty = disabled (no behavior change). When set (e.g. to the tunneled
 # spare-box judge at http://127.0.0.1:8007), the proxy fires a fire-and-forget
