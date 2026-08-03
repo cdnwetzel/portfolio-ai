@@ -1,6 +1,6 @@
 #!/home/chris/miniforge3/bin/python3
 """
-Reranker service — CPU cross-encoder for RAG precision.
+Reranker service — cross-encoder for RAG precision.
 
 Sits between Qdrant retrieval and the LLM in the RAG pipeline. Qdrant's
 bi-encoder cosine (bge-base-en-v1.5, 768-d) is fast but imprecise — good enough
@@ -8,11 +8,20 @@ to get the right chunk into the top-15, not precise enough to pick the best 5.
 This cross-encoder re-scores (query, chunk) pairs with full cross-attention
 and returns the best top_k.
 
-Runs CPU-only (device="cpu") ON PURPOSE: the GPUs are saturated by vLLM, and
-the T5810 has 256GB idle DDR4. Reranking the 15 candidates costs ~3s on CPU —
-the dominant term in the retrieval step, still small next to generation.
+Placement history: CPU-only on the T5810 (GPUs saturated by vLLM; ~3s per
+query — the dominant retrieval term). Tier 3 moves it to the asrock's RTX
+5060 Ti (~50-100ms per query) now that the verifier box has GPU headroom.
+
+Env config (defaults preserve the original T5810 behavior exactly):
+  RERANK_DEVICE   default "cpu". Set "cuda" on the asrock (Tier 3).
+  RERANK_BIND     default 127.0.0.1. On the asrock, set the box's LAN IP so the
+                  T5810's tunnel -L forward can reach it (mirrors VERIFIER_BIND).
+  RERANK_PORT     default 8006.
+
 Mirrors the embed-service pattern (port 8005).
 """
+import os
+
 from fastapi import FastAPI
 from sentence_transformers import CrossEncoder
 import uvicorn
@@ -21,12 +30,18 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+RERANK_DEVICE = os.environ.get("RERANK_DEVICE", "cpu")
+RERANK_BIND = os.environ.get("RERANK_BIND", "127.0.0.1")
+RERANK_PORT = int(os.environ.get("RERANK_PORT", "8006"))
+
 app = FastAPI(title="Reranker Service")
 
-# CPU-pinned — must NOT compete with vLLM for VRAM. bge-reranker-base (278M).
 # max_length=512 is the model's position-embedding limit; ~400-word chunks get
 # their tail truncated, acceptable for relevance scoring (head carries signal).
-model = CrossEncoder("BAAI/bge-reranker-base", max_length=512, device="cpu")
+# Device is env-driven: "cpu" on the T5810 (vLLM owns the VRAM), "cuda" on the
+# asrock (Tier 3) — same model, same scores, different hardware.
+model = CrossEncoder("BAAI/bge-reranker-base", max_length=512, device=RERANK_DEVICE)
+logger.info(f"Reranker loaded on device={RERANK_DEVICE}")
 
 
 @app.post("/rerank")
@@ -52,4 +67,4 @@ async def health():
 
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="127.0.0.1", port=8006, log_level="info")
+    uvicorn.run(app, host=RERANK_BIND, port=RERANK_PORT, log_level="info")

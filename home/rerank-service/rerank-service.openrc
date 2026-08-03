@@ -1,19 +1,35 @@
 #!/sbin/openrc-run
+# Reranker service — bge-reranker-base cross-encoder (RAG precision), port 8006.
 # Install to /etc/init.d/rerank-service (root-owned, 0755)
 # Enable: rc-update add rerank-service default
-# Mirrors embed-service (port 8005); CPU cross-encoder reranker on port 8006.
+#
+# Two deployments share this unit:
+#   T5810 (original):  CPU, 127.0.0.1 — vLLM owns the GPUs there.
+#   asrock (Tier 3):   GPU (RERANK_DEVICE=cuda), bound to the LAN IP so the
+#                      T5810's tunnel -L forward reaches it (mirrors verifier).
+# Per-machine config lives in /etc/conf.d/rerank-service, e.g. on the asrock:
+#   RERANK_DEVICE=cuda
+#   RERANK_BIND=<asrock-lan-ip>
+#   RERANK_PORT=8006
+#   RERANK_PYTHON=/home/chris/rerank-venv/bin/python3   # GPU venv (torch cu128)
+#   RERANK_HOME=/home/chris/rerank-service              # where rerank.py lives
 
 name="Reranker Service"
-description="bge-reranker-base CPU cross-encoder FastAPI server (RAG precision)"
+description="bge-reranker-base cross-encoder FastAPI server (RAG precision)"
 
 supervisor="supervise-daemon"
-command="/home/chris/miniforge3/bin/python3"
-command_args="/opt/rerank-service/rerank.py"
+command="${RERANK_PYTHON:-/home/chris/miniforge3/bin/python3}"
+command_args="${RERANK_HOME:-/opt/rerank-service}/rerank.py"
 pidfile="/run/rerank-service.pid"
 respawn_delay=5
 respawn_max=5
 respawn_period=30
 command_user="chris:chris"
+
+: "${RERANK_DEVICE:=cpu}"
+: "${RERANK_BIND:=127.0.0.1}"
+: "${RERANK_PORT:=8006}"
+export RERANK_DEVICE RERANK_BIND RERANK_PORT
 
 depend() {
     need localmount
@@ -21,6 +37,5 @@ depend() {
 }
 
 start_pre() {
-    mkdir -p /opt/rerank-service
-    chown -R chris:chris /opt/rerank-service
+    checkpath -d -m 0755 -o chris:chris "${RERANK_HOME:-/opt/rerank-service}"
 }
