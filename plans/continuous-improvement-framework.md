@@ -129,19 +129,26 @@ scripts/monthly-eval.sh
 
 ## Judge Flagged-Rate: Decision Tree
 
-**Current baseline (n=10, cold loads):** 0.50 (above watch line 0.35)
+**IMPORTANT: Current n=10 baseline (0.50) is NOT REAL.** 
+- Small sample size (n=10)
+- Collected after 4 idle days (cold loads inflate latency, not a steady-state signal)
+- Do NOT make decisions against this number
+
+**Real baseline TBD:** Will establish at n≥50 real traffic (mid-week 2026-08-10)
 
 ```
-Is flagged_rate > 0.35 at n≥50?
+Is flagged_rate > 0.35 at n≥50 real traffic?
 ├─ YES (persistent over-flagging)
-│  ├─ Check: Is the judge correct? (spot-check 10 flagged answers)
-│  ├─ YES, judge is right, but harsh
-│  │  └─ Action: Lower VERIFY_MIN_SCORE to reduce flag volume
+│  ├─ Check: Is the judge correct? (review 10 flagged answers via verdicts.db)
+│  ├─ YES, judge is right, but too strict
+│  │  └─ Action: RAISE VERIFY_MIN_SCORE (gates when verification runs; lower = more flags)
 │  └─ NO, judge is wrong
-│     └─ Action: Adjust judge system prompt (less strict criteria)
-└─ NO (noise at n=10, now resolved at n≥50)
+│     └─ Action: Adjust judge system prompt or add grounding examples
+└─ NO (under 0.35, converged to acceptable range)
    └─ Action: Monitor, continue baseline
 ```
+
+**NOTE:** VERIFY_MIN_SCORE gates whether verification runs at all. Lowering it verifies MORE queries → MORE flags. To reduce flag volume, RAISE the threshold.
 
 ---
 
@@ -183,20 +190,22 @@ Is flagged_rate > 0.35 at n≥50?
 ## Success Criteria
 
 ✅ **System is continuously learning if:**
-- Judge flagged-rate converges to 0.15–0.35 range (acceptable)
-- Latency stays within ±10% of baseline
+- Judge flagged-rate converges to 0.15–0.35 range (acceptable; TBD at n≥50)
+- Latency stays within ±10% of Tier 3 baseline (5.6s TTFB, 259ms reranker)
 - Off-topic rate stays <15%
 - Voice/persona remains consistent (first-person, opinionated)
 - KB stays fresh (no docs >6 months old)
-- 20/20 golden set retrieval maintained
+- Graded eval mean ≥3.5 (Tier 4 baseline: 4.48)
+- Retrieval recall ≥20/20 on golden set (Tier 1 baseline)
 
 ❌ **System is degrading if:**
-- Flagged-rate trends >0.40 consistently
-- Latency drifts >20% worse
+- Flagged-rate trends >0.40 consistently at n≥50
+- Latency drifts >20% worse than baselines
 - Off-topic rate >25%
 - Voice becomes generic or hedged
 - KB has docs 12+ months old
-- Golden set drops below 18/20
+- Graded eval mean drops below 3.5
+- Retrieval recall drops below 19/20
 
 ---
 
