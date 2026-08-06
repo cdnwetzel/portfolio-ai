@@ -1,8 +1,9 @@
 # Deployment Guide: Portfolio AI Chat
 
-**Status:** Deployed, production  
-**Current as of:** 2026-07-24  
-**Endpoint:** https://dev.cwetzel.com
+**Status:** Deployed, production (Tiers 1–7 live)  
+**Current as of:** 2026-08-06  
+**Endpoint:** https://dev.cwetzel.com  
+**System Info:** https://dev.cwetzel.com/api/system-info (returns deployed_sha + prompt_version as of Tier 7.2)
 
 ---
 
