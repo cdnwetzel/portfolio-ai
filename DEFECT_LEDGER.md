@@ -78,7 +78,28 @@
 
 ## CLOSED DEFECTS
 
-*None yet. This ledger is new (2026-08-05).*
+### 1. SAP Business One: Generation Hallucination — CLOSED 2026-08-06
+**Resolution:** Fixed incidentally by the Tier 4 persona prompt rewrite (commit 5586ad5).
+**Verification (Kimi, 2026-08-06):** Two consecutive live queries returned grounded answers
+(Produmex WMS, multi-region specifics from the case study); zero rule-#6 speculation markers
+("likely", "could include", "not provided"). Deterministic pre-Tier-4, absent post-Tier-4.
+**Lesson:** the defect sat unowned for 9 days (T2.3 → convergence doc) — the ledger exists
+so that doesn't happen again.
+
+### 5. Verifier Wiring Outage (VERIFIER_HOST + VERIFIER_URL) — CLOSED 2026-08-06
+**Severity:** HIGH while live — the verifier was dark ~4 days with zero verdicts recorded
+(last row 2026-08-01 18:00), and nothing alerted.
+**Root cause (two breaks, both from runbook-era redeploys):**
+1. `/etc/default/portfolio-ai-tunnel` (VPS) had no `VERIFIER_HOST` — the tunnel unit's
+   `-L 127.0.0.1:8007:${VERIFIER_HOST}:8007` expanded empty; 8007 listened but dead-ended.
+2. No systemd drop-in set `VERIFIER_URL` for api-proxy — `_fire_verify` no-ops without it.
+**Fix (Kimi, 2026-08-06):** added `VERIFIER_HOST=10.0.1.115` (env file backed up first),
+restarted tunnel — 8007 health OK; added `api-proxy.service.d/verifier.conf` with
+`VERIFIER_URL=http://127.0.0.1:8007`, restarted proxy. E2E proof: live chat → verdict row
+with request_id landed in verdicts.db (faithfulness 1.0, latency 22.2s).
+**Lesson:** redeploys must preserve out-of-repo config. The tunnel env file and the proxy
+drop-ins are invisible to git — DEPLOYMENT.md now lists them as required state to verify.
+Also: "zero verdicts in N days" should itself be an alert condition (Tier 7 candidate).
 
 ---
 

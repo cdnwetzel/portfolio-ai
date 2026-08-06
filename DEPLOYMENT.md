@@ -102,6 +102,15 @@ CI deliberately does not deploy (`.github/workflows/ci.yml` runs offline tests o
 guards that list: adding an import to `api-proxy.py` without adding the file to
 `deploy.sh` fails CI — that exact miss once shipped a crash-looping proxy.
 
+**Out-of-repo config that deploys must preserve (learned 2026-08-06, see DEFECT_LEDGER #5):**
+- `/etc/default/portfolio-ai-tunnel` — `T5810_USER`, `T5810_HOST`, `VERIFIER_HOST`,
+  `RERANK_HOST`. A missing `*_HOST` value makes that tunnel forward listen-but-dead-end.
+- `/etc/systemd/system/api-proxy.service.d/*.conf` — drop-ins carrying `VERIFIER_URL`,
+  `VERIFY_MIN_SCORE`, `COMPRESS_*`. Without `VERIFIER_URL` the verifier silently no-ops:
+  chat works, zero verdicts, nothing errors.
+After any proxy/tunnel redeploy, verify: `curl -s http://127.0.0.1:8007/health` on the VPS
+(answers with the judge model name) and a verdict row lands in verdicts.db after a chat.
+
 ---
 
 ## Startup Sequence

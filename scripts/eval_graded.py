@@ -225,8 +225,13 @@ def build_evidence(chunks: list, budget_chars: int) -> str:
 
 
 def judge_scores(item: dict, result: dict, chunks: list, judge_url: str, judge_model: str,
-                 evidence_chars: int = 6000, timeout: float = 60.0) -> dict:
-    """Call an independent OpenAI-compatible judge endpoint. Returns scores or an error marker."""
+                 evidence_chars: int = 6000, timeout: float = 240.0) -> dict:
+    """Call an independent OpenAI-compatible judge endpoint. Returns scores or an error marker.
+
+    Timeout default is 240s, not 60s: when the judge model shares the GPU with the verifier's
+    production model (or was evicted after idle), a call pays a cold model load (~30-60s) or
+    an eviction+reload on top of 10-20s of inference. At 60s those calls all "time out" and
+    silently fall back to programmatic scoring — 23/35 rows in the 2026-07-27 14B eval run."""
     src_text = build_evidence(chunks, evidence_chars)
     user = JUDGE_TEMPLATE.format(question=item["q"], sources=src_text,
                                  answer=(result.get("answer") or "")[:4000])
@@ -256,7 +261,8 @@ def judge_scores(item: dict, result: dict, chunks: list, judge_url: str, judge_m
                 "judge": judge_model, "judge_error": str(e)[:120]}
 
 
-async def run(url: str, items, judge_url, judge_model, retrieve_url="", evidence_chars=6000):
+async def run(url: str, items, judge_url, judge_model, retrieve_url="", evidence_chars=6000,
+              judge_timeout=240.0):
     rows = []
     for i, item in enumerate(items, 1):
         result = await ask(url, item["q"])
@@ -269,7 +275,7 @@ async def run(url: str, items, judge_url, judge_model, retrieve_url="", evidence
                 retrieve_error = str(e)[:120]
         if judge_url:
             scores = judge_scores(item, result, chunks, judge_url, judge_model,
-                                  evidence_chars=evidence_chars)
+                                  evidence_chars=evidence_chars, timeout=judge_timeout)
             if retrieve_error:
                 # Never grade against snippets silently — that is the bug this fetch exists to fix.
                 scores["retrieve_error"] = retrieve_error
@@ -361,6 +367,11 @@ def main():
     ap.add_argument("--judge-evidence-chars", type=int, default=6000,
                     help="total chars of chunk text shown to the judge, spent best-ranked first "
                          "(keeps the prompt inside Ollama's default 4096-token window)")
+    ap.add_argument("--judge-timeout", type=float, default=240.0,
+                    help="per-call judge timeout (seconds). Default 240 covers a cold model "
+                         "load / GPU eviction-reload on top of 10-20s inference; the old 60s "
+                         "default silently fell back to programmatic scoring on 23/35 rows "
+                         "in the 2026-07-27 14B eval run")
     ap.add_argument("--out", default="", help="write JSONL records here")
     ap.add_argument("--limit", type=int, default=0, help="only run first N items (smoke)")
     ap.add_argument("--from-results", help="re-score a saved JSONL offline (recompute scores "
@@ -391,7 +402,8 @@ def main():
     mode = f"judge={args.judge_model}" if args.judge_url else "programmatic-only"
     print(f"Graded eval against {args.url}  ({len(items)} items, {mode})\n")
     rows = asyncio.run(run(args.url, items, args.judge_url, args.judge_model,
-                           retrieve_url=args.retrieve_url, evidence_chars=args.judge_evidence_chars))
+                           retrieve_url=args.retrieve_url, evidence_chars=args.judge_evidence_chars,
+                           judge_timeout=args.judge_timeout))
 
     if args.out:
         Path(args.out).parent.mkdir(parents=True, exist_ok=True)
