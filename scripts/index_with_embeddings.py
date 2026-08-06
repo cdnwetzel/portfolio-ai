@@ -104,24 +104,31 @@ def load_documents(kb_path: str) -> List[Dict]:
     docs = []
     kb_dir = Path(kb_path)
 
-    # Load posts from metadata
-    metadata_file = kb_dir / "POSTS_METADATA.json"
-    if metadata_file.exists():
-        with open(metadata_file) as f:
-            posts = json.load(f).get('posts', [])
-            for post in posts[:10]:  # Top 10 posts by impressions
-                post_file = kb_dir / post.get('file', '')
-                if post_file.exists():
-                    with open(post_file) as pf:
-                        content = pf.read()
-                        docs.append({
-                            "id": f"post_{post['rank']}",
-                            "title": post.get('title', 'Untitled'),
-                            "content": content,
-                            "source": "linkedin_post",
-                            "impressions": post.get('impressions', 0),
-                        })
-                        logger.info(f"✓ Loaded post: {post.get('title', 'Untitled')} ({post.get('impressions', 0)} impressions)")
+    # Load posts from the posts/ directory — every file, not just the metadata's
+    # top-10. POSTS_METADATA.json still supplies title + impressions where it has an
+    # entry (matched by file path); files without metadata load with a filename-derived
+    # title. (Previously only metadata's first 10 loaded and posts/ was skipped entirely,
+    # so any post without a metadata entry was never indexed.)
+    posts_dir = kb_dir / "posts"
+    if posts_dir.exists():
+        meta_by_file = {}
+        metadata_file = kb_dir / "POSTS_METADATA.json"
+        if metadata_file.exists():
+            with open(metadata_file) as f:
+                for post in json.load(f).get('posts', []):
+                    meta_by_file[post.get('file', '')] = post
+        for post_file in sorted(posts_dir.glob("*.md")):
+            meta = meta_by_file.get(f"posts/{post_file.name}", {})
+            with open(post_file) as pf:
+                content = pf.read()
+                docs.append({
+                    "id": f"post_{meta.get('rank', post_file.stem)}",
+                    "title": meta.get('title') or post_file.stem.replace("_", " ").title(),
+                    "content": content,
+                    "source": "linkedin_post",
+                    "impressions": meta.get('impressions', 0),
+                })
+            logger.info(f"✓ Loaded post: {post_file.stem} ({meta.get('impressions', 0)} impressions)")
 
     # Load case studies
     case_studies_dir = kb_dir / "case_studies"
@@ -140,7 +147,7 @@ def load_documents(kb_path: str) -> List[Dict]:
 
     # Load infrastructure docs (and any other subdirectories of .md files)
     for subdir in sorted(kb_dir.iterdir()):
-        if not subdir.is_dir() or subdir.name in ("case_studies", "posts", "pxx_docs"):
+        if not subdir.is_dir() or subdir.name in ("case_studies", "posts", "pxx_docs", "posts_drafts"):
             continue
         for md_file in sorted(subdir.glob("*.md")):
             with open(md_file) as f:

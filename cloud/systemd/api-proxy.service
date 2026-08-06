@@ -13,8 +13,8 @@ ExecStart=/usr/bin/python3 -m uvicorn main:app --host 127.0.0.1 --port 8000 --lo
 # Landing-page SystemInfo panel, served at /api/system-info. Update KB_DOC_COUNT /
 # KB_CHUNK_COUNT after a KB rebuild (scripts/reindex_kb.sh). VERIFIER_GPU tracks the
 # asrock judge GPU (swapped RTX 3060 Ti -> RTX 5060 Ti, Tier 2, 2026-07-28).
-Environment=KB_DOC_COUNT=27
-Environment=KB_CHUNK_COUNT=62
+Environment=KB_DOC_COUNT=33
+Environment=KB_CHUNK_COUNT=92
 Environment=VERIFIER_GPU=RTX 5060 Ti
 
 Restart=always

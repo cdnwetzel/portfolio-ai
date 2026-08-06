@@ -193,8 +193,8 @@ async def system_info():
     the Tier 2 asrock GPU swap updates the panel without a code change; the
     defaults are today's real values so the endpoint stays honest even unset."""
     return {
-        "docs": int(os.environ.get("KB_DOC_COUNT", "27")),
-        "chunks": int(os.environ.get("KB_CHUNK_COUNT", "62")),
+        "docs": int(os.environ.get("KB_DOC_COUNT", "33")),
+        "chunks": int(os.environ.get("KB_CHUNK_COUNT", "92")),
         "verifier_gpu": os.environ.get("VERIFIER_GPU", "RTX 5060 Ti"),
         "deployed_at": _DEPLOYED_AT,
     }

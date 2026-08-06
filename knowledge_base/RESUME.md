@@ -52,7 +52,7 @@ IT infrastructure professional with 26 years managing enterprise systems at scal
 ## Work History
 
 ### IT Manager — Portnoy Schneck LLC (Law Firm)
-**Aug 2023 – Present (2.5 years)**
+**Aug 2023 – Present (3 years)**
 
 Managing IT operations, infrastructure, security, compliance for law firm (40+ staff).
 

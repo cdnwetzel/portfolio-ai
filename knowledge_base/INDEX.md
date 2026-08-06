@@ -1,8 +1,14 @@
 # Portfolio AI Knowledge Base
 
-**Status:** Day 30 MVP (Ready for GATE 2 Indexing into Qdrant)  
-**Last Updated:** 2026-06-06  
+**Status:** Live in production (indexed in Qdrant; 27 docs / 62 chunks)  
+**Last Updated:** 2026-08-06  
 **Purpose:** Foundation for AI chat trained on Chris Wetzel's professional background, published expertise, and infrastructure projects
+
+> **Note (2026-08):** The inventory below was written 2026-06-06 as a GATE 2 plan. Current
+> reality: `posts/` holds 17 published posts (the 3-post Cloudflare outage series was added
+> 2026-08-06), `case_studies/` has 9 write-ups (created), `infrastructure/` covers the Gentoo
+> machines + this AI system (created), and `current_work_2026.md` tracks ongoing work.
+> Sections marked "TO CREATE" below are done.
 
 ---
 
