@@ -1,7 +1,4 @@
-# Why Gentoo (DRAFT — pending Chris's review)
-
-**Note:** Drafted by the AI assistant from existing KB material (gentoo_machines.md,
-homelab docs). Chris reviews before this indexes.
+# Why Gentoo
 
 People ask why I run Gentoo in 2026 when every fleet tutorial assumes Ubuntu or RHEL.
 

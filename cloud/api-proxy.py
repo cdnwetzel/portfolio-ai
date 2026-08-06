@@ -191,12 +191,16 @@ async def system_info():
     """Live values for the landing-page SystemInfo panel. Counts/GPU come from
     systemd env (KB_DOC_COUNT, KB_CHUNK_COUNT, VERIFIER_GPU) so a KB rebuild or
     the Tier 2 asrock GPU swap updates the panel without a code change; the
-    defaults are today's real values so the endpoint stays honest even unset."""
+    defaults are today's real values so the endpoint stays honest even unset.
+    deployed_sha is stamped by deploy.sh (DEPLOY_GIT_SHA) — answers "what
+    exactly is running" without SSHing in."""
     return {
-        "docs": int(os.environ.get("KB_DOC_COUNT", "33")),
-        "chunks": int(os.environ.get("KB_CHUNK_COUNT", "92")),
+        "docs": int(os.environ.get("KB_DOC_COUNT", "35")),
+        "chunks": int(os.environ.get("KB_CHUNK_COUNT", "94")),
         "verifier_gpu": os.environ.get("VERIFIER_GPU", "RTX 5060 Ti"),
         "deployed_at": _DEPLOYED_AT,
+        "deployed_sha": os.environ.get("DEPLOY_GIT_SHA", "unknown"),
+        "prompt_version": PROMPT_VERSION,
     }
 
 @app.post("/api/search")

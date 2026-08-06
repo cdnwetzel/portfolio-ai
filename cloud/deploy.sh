@@ -37,6 +37,12 @@ scp -q "${HERE}/sparse_bm25.py"      "${CLOUD}:${APIDIR}/sparse_bm25.py"
 scp -q "${HERE}/guardrails.py"       "${CLOUD}:${APIDIR}/guardrails.py"
 scp -q "${HERE}/verify_gate.py"      "${CLOUD}:${APIDIR}/verify_gate.py"
 scp -q "${HERE}/rate_limit.py"       "${CLOUD}:${APIDIR}/rate_limit.py"
+# Stamp the deployed git SHA so /api/system-info can answer "what exactly is running"
+# (Tier 7). Written as a drop-in so it survives unit-file edits.
+DEPLOY_SHA="$(git -C "${REPO}" rev-parse --short HEAD)"
+ssh "${CLOUD}" "mkdir -p /etc/systemd/system/api-proxy.service.d && \
+  printf '[Service]\nEnvironment=DEPLOY_GIT_SHA=${DEPLOY_SHA}\n' > /etc/systemd/system/api-proxy.service.d/deploy-sha.conf && \
+  systemctl daemon-reload"
 ssh "${CLOUD}" "chown apiproxy:apiproxy ${APIDIR}/main.py ${APIDIR}/context_manager.py ${APIDIR}/query_expansion.py ${APIDIR}/query_router.py ${APIDIR}/sparse_bm25.py ${APIDIR}/guardrails.py ${APIDIR}/rate_limit.py && \
   systemctl restart api-proxy.service && sleep 2 && systemctl is-active api-proxy.service"
 

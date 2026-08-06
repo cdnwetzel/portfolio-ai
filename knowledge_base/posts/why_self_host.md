@@ -1,7 +1,4 @@
-# Why I Self-Host (DRAFT — pending Chris's review)
-
-**Note:** Drafted by the AI assistant from existing KB material. Chris reviews before
-this indexes.
+# Why I Self-Host
 
 I run my portfolio's AI stack — LLM inference, vector search, reranking, faithfulness
 verification — on hardware in my home office instead of renting cloud GPUs. People ask why.
@@ -24,6 +21,6 @@ build and run this? Yes. It's running.
 leave my machines. No third party logs a single prompt — not a policy promise, an
 architectural fact.
 
-Self-hosting isn't free — it's a trade: my time, my hardware, my problem when it breaks
-at 2 AM. For a portfolio that exists to prove I can run infrastructure, that trade is the
+Self-hosting isn't free — it's a trade: my time, my hardware, my responsibility when it
+fails. For a portfolio that exists to prove I can run infrastructure, that trade is the
 whole point.
