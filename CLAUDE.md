@@ -11,10 +11,13 @@ Postgres, JWT/API keys, Stripe billing) was **cut**: its code is on the `legacy/
 branch and its design docs are in [`docs/archive/`](docs/archive/). Nothing in the running system
 has a database, an account, or a tenant — so if you find `tenant_id` anywhere, it's archaeology.
 
-**Status:** deployed and in production, 5-tier quality upgrade complete. All tiers live:
+**Status:** deployed and in production, 7-tier quality upgrade complete. All tiers live:
 1. Credibility gates (6/6 passed), 2. 14B judge on RTX 5060 Ti (9/9 fixtures), 3. GPU reranker
 (15.8x faster), 4. First-person voice & query routing, 5. UX polish (stop button, textarea, 
-auto-scroll, sources readability). Self-test gate passing. Health monitoring active.
+auto-scroll, sources readability), 6. KB expansion (35 docs / 94 chunks; indexer post-loading
+bug fixed), 7. Ops maturity (verdicts.db backups, weekly digest with silence alerts, incident
+runbook, deploy-stamped version endpoint). Self-test gate passing. Health monitoring active.
+Continuous improvement: weekly flagged-queue review + defect ledger (DEFECT_LEDGER.md).
 
 ## Core Architecture
 
