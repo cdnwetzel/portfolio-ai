@@ -21,7 +21,11 @@
 - [ ] Adjust system prompt strictness OR fine-grain the chunk content
 
 **Discovered by:** Kimi (noted in T2.3, then disappeared into STATUS)  
-**Last reviewed:** 2026-08-05 (flagged in verdicts.db, not yet acted on)
+**Last reviewed:** 2026-08-05 (flagged in verdicts.db, not yet acted on)  
+**Evidence + candidate fix (2026-08-10):** Grounded A/B measured pscode at 0.71 mean faithfulness (2/4
+flagged) vs qwen3-coder:30b at 0.97 (0/4 flagged) on the same retrieved sources; the 30B removes the
+"Mac Studio T5810" style confabulation entirely. Model swap is GREEN on quality but BLOCKED on GPU
+capacity. See `plans/model-faithfulness-ab-qwen3-30b-2026-08.md`.
 
 ---
 
