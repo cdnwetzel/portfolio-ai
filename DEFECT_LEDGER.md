@@ -80,7 +80,74 @@ capacity. See `plans/model-faithfulness-ab-qwen3-30b-2026-08.md`.
 
 ---
 
+### 5. Router: "Favorite Language" Answers Neither Way
+**Status:** OPEN
+**Severity:** LOW (cosmetic; graded eval reports it as review-only, not a gate failure)
+**Discovery:** Graded eval after the 2026-08-19 router fix (commit 4565c8b)
+**Issue:** `"What is Chris's favorite programming language?"` scores g=1 — "neither cleanly
+refused nor substantive." Under the old off_topic default it got a clean canned refusal;
+now it routes on_topic, retrieves weak evidence, and waffles instead of committing.
+**Fix options:**
+- [ ] Option A: KB gap — the corpus has no explicit preference statement; add one if true
+- [ ] Option B: Prompt — strengthen the "commit or say you don't have it" instruction
+**Note:** Do NOT fix by reverting the router default. That default caused defect #6.
+**Discovered by:** Claude (2026-08-19 session)
+
+---
+
 ## CLOSED DEFECTS
+
+### 6. Router Default Deflected a Third of the Golden Set — CLOSED 2026-08-19 (4565c8b)
+**Severity:** HIGH (user-facing; the site refused to describe the person it exists to describe)
+**Issue:** `classify_query()` defaulted to `off_topic`, making the router a grounding gate it
+could never be — the on-topic keyword list had no entry for "chris", so
+`"what can you tell me about chris"` got a canned redirect. **13 of 40 golden-set `grounded`
+questions classified off_topic**, including "Summarize Chris's professional background" and
+"How can I contact Chris professionally?".
+**Why it went unseen:** `compare_retrieval.py` (the source of the "20/20" figure in CLAUDE.md)
+measures retrieval only and never invokes the router. `eval_graded.py` asks via `/ws/chat` but
+grades evidence via `/api/retrieve`, so the router's deflection never showed as a retrieval miss.
+**Resolution:** Default is now `on_topic`; redirects come from an explicit off-topic list.
+Grounding stays on api-proxy's `RAG_MIN_SCORE` guardrail, where it always belonged. Adversarial
+probes remain caught upstream by `is_prompt_extraction` (verified). Added `tests/test_query_router.py`
+— the module had no test coverage at all.
+**Verification:** graded eval 30 grounded / mean 4.80 (baseline 4.82), 0 safety hard-fails,
+0 transport errors; self-test 3/3.
+**Lesson:** a retrieval-level metric cannot see a routing-level bug. The "20/20" number was
+true and irrelevant. Measure the path the user actually takes.
+
+### 7. Verdict Window 429'd the User's Own Next Turn — CLOSED 2026-08-19 (4565c8b)
+**Severity:** HIGH (presented as "Connection lost" with the question silently unanswered)
+**Issue:** The client armed `VERDICT_WINDOW_MS` (25s) after every `done` to await a faithfulness
+verdict. Four paths (guardrail, meta, off-topic, not-documented) never run the verifier, and
+`should_verify()` gating skips others — so the socket was held the full window for a verdict that
+could never arrive. `ConnectionRateLimiter(max_concurrent_per_ip=1)` then rejected the user's own
+follow-up with a 429 **before `accept()`**, which the browser surfaces as an opaque close (1006).
+**Presentation:** intermittent and typing-speed dependent — read the answer slowly and the next
+turn works; fire off two questions quickly and both vanish. This misdirected diagnosis toward an
+"empty-retrieval branch that crashes," which does not exist.
+**Evidence:** 8 logged `rate limit: rejected duplicate /ws/chat connection` entries from a single
+IP, clustered in bursts seconds apart, matching every observed failure 1:1.
+**Resolution:** `done` now carries `verify`; the client only waits when a verdict is actually
+coming, and closes a superseded socket before opening the next. Limiter raised to 2 to absorb
+handoff overlap (still trips a scripted loop immediately).
+**Verification:** scripted repro of all three failing pairs — including holding the first socket
+open exactly as the old client did — passes; 0 rejections and 0 errors post-deploy.
+**Lesson:** a client that waits for a message the server may never send needs the server to say
+so. Relates to open defect #3 (verdict window), which this partially de-risks.
+
+### 8. Canned Paths Were Dead Ends — CLOSED 2026-08-19 (4565c8b)
+**Severity:** MEDIUM (worst-case first impression for a new visitor)
+**Issue:** Every canned path returned a refusal with nothing to click. Suggestion chips are parsed
+from a `FOLLOWUPS` block in the answer, and the canned strings had none — so a visitor asking
+"what can I ask?" was told no and handed a blank slate.
+**Also:** `meta_keywords` lacked "what do you know" / "what am I supposed to do", so visitors asking
+the chat for help were told they were off-topic.
+**Resolution:** All three canned responses carry a `FOLLOWUPS` block (no client change needed —
+the existing parser renders them), with chips spanning distinct corpus domains rather than three
+flavours of the same question. Meta keyword list extended.
+**Credit:** the "the answer to 'what can I ask?' is in the doc titles" framing came from a parallel
+CC session; its causal diagnosis was wrong but the product instinct was right.
 
 ### 1. SAP Business One: Generation Hallucination — CLOSED 2026-08-06
 **Resolution:** Fixed incidentally by the Tier 4 persona prompt rewrite (commit 5586ad5).
@@ -149,7 +216,7 @@ This is why "mine query logs for trends" doesn't work here — and why the verif
 
 ---
 
-**Last Updated:** 2026-08-05  
+**Last Updated:** 2026-08-19  
 **Owner:** Claude (reviews weekly), Kimi (discovers during tests)  
-**Next Review:** 2026-08-12 (weekly flagged-queue)  
+**Next Review:** 2026-08-26 (weekly flagged-queue)  
 **Next Full Review:** 2026-09-05 (monthly ops review)

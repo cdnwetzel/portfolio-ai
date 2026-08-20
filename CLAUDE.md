@@ -51,6 +51,20 @@ picks the best 5. It runs CPU-only on the T5810's idle 256 GB DDR4, so it never 
 for VRAM. It **fails open** to cosine top-5 if the reranker is down; the verifier is fully fail-open
 (chat is unaffected if asrock is down).
 
+**Query routing** (`cloud/query_router.py`) runs before retrieval: `meta` and `off_topic` return
+instant canned responses with no GPU call, everything else goes to full RAG. Its default is
+`on_topic` **by design** — the router is a cost optimization, not a grounding gate, and inverting
+that assumption is what caused it to deflect a third of the golden set (DEFECT_LEDGER #6). Grounding
+is enforced by `RAG_MIN_SCORE`; adversarial input by the guardrail below. Both run independently of
+the router. Every canned path carries a `FOLLOWUPS` block so it renders suggestion chips instead of
+being a dead end.
+
+`/ws/chat` is limited to **2 concurrent connections per IP** (`cloud/rate_limit.py`). Not 1: the
+client opens the next turn's socket before the previous close is processed, and a limit of 1
+rejected real users' own follow-ups with a 429 the browser shows as "Connection lost"
+(DEFECT_LEDGER #7). Relatedly, the `done` frame carries `verify` — the client must only hold the
+socket open for a verdict when one is actually coming.
+
 A deterministic **prompt-extraction guardrail** (`cloud/guardrails.py`) refuses
 "reveal/repeat your prompt"-style attacks before they reach the LLM. A **graded eval**
 (`scripts/eval_graded.py` + `eval/golden_set.yaml`) gates changes. A **hybrid dense+BM25** path
@@ -277,6 +291,11 @@ worth remembering:
 - **2026-08-03** — Updated architecture after Tier 3 (GPU reranker moved T5810 CPU → asrock RTX 5060 Ti,
   15.8x faster at 259ms) and Tier 5 (UX polish: stop button, textarea, auto-scroll, sources readability).
   All 5 tiers live. Self-test gate passing. Health monitoring active with baselines established.
+- **2026-08-19** — Corrected a claim this file made by implication. The "20/20 end-to-end" figure
+  below is a *retrieval* measurement (`compare_retrieval.py`) and never invokes the query router.
+  The router was meanwhile defaulting to `off_topic`, deflecting **13 of 40 golden-set `grounded`
+  questions** with a canned redirect — a routing bug that no retrieval metric could see. Default is
+  now `on_topic`, with grounding left to `RAG_MIN_SCORE` where it always was. See DEFECT_LEDGER #6–8.
 
 **When you change the system, change the docs in the same commit.** A wrong doc is worse than a
 missing one: it is confidently wrong, and it survives long after the person who knew better moved on.

@@ -134,26 +134,37 @@ def classify_query(query: str) -> str:
 # real answer does. The frontend already parses this (useChat.js parseFollowups)
 # and strips it from the displayed text — no client change needed. Without it these
 # paths were a dead end: the visitor got told "no" and handed nothing to click.
+# Chips deliberately span DIFFERENT domains of the corpus (enterprise migration,
+# compliance, homelab/GPU, this system) rather than three flavours of "tell me about
+# Chris". A first-time visitor asking "what can I ask?" is navigating, and the honest
+# answer to that is the breadth of the KB — which they cannot otherwise see.
 _STARTER_FOLLOWUPS = (
     '\nFOLLOWUPS:["What has Chris built?",'
+    '"Describe the Azure Virtual Desktop migration",'
     '"Tell me about the GPU home lab setup",'
-    '"What consulting and MSP experience does Chris have?"]'
+    '"What did Chris do for SOC 2 compliance?"]'
 )
 
 META_RESPONSE = (
-    "I'm an AI that knows Chris Wetzel's work—infrastructure he's built, projects he's solved, "
-    "career experience he's documented. This chat runs on his homelab. "
-    "Ask me about specific projects from his portfolio, infrastructure decisions, case studies, or technical approaches. "
-    "I can tell you about the AVD migration, the homelab setup, systems work, or design decisions."
+    "I'm an AI that answers from Chris Wetzel's documented work, and I run on the homelab I'll "
+    "tell you about. What's in here: enterprise migrations (Azure Virtual Desktop for 200 users, "
+    "Microsoft 365, SAP Business One + WMS), SOC 2 Type II compliance for a multi-tenant MSP, "
+    "virtualization and BCDR builds, the Gentoo GPU homelab this chat runs on, the pxx project, "
+    "and writing on the Cloudflare outage and AI agent security. "
+    "Ask about any of it and I'll answer from the source documents, or tell you I don't have it."
 ) + _STARTER_FOLLOWUPS
 
 OFF_TOPIC_RESPONSE = (
-    "I only know Chris Wetzel's professional work—the infrastructure he's built, the projects "
-    "he's shipped, and the technical decisions behind them. I don't have anything useful to say "
-    "about that one. Here's what I can actually dig into:"
+    "I only know Chris Wetzel's professional work—the infrastructure he's built, the projects he's "
+    "shipped, and the decisions behind them—so I'd just be guessing on that one. What I can cover: "
+    "enterprise migrations and compliance work, virtualization and disaster recovery, the Gentoo GPU "
+    "homelab running this chat, and his writing on infrastructure and AI security."
 ) + _STARTER_FOLLOWUPS
 
 # Returned when retrieval finds nothing relevant enough (api-proxy.py RAG guardrail).
+# Keeps the "don't have that documented" phrasing that selftest and the verifier's
+# REFUSAL_MARKERS match on — do not reword that clause without updating both.
 NOT_DOCUMENTED_RESPONSE = (
-    "I don't have that documented in my knowledge base. Try one of these instead:"
+    "I don't have that documented in my knowledge base. I do have his enterprise migration and "
+    "compliance case studies, the GPU homelab build, and how this chat system works—try one of these:"
 ) + _STARTER_FOLLOWUPS
