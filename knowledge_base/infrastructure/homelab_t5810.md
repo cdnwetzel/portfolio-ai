@@ -8,8 +8,9 @@
 
 ### GPU Configuration
 - **2× NVIDIA RTX A4500** — 20 GB GDDR6 VRAM per card (40 GB aggregate across the pair;
-  no single card has more than 20 GB). This is video memory (VRAM), not disk storage — the
-  A4500 has no onboard storage.
+  no single card has more than 20 GB). VRAM is the GPUs' working memory for model weights and
+  KV cache. It is not system RAM and not disk capacity — those are separate, and the machine
+  has plenty of both (see CPU & Memory and Storage below).
 - **NVLink bridge:** NV4 topology (4-link bridge) — 56 GB/s per direction, 112 GB/s aggregate. Required for tensor-parallel vLLM TP=2; without NVLink, CUDA sees two isolated GPUs
 - **Usable VRAM:** 20,470 MiB per card — the full ~20 GB is available because ECC is **disabled** (a deliberate trade-off that reclaims the ~1.25 GB/card ECC overhead — ~2.5 GB total across the pair — for vLLM's KV cache)
 - **Power:** Dell 825W internal PSU (primary) + external Corsair ATX 3.0 1000W PSU via SATA sync/trigger board for GPU supplemental power
@@ -19,6 +20,14 @@
 - **Memory:** 256 GB DDR4 ECC (total system RAM) — ample headroom to run the CPU embedder, reranker, and Qdrant alongside vLLM with no GPU-VRAM contention
 - **Build performance:** kernel 6.18 at `-j44` in ~5 min; full `@world` (250 packages) in ~90 min; peak RAM during Node.js/V8 compile ~48GB (a workload spike, not the machine's total)
 - **PCIe:** Gen 3 slots for dual-GPU installation
+
+### Storage
+- **Yes, the T5810 has onboard storage** — internal drives inside the workstation chassis,
+  like any normal workstation. They hold the Gentoo root filesystem, the Qwen2.5-Coder-14B
+  model weights that vLLM loads at startup, and the Qdrant collection.
+- The machine boots and runs entirely from its own internal drives. Exact drive capacities
+  are not documented here; the correct answer to "how much disk does it have?" is that the
+  capacity isn't recorded, **not** that the machine lacks storage.
 
 ### Operating System
 - **OS:** Gentoo Linux (custom compiled kernel) — the home server runs **Gentoo**, not Ubuntu

@@ -27,6 +27,31 @@ flagged) vs qwen3-coder:30b at 0.97 (0/4 flagged) on the same retrieved sources;
 "Mac Studio T5810" style confabulation entirely. Model swap is GREEN on quality but BLOCKED on GPU
 capacity. See `plans/model-faithfulness-ab-qwen3-30b-2026-08.md`.
 
+**Reproduced live 2026-08-19 with a clean isolation, two independent cases:**
+
+*Case A — contradicts retrieved evidence.* `"tell me about the Asrock B550"` returned a generic
+motherboard spec sheet under "Sources (5)": invented a *Realtek ALC892 audio codec*, *128 GB DDR4 at
+5600 MHz*, and *"Realtek Gigabit Ethernet"* — while `gentoo_machines.md:26` states **Intel AX200 WiFi,
+I225-V 2.5GbE**. Not a KB gap; a direct contradiction of retrieved text. The same session also had it
+claim the T5810 has *"Integrated Intel HD Graphics"*, contradicting both the KB and its own answer two
+turns earlier.
+
+*Case B — the isolation that rules out retrieval.* `"does the T5810 have onboard storage?"` answered
+*"does not have onboard storage. It relies on external storage solutions."* `/api/retrieve` for that
+exact query returns the corrected chunk at **rank 3**, containing the literal sentence *"Yes, the
+T5810 has onboard storage — internal drives inside the workstation chassis."* **Evidence was in
+context and the model asserted its negation.** This is the cleanest available proof that the defect
+is generation, not retrieval or KB coverage.
+
+*Also learned:* the KB previously said *"the A4500 has no onboard storage"* (true, about the GPU) and
+the model attributed it to the workstation. Rewording fixed 4 of 5 phrasings. The first attempt
+*quoted* the wrong phrase in order to warn against it — and the model pattern-matched the quoted
+string, reproducing the error. **Never write a wrong phrasing into the KB even to negate it;**
+retrieval matches the phrase, not the logic. Fixed by stating the positive fact only.
+
+*Verifier note:* none of these were flagged by the 14B judge, so the faithfulness verifier is also
+missing this class. Worth checking against defect #3 before trusting flag counts as a quality signal.
+
 ---
 
 ### 2. Judge Timeout Wrapper: Infrastructure Debt
@@ -91,6 +116,26 @@ now it routes on_topic, retrieves weak evidence, and waffles instead of committi
 - [ ] Option A: KB gap — the corpus has no explicit preference statement; add one if true
 - [ ] Option B: Prompt — strengthen the "commit or say you don't have it" instruction
 **Note:** Do NOT fix by reverting the router default. That default caused defect #6.
+**Discovered by:** Claude (2026-08-19 session)
+
+---
+
+### 6. WATCH: Grounding 4.80 → 4.70 After the T5810 Storage Reindex
+**Status:** OPEN (watch item, not a confirmed regression)
+**Severity:** LOW — graded eval PASSED; both flags are review-level, not gates
+**Discovery:** 2026-08-19, graded eval run immediately after the homelab_t5810.md reword + reindex
+**Observation:** mean grounding 4.80 → 4.70, and a new sub-2.5 flag on
+`"What Linux distributions has Chris used in production?"` that was not present in the run 40
+minutes earlier on the same code.
+**Two candidate causes, not yet separated:**
+- Run-to-run variance. Generation is temperature 0.2 and the judge is an LLM; a 0.10 swing on a
+  30-item mean is plausibly noise. One re-run would tell.
+- Real effect of the edit. Adding a `### Storage` section to `homelab_t5810.md` shifts chunk
+  boundaries in that doc, which can displace OS/distro content into a different chunk and change
+  what surfaces under the ≤2-per-doc cap.
+**Next step:** re-run `scripts/eval_graded.py` unchanged. If 4.70 reproduces, diff retrieval for
+that question against the pre-reindex ranking before touching anything.
+**Do not** "fix" this by reverting the storage reword — that fix is verified on 4 of 5 phrasings.
 **Discovered by:** Claude (2026-08-19 session)
 
 ---
