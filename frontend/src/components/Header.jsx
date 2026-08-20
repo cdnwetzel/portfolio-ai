@@ -39,7 +39,15 @@ const EmailIcon = () => (
   </svg>
 )
 
-export default function Header() {
+const NewChatIcon = () => (
+  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"
+       strokeWidth={1.8} aria-hidden="true">
+    <path strokeLinecap="round" strokeLinejoin="round"
+      d="M12 4.5v15m7.5-7.5h-15" />
+  </svg>
+)
+
+export default function Header({ onNewChat, canClear = false }) {
   return (
     <div className="bg-secondary border-b border-gray-700 px-4 py-3 shrink-0">
       <div className="max-w-4xl mx-auto flex items-start justify-between gap-4">
@@ -62,6 +70,24 @@ export default function Header() {
         </div>
 
         <div className="flex items-center gap-3 shrink-0 pt-0.5">
+          {/* Primary way to start over. Lives in the header because chat history
+              persists in localStorage across visits — without a visible control,
+              every "new chat" silently resumed the last one. */}
+          <button
+            type="button"
+            onClick={onNewChat}
+            disabled={!canClear}
+            title={canClear ? 'Clear this conversation and start over' : 'Nothing to clear'}
+            className="flex items-center gap-1.5 text-xs rounded px-2 py-1 border transition
+                       text-gray-300 border-gray-600 hover:text-white hover:border-gray-400
+                       hover:bg-gray-700/50
+                       disabled:text-gray-600 disabled:border-gray-700 disabled:hover:bg-transparent
+                       disabled:cursor-not-allowed"
+          >
+            <NewChatIcon />
+            <span>New chat</span>
+          </button>
+
           <a href={GITHUB_URL} target="_blank" rel="noreferrer"
              className="text-gray-400 hover:text-white transition" title="GitHub">
             <GitHubIcon />

@@ -29,7 +29,7 @@ export default function Chat() {
 
   return (
     <div className="h-screen flex flex-col bg-primary">
-      <Header />
+      <Header onNewChat={clearChat} canClear={messages.length > 0} />
 
       <div className="flex-1 overflow-y-auto" ref={containerRef}>
         <div className="max-w-4xl mx-auto">
@@ -53,19 +53,14 @@ export default function Chat() {
             placeholder="Ask about infrastructure, AI systems, startup work…"
             onStop={stopGeneration}
           />
-          <div className="flex items-center justify-center gap-3 mt-2">
-            <p className="text-center text-xs text-gray-600">
-              Chat history stays in your browser · Nothing stored or logged server-side · No cloud GPU
-            </p>
-            {messages.length > 0 && (
-              <button
-                onClick={clearChat}
-                className="text-xs text-gray-600 hover:text-gray-300 underline transition shrink-0"
-              >
-                Clear chat
-              </button>
-            )}
-          </div>
+          {/* The clear control moved to the header "New chat" button — one obvious
+              affordance beats two differently-worded ones doing the same thing.
+              "stays in your browser" is literal: localStorage, so it survives a
+              reload and a browser restart until New chat is pressed. */}
+          <p className="text-center text-xs text-gray-600 mt-2">
+            Chat history stays in your browser until you press New chat ·
+            Nothing stored or logged server-side · No cloud GPU
+          </p>
         </div>
       </div>
 

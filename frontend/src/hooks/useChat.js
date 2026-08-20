@@ -18,10 +18,19 @@ const FOLLOWUPS_MARKER = /\n?\s*FOLLOWUPS:/gi
 // Was 9000 (fit the 7B's 6.5s median).
 const VERDICT_WINDOW_MS = 25000
 
-// Chat history persistence (browser localStorage). CLAUDE.md documents this as
-// "Browser localStorage — per-session; nothing persisted server-side". All access
-// is try/catch'd: in private mode or with storage disabled, every operation no-ops
-// and the chat works exactly as before — just without persistence.
+// Chat history persistence (browser localStorage).
+//
+// NOT per-session, despite what this comment and the UI both used to claim:
+// localStorage has no session scope, so a transcript survives reload, tab close and
+// browser restart until it is explicitly cleared. That is deliberate — you can close
+// the tab mid-conversation and pick it up later — but it means the ONLY way to start
+// fresh is the header's "New chat" button (clearChat below). Without a visible
+// control, every visit silently resumed the previous conversation.
+//
+// Scope is per-origin/profile/device: nothing is shared between visitors, between
+// your phone and your laptop, or with the server. All access is try/catch'd, so in
+// private mode or with storage disabled every operation no-ops and the chat works
+// exactly as before — just without persistence.
 const STORAGE_KEY = 'portfolio_chat_messages'
 
 function loadMessages() {
@@ -231,10 +240,23 @@ export function useChat() {
     }
   }, [messages])
 
+  // "New chat": wipe the transcript and start clean. Safe to press at any time,
+  // including mid-stream — the socket is closed first so a in-flight answer can't
+  // stream into the cleared transcript, and so the connection slot is released
+  // rather than held for the rest of the verdict window.
   const clearChat = useCallback(() => {
+    const ws = wsRef.current
+    if (ws && ws.readyState !== WebSocket.CLOSING && ws.readyState !== WebSocket.CLOSED) {
+      // 1000 = deliberate; onclose treats only 1006 as an error, so no false
+      // 'connection_lost' banner appears after clearing.
+      try { ws.close(1000, 'new_chat') } catch (e) { log('error closing WebSocket', e) }
+    }
+    wsRef.current = null
+    lastPayloadRef.current = null   // nothing to Retry into — the transcript is gone
     setMessages([])
     setSuggestions([])
     setError(null)
+    setStatus('idle')
     try { localStorage.removeItem(STORAGE_KEY) } catch { /* storage unavailable */ }
   }, [])
 

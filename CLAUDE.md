@@ -155,7 +155,7 @@ cwdotcom/
 | **Frontend** | React + Vite + Tailwind | Built + rsynced to dev.cwetzel.com |
 | **Reverse proxy** | Apache | SSL termination, static serving, WSS proxy |
 | **Networking** | SSH tunnel | VPS → T5810 → asrock (services stay LAN-only) |
-| **Chat history** | Browser localStorage | Per-session; nothing persisted server-side |
+| **Chat history** | Browser localStorage | Per-browser; cleared by the header's "New chat" button. Nothing server-side |
 
 ## Endpoints
 
