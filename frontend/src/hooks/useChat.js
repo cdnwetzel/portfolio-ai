@@ -74,6 +74,14 @@ export function useChat() {
   const openConnection = useCallback((allMessages) => {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const wsUrl = `${protocol}//${window.location.host}/ws/chat`
+    // Close any socket left over from the previous turn before opening a new one.
+    // A lingering verdict-window socket counts against the per-IP connection limit,
+    // so leaking it made the server 429 the next turn's handshake.
+    const stale = wsRef.current
+    if (stale && stale.readyState !== WebSocket.CLOSING && stale.readyState !== WebSocket.CLOSED) {
+      try { stale.close(1000, 'superseded') } catch { /* noop */ }
+    }
+
     const ws = new WebSocket(wsUrl)
     wsRef.current = ws
 
@@ -150,7 +158,16 @@ export function useChat() {
           // The faithfulness verifier runs AFTER the answer. Keep the socket open
           // briefly to receive a {type:"verdict"}; close on verdict or timeout.
           // Non-blocking — the answer is already complete and usable.
-          verdictTimer = setTimeout(() => { try { ws.close() } catch { /* noop */ } }, VERDICT_WINDOW_MS)
+          //
+          // Only when the server says a verdict is actually coming. Canned paths
+          // (guardrail, meta, off-topic, not-documented) and low-relevance answers
+          // never run the verifier, and holding the socket open for them made the
+          // per-IP limiter reject the user's own next turn as "Connection lost".
+          if (data.verify === false) {
+            try { ws.close(1000, 'no_verdict_expected') } catch { /* noop */ }
+          } else {
+            verdictTimer = setTimeout(() => { try { ws.close() } catch { /* noop */ } }, VERDICT_WINDOW_MS)
+          }
         } else if (data.type === 'verdict') {
           if (data.flagged && data.request_id) {
             setMessages(prev => prev.map(m =>

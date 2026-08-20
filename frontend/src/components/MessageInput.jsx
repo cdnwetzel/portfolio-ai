@@ -41,8 +41,12 @@ export default function MessageInput({ onSend, status, placeholder, onStop }) {
   const isOver = input.length >= MAX_CHARS
 
   return (
-    <form onSubmit={handleSubmit} className="flex gap-2 items-end">
-      <div className="flex-1">
+    <form onSubmit={handleSubmit}>
+      {/* The counter must live OUTSIDE this row. Inside it, `items-end` aligned the
+          button to the bottom of the counter rather than the textarea, pushing the
+          button ~20px low. The buttons carry a transparent border so their box height
+          matches the textarea's bordered box exactly (50px at rows=1). */}
+      <div className="flex gap-2 items-end">
         <textarea
           ref={textareaRef}
           value={input}
@@ -51,38 +55,38 @@ export default function MessageInput({ onSend, status, placeholder, onStop }) {
           placeholder={placeholder}
           disabled={busy}
           rows={rows}
-          className="w-full px-4 py-3 rounded-lg bg-primary border border-gray-600 text-white
+          className="flex-1 px-4 py-3 rounded-lg bg-primary border border-gray-600 text-white
                      placeholder-gray-400 focus:outline-none focus:border-blue-600
                      disabled:opacity-50 text-base font-sans resize-none overflow-y-auto
                      max-h-[200px]"
         />
-        <div className="flex justify-between items-center mt-1">
-          <div className="text-xs text-gray-500">
-            {input.length}/{MAX_CHARS}
-            {isOver && <span className="ml-1 text-red-400">at limit</span>}
-          </div>
-        </div>
+
+        {busy ? (
+          <button
+            type="button"
+            onClick={onStop}
+            className="px-6 py-3 bg-red-600 hover:bg-red-700 text-white font-semibold
+                       rounded-lg transition min-w-[5rem] border border-transparent"
+          >
+            Stop
+          </button>
+        ) : (
+          <button
+            type="submit"
+            disabled={!input.trim()}
+            className="px-6 py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600
+                       text-white font-semibold rounded-lg transition min-w-[5rem]
+                       border border-transparent"
+          >
+            {btnLabel}
+          </button>
+        )}
       </div>
 
-      {busy ? (
-        <button
-          type="button"
-          onClick={onStop}
-          className="px-4 py-3 bg-red-600 hover:bg-red-700 text-white font-semibold
-                     rounded-lg transition min-w-[5rem] h-12"
-        >
-          Stop
-        </button>
-      ) : (
-        <button
-          type="submit"
-          disabled={!input.trim()}
-          className="px-6 py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600
-                     text-white font-semibold rounded-lg transition min-w-[5rem] h-12"
-        >
-          {btnLabel}
-        </button>
-      )}
+      <div className="text-xs text-gray-500 mt-1">
+        {input.length}/{MAX_CHARS}
+        {isOver && <span className="ml-1 text-red-400">at limit</span>}
+      </div>
     </form>
   )
 }

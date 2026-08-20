@@ -27,7 +27,9 @@ from context_manager import (
 )
 from query_expansion import expand_query
 from guardrails import is_prompt_extraction, EXTRACTION_REFUSAL
-from query_router import classify_query, META_RESPONSE, OFF_TOPIC_RESPONSE
+from query_router import (
+    classify_query, META_RESPONSE, OFF_TOPIC_RESPONSE, NOT_DOCUMENTED_RESPONSE,
+)
 from verify_gate import should_verify
 from rate_limit import ConnectionRateLimiter, client_ip_from_headers
 import sparse_bm25
@@ -155,10 +157,15 @@ PROMPT_VERSION = "p1-" + hashlib.sha1((SYSTEM_PREFIX + SYSTEM_SUFFIX).encode()).
 # Persistent client — avoids TCP hand-shake overhead on every request
 _http: httpx.AsyncClient | None = None
 
-# Per-IP connection limit for /ws/chat (see rate_limit.py): 1 open chat per IP,
-# localhost bypassed. Anonymous unthrottled access is the site's one DoS vector —
-# a single scripted loop pins the 14B vLLM and starves every real visitor.
-_rate_limiter = ConnectionRateLimiter(max_concurrent_per_ip=1)
+# Per-IP connection limit for /ws/chat (see rate_limit.py). Anonymous unthrottled
+# access is the site's one DoS vector — a single scripted loop pins the 14B vLLM and
+# starves every real visitor. Localhost is bypassed.
+#
+# 2, not 1: the client opens the next turn's socket before the previous one's close
+# has been processed here, so a strict limit of 1 rejected a real user's own follow-up
+# with a 429 that the browser surfaces as "Connection lost" (2026-08-19). One slot of
+# overlap absorbs that handoff; a scripted loop still trips it immediately.
+_rate_limiter = ConnectionRateLimiter(max_concurrent_per_ip=2)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -525,7 +532,9 @@ async def websocket_chat(websocket: WebSocket):
                 logger.info("Guardrail: prompt-extraction attempt; returning canned refusal")
                 await websocket.send_json({"type": "sources", "data": []})
                 await websocket.send_json({"type": "chunk", "data": {"choices": [{"delta": {"content": EXTRACTION_REFUSAL}}]}})
-                await websocket.send_json({"type": "done", "prompt_version": PROMPT_VERSION})
+                # verify:false — no verifier runs on canned paths, so the client must
+                # not hold the socket open waiting for a verdict that cannot arrive.
+                await websocket.send_json({"type": "done", "prompt_version": PROMPT_VERSION, "verify": False})
                 continue
 
             # Tier 4: Query routing (meta/on-topic/off-topic)
@@ -536,7 +545,8 @@ async def websocket_chat(websocket: WebSocket):
                 logger.info(f"Query classified as meta; returning instant response")
                 await websocket.send_json({"type": "sources", "data": []})
                 await websocket.send_json({"type": "chunk", "data": {"choices": [{"delta": {"content": META_RESPONSE}}]}})
-                await websocket.send_json({"type": "done", "request_id": request_id, "prompt_version": PROMPT_VERSION})
+                await websocket.send_json({"type": "done", "request_id": request_id,
+                                           "prompt_version": PROMPT_VERSION, "verify": False})
                 continue
 
             if query_class == "off_topic":
@@ -544,7 +554,8 @@ async def websocket_chat(websocket: WebSocket):
                 logger.info(f"Query classified as off-topic; returning redirect")
                 await websocket.send_json({"type": "sources", "data": []})
                 await websocket.send_json({"type": "chunk", "data": {"choices": [{"delta": {"content": OFF_TOPIC_RESPONSE}}]}})
-                await websocket.send_json({"type": "done", "request_id": request_id, "prompt_version": PROMPT_VERSION})
+                await websocket.send_json({"type": "done", "request_id": request_id,
+                                           "prompt_version": PROMPT_VERSION, "verify": False})
                 continue
 
             # Sliding window: drop oldest user/assistant pairs when history is too large
@@ -566,10 +577,10 @@ async def websocket_chat(websocket: WebSocket):
             # asking the model to invent an answer.
             if not context_docs or context_docs[0].get("score", 0.0) < RAG_MIN_SCORE:
                 logger.info("RAG guardrail: top score below threshold; returning fallback refusal")
-                refusal = "I don't have that documented in my knowledge base."
                 await websocket.send_json({"type": "sources", "data": []})
-                await websocket.send_json({"type": "chunk", "data": {"choices": [{"delta": {"content": refusal}}]}})
-                await websocket.send_json({"type": "done", "prompt_version": PROMPT_VERSION})
+                await websocket.send_json({"type": "chunk", "data": {"choices": [{"delta": {"content": NOT_DOCUMENTED_RESPONSE}}]}})
+                await websocket.send_json({"type": "done", "request_id": request_id,
+                                           "prompt_version": PROMPT_VERSION, "verify": False})
                 continue
 
             system_prefix = SYSTEM_PREFIX
@@ -683,9 +694,19 @@ async def websocket_chat(websocket: WebSocket):
                     logger.info("Response: CONFLICT")
                 else:
                     logger.info("Response: GROUNDED")
+                # Decide the verifier BEFORE `done` so the client learns whether a verdict
+                # is coming. It holds the socket open to receive one; told nothing, it waited
+                # the full window on every answer that would never produce a verdict, and the
+                # per-IP limiter then rejected the user's own next turn (2026-08-19).
+                # Gate on retrieval relevance (verify_gate.py): skip if top evidence score is
+                # too low, avoiding false-positive flags on non-KB answers (see context above).
+                top_score = evidence_docs[0].get("score", 0.0) if evidence_docs else 0.0
+                will_verify = bool(VERIFIER_URL) and should_verify(top_score, VERIFY_MIN_SCORE)
+
                 # request_id created earlier, used for all paths (meta, off-topic, on-topic)
                 await websocket.send_json({
                     "type": "done", "prompt_version": PROMPT_VERSION, "request_id": request_id,
+                    "verify": will_verify,
                     # metadata-only telemetry (durations + counts, no content — red-lines.md #2)
                     "timing": {"retrieval_ms": retrieval_ms,
                                "ttft_ms": stream_meta.get("ttft_ms"),
@@ -694,10 +715,7 @@ async def websocket_chat(websocket: WebSocket):
                 })
                 # Out-of-band faithfulness check (verifier plan §7.1): post-`done`,
                 # fire-and-forget, no-op unless VERIFIER_URL is set. Never blocks.
-                # Gate on retrieval relevance (verify_gate.py): skip if top evidence score is
-                # too low, avoiding false-positive flags on non-KB answers (see context above).
-                top_score = evidence_docs[0].get("score", 0.0) if evidence_docs else 0.0
-                if should_verify(top_score, VERIFY_MIN_SCORE):
+                if will_verify:
                     asyncio.create_task(
                         _fire_verify(request_id, user_query, full_response, evidence_docs, websocket)
                     )
