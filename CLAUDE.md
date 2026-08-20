@@ -2,7 +2,7 @@
 
 A single-tenant **portfolio RAG chat** at [dev.cwetzel.com](https://dev.cwetzel.com): a React
 frontend and a FastAPI proxy on an Ubuntu VPS, talking over an SSH tunnel to vLLM
-(Qwen2.5-Coder-14B + pscode LoRA), Qdrant, a CPU embedder and a CPU reranker on a T5810 in a home
+(Qwen2.5-Coder-14B — base, *not* the pscode LoRA; see below), Qdrant, a CPU embedder and a CPU reranker on a T5810 in a home
 office, plus a faithfulness verifier on a second home box.
 
 It is a professional-portfolio showcase running on owned hardware (2x A4500 GPUs, ~400 Mbps
@@ -173,7 +173,15 @@ The proxy exposes four routes. There is no auth layer — the chat is public and
 **On the T5810 (Gentoo/OpenRC):**
 ```bash
 # vLLM (OpenRC: pscode-vllm; config /etc/pscode/pscode.conf + /etc/conf.d/pscode-vllm)
-MODEL=qwen2.5-coder-14b-pscode   # served-model-name; base Qwen2.5-Coder-14B + pscode-prod LoRA
+MODEL=qwen2.5-coder-14b-pscode   # served-model-name of the BASE model. The name misleads:
+                                 # /v1/models shows this id with parent=None and
+                                 # root=/data/pscode/models/qwen2.5-coder-14b-instruct, while the
+                                 # adapter is a SEPARATE id, `pscode-prod` (parent=this). The client
+                                 # sends the base id (useChat.js) and the proxy does not override it,
+                                 # so **production has never used the LoRA** — it is loaded and never
+                                 # requested. Verified 2026-08-19. Consequence: the "pscode" arm of
+                                 # plans/model-faithfulness-ab-qwen3-30b-2026-08.md was actually the
+                                 # base model, and `pscode-prod` has never been evaluated.
 PORT=8004
 TENSOR_PARALLEL_SIZE=2
 GPU_MEMORY_UTILIZATION=0.93      # 0.95 OOMs; 760 MiB free/A4500 — no room for spec-dec draft

@@ -49,8 +49,27 @@ the model attributed it to the workstation. Rewording fixed 4 of 5 phrasings. Th
 string, reproducing the error. **Never write a wrong phrasing into the KB even to negate it;**
 retrieval matches the phrase, not the logic. Fixed by stating the positive fact only.
 
-*Verifier note:* none of these were flagged by the 14B judge, so the faithfulness verifier is also
-missing this class. Worth checking against defect #3 before trusting flag counts as a quality signal.
+*Verifier note — CORRECTED 2026-08-19:* an earlier draft of this entry claimed the judge misses this
+class, inferred from the absence of a flag in the browser. That was wrong. Re-running the ASRock
+question through `/verify` directly, the judge **did** flag it (`flagged=True, n_contradicted=1`,
+faithfulness 0.92). So the judge detects the contradiction; what failed was flag *delivery or display*
+in the client. Investigate that separately — do not treat this as judge blindness.
+
+**Model configuration finding (2026-08-19) — production has never used the pscode LoRA.**
+`/v1/models` shows `qwen2.5-coder-14b-pscode` with `parent=None` and
+`root=/data/pscode/models/qwen2.5-coder-14b-instruct` (the base), and `pscode-prod` as a separate id
+with `parent=qwen2.5-coder-14b-pscode` (the adapter). `useChat.js` sends the base id and the proxy
+does not override it. **Consequence:** the "pscode 0.71" arm of the qwen3-30B A/B was the *base*
+model, mislabeled, and `pscode-prod` has never been evaluated at any point.
+
+*First measurement of the adapter (n=5, identical chunks/prompt/sampling, scored by the site's own
+judge):* base mean 0.983 with 1 flag; LoRA mean **1.000 with 0 flags**, and far more disciplined
+output (pxx answer 881 chars vs the base's 4079). **Not yet actionable** — 9 of 10 cells scored
+exactly 1.00, so the whole difference is one data point, and the base answered the T5810 storage
+question *correctly* here while getting it *wrong* in production an hour before on the same chunks,
+prompt and sampling. **The defect is stochastic at temperature 0.2**, so single-sample comparisons
+cannot resolve it. Next step: k≥5 samples per question per arm, and a temperature-0 arm, before any
+serving change. Harness: `scratchpad/lora_ab.py` (runs on the VPS; no restart, live site unaffected).
 
 ---
 
