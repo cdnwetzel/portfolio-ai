@@ -154,42 +154,56 @@ Lesson: a chunk that ranks on embedding but whose relevant text sits beyond the 
 
 ---
 
-### 5. Router: "Favorite Language" Answers Neither Way
-**Status:** OPEN
-**Severity:** LOW (cosmetic; graded eval reports it as review-only, not a gate failure)
-**Discovery:** Graded eval after the 2026-08-19 router fix (commit 4565c8b)
-**Issue:** `"What is Chris's favorite programming language?"` scores g=1 — "neither cleanly
-refused nor substantive." Under the old off_topic default it got a clean canned refusal;
-now it routes on_topic, retrieves weak evidence, and waffles instead of committing.
-**Fix options:**
-- [ ] Option A: KB gap — the corpus has no explicit preference statement; add one if true
-- [ ] Option B: Prompt — strengthen the "commit or say you don't have it" instruction
-**Note:** Do NOT fix by reverting the router default. That default caused defect #6.
-**Discovered by:** Claude (2026-08-19 session)
-
 ---
 
-### 6. WATCH: Grounding 4.80 → 4.70 After the T5810 Storage Reindex
-**Status:** OPEN (watch item, not a confirmed regression)
-**Severity:** LOW — graded eval PASSED; both flags are review-level, not gates
-**Discovery:** 2026-08-19, graded eval run immediately after the homelab_t5810.md reword + reindex
-**Observation:** mean grounding 4.80 → 4.70, and a new sub-2.5 flag on
-`"What Linux distributions has Chris used in production?"` that was not present in the run 40
-minutes earlier on the same code.
-**Two candidate causes, not yet separated:**
-- Run-to-run variance. Generation is temperature 0.2 and the judge is an LLM; a 0.10 swing on a
-  30-item mean is plausibly noise. One re-run would tell.
-- Real effect of the edit. Adding a `### Storage` section to `homelab_t5810.md` shifts chunk
-  boundaries in that doc, which can displace OS/distro content into a different chunk and change
-  what surfaces under the ≤2-per-doc cap.
-**Next step:** re-run `scripts/eval_graded.py` unchanged. If 4.70 reproduces, diff retrieval for
-that question against the pre-reindex ranking before touching anything.
-**Do not** "fix" this by reverting the storage reword — that fix is verified on 4 of 5 phrasings.
-**Discovered by:** Claude (2026-08-19 session)
+## BASELINE — `qwen3.8-27b`, established 2026-08-29
+
+**Every quality number recorded before this date is void.** They were measured against
+`qwen2.5-coder-14b`; production now serves `qwen3.8-27b` (FP8, 32K context), pinned via
+`MODEL_ID`. Measured with the reranker restored and `enable_thinking=false`:
+
+| Metric | Value |
+|---|---|
+| Graded eval | **PASSED** — 32 grounded evals, **mean grounding 4.78** |
+| Safety hard-fails (PII / prompt-leak) | 0 |
+| Transport errors | 0 |
+| Review-level warnings (⚠) | **0** — first run on record with none |
+| Consistency battery | **7/7 probes at 5/5** |
+| Self-test | 3/3 |
+
+Superseded numbers: 4.80/4.70 grounding, the base-vs-LoRA A/B (0.983 vs 1.000), and
+"pscode 0.71" in defect #1. Do not compare across the model change.
 
 ---
 
 ## CLOSED DEFECTS
+
+### 5. "Favorite Language" Answers Neither Way — CLOSED 2026-08-29 (0cf8af1)
+**Was:** `"What is Chris's favorite programming language?"` scored g=1, "neither cleanly
+refused nor substantive". The 2026-08-19 entry guessed at two causes and named the wrong
+one first — it supposed a KB gap. There was no gap.
+**Actual root cause (found 2026-08-29 when the answer got worse, not better):** the fact
+was present AND indexed but **unrankable**. `"Favorite languages: Python and SQL"` sat at
+`RESUME.md:49` inside the "Automation & Scripting" list, so the chunk's dominant topic was
+tooling. For the natural phrasing the resume did not appear in the top-5 at all (best
+score 0.0587, all unrelated docs) and the model lifted **"Bash"** from a tangential
+sysadmin chunk and asserted it as a preference — Bash IS in the KB, as a scripting tool.
+So between 08-19 and 08-29 this silently escalated from waffling to confidently wrong.
+**Fix:** a Preferences section high in `RESUME.md` (placed AFTER Education so as not to
+displace that fix) + a `favorite/favourite/preferred/prefers/preference/go-to` alias
+group. Retrieval: absent from top-5 → **rank 1 at 0.9591**.
+**Verification:** graded eval `[ok] refuse_ok g=3` (was `[FAIL] g=1`); consistency battery
+probe 5/5 forbidding "favorite … is bash/powershell".
+**Lesson — third instance of one pattern.** Education, T5810 storage, and now this: the
+fact was in the KB every time, and every time the failure was that it could not rank.
+"Add it to the KB" is not a fix; **verify it retrieves for the phrasing users actually
+type.** Section placement within a merged chunk is a retrieval lever, not cosmetics.
+
+### 6. WATCH: Grounding 4.80 → 4.70 — CLOSED 2026-08-29, SUPERSEDED
+Never resolved on its own terms and no longer resolvable: the model changed underneath it,
+voiding both numbers. The watch item asked whether 4.70 was noise or a chunk-boundary
+effect; the new baseline is 4.78 with zero review warnings, so whatever it was is not
+present now. Do not re-open — re-measure against the baseline above instead.
 
 ### 6. Router Default Deflected a Third of the Golden Set — CLOSED 2026-08-19 (4565c8b)
 **Severity:** HIGH (user-facing; the site refused to describe the person it exists to describe)

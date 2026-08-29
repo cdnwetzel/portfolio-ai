@@ -118,7 +118,16 @@ after committing. **Effort:** ~15 min.
 
 ## P2 — Quality, and why every prior measurement is now void
 
-### P2.1 — Re-baseline everything against `qwen3.8-27b`
+### P2.1 — Re-baseline everything against `qwen3.8-27b` — ✅ DONE 2026-08-29
+**New baseline (reranker restored, `enable_thinking=false`):** graded eval PASSED, 32
+grounded evals, **mean grounding 4.78**, 0 safety hard-fails, 0 transport errors, and
+**zero review-level warnings** — the first run on record with none. Consistency battery
+**7/7 probes at 5/5**. Self-test 3/3. Recorded in DEFECT_LEDGER under "BASELINE".
+**Closed on the way:** ledger #5 (favorite-language, root cause was a retrieval miss, not
+the KB gap the original entry guessed at) and #6 (superseded by the model change).
+**Do not** compare these to 4.80/4.70 or to "pscode 0.71" — different model.
+
+### P2.1 (original) — Re-baseline everything against `qwen3.8-27b`
 **The model changed, so all existing quality numbers are meaningless.** Specifically
 void: the golden-set grounding baseline (4.70–4.80), the consistency battery's 6/6,
 the base-vs-LoRA A/B, and DEFECT_LEDGER #1's "0.71 pscode" figure. Every one of those
