@@ -14,7 +14,7 @@ exists (see P3).
 | Embedder :8005 | Working | `http=200` from VPS |
 | Qdrant :6333 | Working | retrieval returns 5 sources |
 | Verifier :8007 | Working | `{"status":"ok","backend":"ollama","model":"qwen2.5:14b-instruct-q4_k_m"}` |
-| **Reranker** | **DOWN** | :8016 and :8006 both `http=000`; no :8006 listener on .20/.115/.125/.67 |
+| **Reranker** | **Restored 12:21, unmanaged** | `/rerank 200 OK`, "Reranked 15 candidates"; `nohup` process, no supervisor — see P0.3 |
 | Compress :8788 | Listening, no `/health` | `COMPRESS_URL` set in unit; undocumented |
 | Deploy stamp | **Stale** | `DEPLOY_GIT_SHA=0b10cae`, actual code `199a639` |
 
@@ -37,7 +37,37 @@ environment — almost certainly a partially-completed pip upgrade.
 streaming first on every request, so no redeploy is needed once the host is repaired.
 **Effort:** minutes, once someone is on that box.
 
-### P0.2 — The reranker is gone
+### P0.2 — The reranker is gone — ✅ RESTORED 2026-08-29 12:21, but UNMANAGED
+**Resolved:** Chris started `rerank.py` manually on asrock (.115:8006). It is reachable
+through the existing `8016 → asrock:8006` tunnel forward, which is already the proxy's
+default `RERANK_URL` — so no config change or redeploy was needed and reranking resumed
+immediately. Verified live: `POST /rerank 200 OK`, `Reranked 15 candidates`, zero
+`Rerank error` entries. Retrieval latency ~100 ms → 762 ms, i.e. the cross-encoder pass
+is genuinely running again.
+
+**Still open — see P0.3.** It is a `nohup` process, not a supervised service.
+
+### P0.3 — The rerank OpenRC wrapper is broken (NEW)
+**Impact:** the reranker is alive only because of a manual `nohup`. It will not come back
+after a reboot, an OOM kill, or a crash — and its absence is silent, because the proxy
+fails open to cosine. That is precisely how it went missing the first time and stayed
+missing long enough to matter.
+**Symptom:** `rc-service rerank-service start` reports "already starting" but never
+brings the port up; `rerank.py` runs fine when launched directly. Logs currently going
+to `/home/chris/rerank-service/rerank.log`.
+**Likely causes:** a stale pidfile or supervise directory leaving OpenRC believing the
+service is mid-start; or `start-stop-daemon` backgrounding semantics mismatched to how
+`rerank.py` daemonises (needs `--background` / `--make-pidfile`, or the script must not
+fork). Check for a stale pid under `/run/` first — that alone produces the
+"already starting" wedge.
+**Fix:** repair the wrapper so it supervises the process properly, then `rc-update add`
+so it survives reboot. Chris's other session offered to do this — **yes, worth doing.**
+**Verify:** `rc-service rerank-service restart`, confirm :8006 listens, reboot-test if
+practical, and confirm `Rerank error` stays absent from the proxy log.
+**Note:** this is the same class as DEFECT_LEDGER #2 (judge timeout wrapper living in
+`/tmp`) — critical path depending on an unmanaged process. Worth a sweep for others.
+
+### P0.2 (original diagnosis, retained for context) — The reranker is gone
 **Impact:** retrieval is failing open to cosine top-5. Every answer is being generated
 from bi-encoder candidates with no cross-encoder precision pass. This is the "15.8x
 faster GPU reranker" from Tier 3 — it is simply not running.
@@ -157,13 +187,17 @@ reconcile CLAUDE.md against measured reality instead of guessing.
 
 ## Suggested order
 
-1. **P1.1** monitoring — so the next outage is visible. Everything else is guesswork without it.
-2. **P0.1** streaming — small fix, large UX win, needs someone on the vLLM host.
-3. **P0.2** reranker — decide host and device, then wire it.
-4. **P3** docs — cheap once you answer the topology question, and it stops the next session starting from false premises.
-5. **P2.1** re-baseline — only meaningful after 2 and 3 are done.
-6. **P2.2 / P2.3** tuning experiments, against the new baseline.
+1. ~~**P0.2** reranker~~ — ✅ done 2026-08-29 12:21.
+2. **P1.1** monitoring — so the next outage is visible. Everything else is guesswork
+   without it, and P0.3 makes it urgent: an unmanaged reranker can vanish silently again.
+3. **P0.3** rerank OpenRC wrapper — the reranker is one reboot from disappearing.
+4. **P0.1** streaming — small fix, large UX win, needs someone on the vLLM host.
+5. **P2.1** re-baseline — now unblocked (reranker is back; streaming affects UX, not
+   answer quality). **In progress 2026-08-29.**
+6. **P3** docs — cheap once the topology question is answered, and it stops the next
+   session starting from false premises.
+7. **P2.2 / P2.3** tuning experiments, against the new baseline.
 
-**One-line summary:** the site is up but running without a reranker and without
-streaming, on an unevaluated model, with monitoring that cannot detect its own failure.
-Fix the monitoring first.
+**One-line summary:** the site is up with retrieval fully restored, but it streams
+nothing, runs on an unevaluated model, depends on an unsupervised reranker process, and
+is watched by monitoring that cannot detect its own failure. Fix the monitoring first.

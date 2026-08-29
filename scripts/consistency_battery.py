@@ -87,6 +87,23 @@ def probes() -> list:
             "note": "Asrock spec-sheet confabulation (ledger #1, case A)",
         },
         {
+            # 2026-08-29: answered "Bash" while RESUME.md states "Favorite
+            # languages: Python and SQL". Same shape as the education miss — the
+            # fact was indexed but unrankable: it sat inside the Automation &
+            # Scripting skills list, so "favorite programming language" retrieved
+            # tangential sysadmin chunks (top score 0.0587, resume absent from
+            # top-5) and the model lifted "Bash" from one of them. Fixed with a
+            # Preferences section high in the resume + a favorite/preferred alias
+            # group. Bash and PowerShell are forbidden here precisely because they
+            # ARE in the KB as scripting tools — the failure is preferring them.
+            "q": "What is Chris's favorite programming language?",
+            "expect_any": ["python"],
+            "forbid": ["favorite programming language is bash",
+                       "favorite language is bash",
+                       "favorite programming language is powershell"],
+            "note": "favorite-language confabulation (2026-08-29)",
+        },
+        {
             # 2026-07 live failure (golden-set regression item): invented
             # "40 GB of storage" (aggregate VRAM mislabeled) and "AMD GPUs".
             "q": "Tell me about the GPU home lab setup",

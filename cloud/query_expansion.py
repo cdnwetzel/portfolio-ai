@@ -36,6 +36,10 @@ ALIAS_GROUPS: List[List[str]] = [
     ["t5810", "home server", "homelab", "precision t5810", "dell precision"],
     ["resume", "cv", "experience", "background", "career history"],
     ["school", "college", "education", "university", "degree", "tcnj"],
+    # "favorite X" questions retrieved the skills list instead of the stated
+    # preference, and the model answered "Bash" against a KB that says Python and
+    # SQL (2026-08-29). Pull preference vocabulary toward the Preferences section.
+    ["favorite", "favourite", "preferred", "prefers", "preference", "enjoys most", "go-to"],
     ["nvlink", "tensor parallel", "tensor parallelism"],
     ["websocket", "streaming", "real-time chat", "real time chat"],
 ]

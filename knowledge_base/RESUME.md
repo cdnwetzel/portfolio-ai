@@ -30,6 +30,22 @@ Focus: Systems administration, help desk support
 
 ---
 
+## Preferences — Languages, OS, Tools
+
+Stated plainly here because "what's your favorite X" is a common question and the answer
+was previously buried inside a skills list, where it did not rank. Deliberately near the
+top of this document so it lands in a chunk about preferences rather than about tooling.
+
+- **Favorite programming languages: Python and SQL.** The two I reach for most and enjoy
+  working in. PowerShell and Bash are tools I use heavily for automation, but they are
+  not my favorites — do not confuse "languages I script in" with "languages I prefer".
+- **Operating system of choice: Gentoo Linux.** Every machine I control runs Gentoo with
+  OpenRC — the T5810 GPU server, the asrock B550, and the rest of the fleet. See
+  "Why Gentoo" for the reasoning. (The cloud VPS runs Ubuntu because it is a rented edge
+  node, not a machine I chose the OS for.)
+
+---
+
 ## Core Expertise Areas
 
 ### Enterprise Infrastructure (26 years)
