@@ -39,6 +39,23 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 VLLM_URL   = os.environ.get("VLLM_URL", "http://127.0.0.1:8004")
+
+# The served model id is pinned HERE, server-side. It used to come from the browser
+# (useChat.js sent a hardcoded string), which meant renaming a model on the T5810
+# silently broke the whole site: vLLM answered model_not_found, the proxy swallowed
+# it, and every visitor got a blank bubble while /health stayed green (2026-08-29).
+# A client must never choose the backend model. Override with MODEL_ID in the unit
+# file when the fleet changes; never edit the frontend for this again.
+MODEL_ID   = os.environ.get("MODEL_ID", "qwen3.8-27b")
+
+# Reasoning builds (qwen3.8-27b is one) emit chain-of-thought into a separate
+# `reasoning` field and spend the max_tokens budget on it BEFORE producing any
+# `content`. On 2026-08-29 that meant long answers came back completely empty:
+# 2048 tokens of thinking, zero tokens of answer. Grounded RAG QA gains nothing from
+# CoT — the reasoning is "read the sources and quote them" — so it is disabled and
+# the whole budget goes to the answer. Set DISABLE_THINKING=0 if a future pinned
+# model's chat template rejects the kwarg.
+DISABLE_THINKING = os.environ.get("DISABLE_THINKING", "1") == "1"
 QDRANT_URL = "http://127.0.0.1:6333"
 EMBED_URL  = "http://127.0.0.1:8005"
 RERANK_URL = os.environ.get("RERANK_URL", "http://127.0.0.1:8016")  # Tier 3: GPU reranker on asrock via tunnel 8016
@@ -388,6 +405,50 @@ async def search_knowledge_base(query: str, retrieve_limit: int = RAG_RETRIEVE_L
         return [], []
 
 
+class StreamRejected(RuntimeError):
+    """vLLM refused the streaming request itself, rather than dropping mid-stream.
+
+    Distinct from a transport blip because retrying the same streaming call cannot
+    help — the serving side is unable to stream at all. Seen 2026-08-29 as
+    `HTTP 500: No module named 'anyio._backends'`, where /v1/models and
+    non-streaming completions both worked and only the streaming path failed.
+    The caller falls back to a single-shot completion so the site stays up.
+    """
+
+
+async def _complete_once(websocket: WebSocket, body: dict) -> tuple[str, bool, dict]:
+    """Non-streaming fallback: fetch the whole answer, emit it as one chunk frame.
+
+    Degraded but correct — the client's frame contract is unchanged, so it renders
+    normally; the answer simply appears at once instead of token by token. This is
+    deliberately automatic and self-healing: streaming is always attempted first, so
+    when the serving host is repaired the site returns to streaming with no redeploy.
+    """
+    t_start = time.perf_counter()
+    single = dict(body)
+    single["stream"] = False
+    r = await _http.post(f"{VLLM_URL}/v1/chat/completions", json=single, timeout=120.0)
+    if r.status_code != 200:
+        raise RuntimeError(f"vLLM HTTP {r.status_code} (non-streaming): {r.text[:300]}")
+    data = r.json()
+    msg = (data.get("choices") or [{}])[0].get("message") or {}
+    # `reasoning` / `reasoning_content` are the model's chain of thought on reasoning
+    # builds; only `content` is the answer, and only `content` may reach the client.
+    text = msg.get("content") or ""
+    if text:
+        await websocket.send_json(
+            {"type": "chunk", "data": {"choices": [{"delta": {"content": text}}]}}
+        )
+    elapsed = int((time.perf_counter() - t_start) * 1000)
+    usage = data.get("usage") or {}
+    meta = {
+        "ttft_ms": None,            # no first-token signal exists in this mode
+        "generation_ms": elapsed,
+        "completion_tokens": usage.get("completion_tokens") or count_tokens(text),
+    }
+    return text, bool(text), meta
+
+
 async def _stream_completion(websocket: WebSocket, body: dict) -> tuple[str, bool, dict]:
     """Stream one vLLM chat completion to the websocket.
     Returns (full_response, got_token, meta), where meta is metadata-only telemetry
@@ -401,6 +462,14 @@ async def _stream_completion(websocket: WebSocket, body: dict) -> tuple[str, boo
     async with _http.stream(
         "POST", f"{VLLM_URL}/v1/chat/completions", json=body, timeout=120.0
     ) as response:
+        # A non-200 body is JSON, not SSE, so the loop below would find no "data: "
+        # lines and return an empty answer with no exception — which the caller then
+        # reported as success. That is exactly how a model rename on the T5810 became
+        # a site-wide outage rendering blank bubbles while /health stayed green
+        # (2026-08-29). Fail loudly instead.
+        if response.status_code != 200:
+            detail = (await response.aread()).decode("utf-8", "replace")[:300]
+            raise StreamRejected(f"vLLM HTTP {response.status_code}: {detail}")
         async for line in response.aiter_lines():
             if not line.startswith("data: "):
                 continue
@@ -512,6 +581,12 @@ async def websocket_chat(websocket: WebSocket):
             body = data.get("payload", {})
             messages = body.get("messages", [])
             body["stream"] = True
+            # Ignore any client-supplied model. See MODEL_ID above.
+            body["model"] = MODEL_ID
+            if DISABLE_THINKING:
+                kwargs = dict(body.get("chat_template_kwargs") or {})
+                kwargs["enable_thinking"] = False
+                body["chat_template_kwargs"] = kwargs
             # Grounded-RAG sampling: low temperature, NO presence penalty. presence_penalty
             # punishes re-using tokens already seen, which on a factual task forces lexical
             # novelty and causes paraphrase drift / word-substitution — the suspected cause
@@ -685,6 +760,17 @@ async def websocket_chat(websocket: WebSocket):
                     full_response, got_token, stream_meta = await _stream_completion(websocket, body)
                     last_error = None
                     break
+                except StreamRejected as reject:
+                    # Retrying the stream is pointless — the server can't stream at all.
+                    # Degrade to one-shot so visitors get an answer instead of nothing.
+                    logger.error(f"Streaming rejected by vLLM; falling back to non-streaming: {reject}")
+                    try:
+                        full_response, got_token, stream_meta = await _complete_once(websocket, body)
+                        last_error = None
+                    except Exception as fallback_error:
+                        logger.error(f"Non-streaming fallback also failed: {fallback_error}")
+                        last_error = fallback_error
+                    break
                 except Exception as stream_error:
                     last_error = stream_error
                     if got_token:
@@ -695,9 +781,19 @@ async def websocket_chat(websocket: WebSocket):
                         continue
                     logger.error(f"Stream error after retry: {stream_error}")
 
-            if last_error is not None and not got_token:
+            # `not got_token` is the condition, not just `last_error` — a request that
+            # produced zero tokens WITHOUT raising used to fall through to the success
+            # branch and emit `done` with completion:0, rendering a blank bubble. There
+            # must be no path to an empty answer that looks like success.
+            if not got_token:
+                logger.error(f"Generation produced no tokens; last_error={last_error!r}")
                 try:
-                    await websocket.send_json({"type": "error", "message": str(last_error)})
+                    # Generic text: the detail (which can name internal models/hosts)
+                    # goes to the log, not to a public client.
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": "The model backend is unavailable. Please try again.",
+                    })
                 except Exception:
                     pass
             else:
