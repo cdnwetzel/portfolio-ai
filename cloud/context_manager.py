@@ -2,6 +2,7 @@
 Pure functions for chat context management.
 Extracted here so they can be unit-tested without the full FastAPI stack.
 """
+from datetime import date
 
 MAX_PROMPT_CHARS = 4000
 MAX_HISTORY_CHARS = 24000
@@ -219,3 +220,34 @@ def estimate_answer_length(query: str) -> int:
     else:
         # Long/complex question -> full answer with details (2048 tokens ~800-1000 words)
         return 2048
+
+
+def server_facts_block(birthdate: str = "", today: "date | None" = None) -> str:
+    """Deterministic, server-computed facts injected into the system prompt on every
+    RAG turn. Recomputed per request, so never stale.
+
+    Why this exists (DEFECT_LEDGER #1, live 2026-08-22): asked "how old is Chris",
+    the model pattern-matched the KB's ubiquitous "26 years of experience" onto age
+    and answered "Chris Wetzel is 26 years old" — the KB has no age statement at all,
+    so retrieval had nothing true to offer. Age is computed HERE, not by the model:
+    LLM date arithmetic is unreliable, and a static "Chris is N" fact in the KB goes
+    stale on his birthday. Only the computed age reaches the prompt; the birthdate
+    itself is config and never becomes prompt text.
+
+    `birthdate` is ISO "YYYY-MM-DD"; empty or unparseable omits the age line.
+    Positive facts only — never write a wrong value here even to negate it.
+    """
+    today = today or date.today()
+    lines = [f"- Today's date is {today.isoformat()}."]
+    if birthdate:
+        try:
+            dob = date.fromisoformat(birthdate)
+        except ValueError:
+            dob = None
+        if dob is not None:
+            age = today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
+            lines.append(f"- Chris Wetzel is {age} years old as of today.")
+    return (
+        "\nSERVER FACTS (computed by the server at request time — always current; "
+        "trust these over retrieved documents):\n" + "\n".join(lines) + "\n"
+    )

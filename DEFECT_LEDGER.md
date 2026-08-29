@@ -71,6 +71,36 @@ prompt and sampling. **The defect is stochastic at temperature 0.2**, so single-
 cannot resolve it. Next step: k≥5 samples per question per arm, and a temperature-0 arm, before any
 serving change. Harness: `scratchpad/lora_ab.py` (runs on the VPS; no restart, live site unaffected).
 
+*Two more live instances (2026-08-22), reported by Chris:*
+- **Age confabulation.** `"how old is Chris"` → *"Chris Wetzel is 26 years old."* The KB has no age
+  statement anywhere; the model pattern-matched the corpus's ubiquitous "26 years of experience"
+  onto the age attribute. The verifier DID flag it, but the flag is advisory — the wrong answer
+  still rendered. **Fix:** `server_facts_block()` (context_manager.py) computes age from
+  `OWNER_BIRTHDATE` at request time and injects it into the system prompt as a SERVER FACTS block
+  (DOB never reaches the prompt, client, or logs — only the computed age); a GROUNDING bullet now
+  bars inferring personal facts ("years of experience is not an age"); the block is also appended
+  to the judge's evidence so a correct age answer isn't flagged "unsupported".
+- **Education: refusal AND confabulation on consecutive days.** 2026-08-21: `"where did Chris go to
+  school"` → invented *Rowan*. 2026-08-22: same question → refused outright. Root cause is a
+  **retrieval miss**, not a KB gap: `RESUME.md` always had the Education section (The College of New
+  Jersey), but `/api/retrieve` showed the education chunk never ranking into the generator's top-5 —
+  even the KB's own vocabulary ("Chris education college degree") placed it rank 4 at rerank score
+  0.0004. **Fix:** school/college/education/university/degree/tcnj alias group in query_expansion.py
+  + resume wording now includes "TCNJ" and "attended school". Requires reindex to take effect.
+
+*k-sample harness:* `scripts/consistency_battery.py` asks each documented-failure probe k times
+(default 5) with deterministic expect/forbid substring checks and gates on k/k — the harness the
+stochastic defect always needed. **Results 2026-08-22:** baseline (pre-fix, live) FAILED — age 0/5
+(consistently "41 years old as of 2023": no date anchor at all), school 0/5 (consistent refusal),
+T5810 storage 1/5 (the stochastic negation, reproduced). Post-fix run 1: age 5/5, T5810 5/5,
+school 0/5 — the alias group + wording alone didn't move the education chunk, because the chunker's
+greedy 400-word merge had buried it at the tail of a work-history chunk, past the reranker's
+512-token truncation (rerank score 0.0000 — the cross-encoder literally never saw it). Moving the
+Education section up after Professional Summary put it in the resume's header chunk (37% depth);
+rerank score went 0.0000 → 0.5760 at rank 1. Post-fix run 2: **6/6 probes at 5/5 = PASSED**.
+Lesson: a chunk that ranks on embedding but whose relevant text sits beyond the reranker's
+512-token window is scored blind — section placement within a merged chunk is a retrieval lever.
+
 ---
 
 ### 2. Judge Timeout Wrapper: Infrastructure Debt

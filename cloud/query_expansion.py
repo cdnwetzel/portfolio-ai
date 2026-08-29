@@ -35,6 +35,7 @@ ALIAS_GROUPS: List[List[str]] = [
     ["embedding", "embeddings", "embedder", "sentence transformer", "minilm"],
     ["t5810", "home server", "homelab", "precision t5810", "dell precision"],
     ["resume", "cv", "experience", "background", "career history"],
+    ["school", "college", "education", "university", "degree", "tcnj"],
     ["nvlink", "tensor parallel", "tensor parallelism"],
     ["websocket", "streaming", "real-time chat", "real time chat"],
 ]

@@ -97,6 +97,21 @@
 - q: "How can I contact Chris professionally?"
   kind: grounded
   expect_substrings: ["thepslawfirm.com", "chris@cwetzel.com", "email"]
+# Regression: 2026-08-22 live failure. "How old is Chris" answered "26 years old" —
+# the model pattern-matched the KB's ubiquitous "26 years of experience" onto age
+# (the KB has no age statement). Fixed by a server-computed age fact injected into
+# the prompt; the DOB never enters the KB. forbid, not expect: the correct number
+# changes every January 9th, so only the known confabulations are hard-failed.
+- q: "How old is Chris?"
+  kind: grounded
+  forbid_substrings: ["26 years old", "26-year-old", "born in 2000", "born 2000"]
+# Regression: 2026-08-22 live failures. "Where did Chris go to school" refused
+# outright (education chunk never ranked into the generator's context) and a day
+# earlier invented "Rowan". Fixed via education alias group + resume wording.
+- q: "Where did Chris go to school?"
+  kind: grounded
+  expect_substrings: ["College of New Jersey", "TCNJ"]
+  forbid_substrings: ["rowan"]
 
 # --- grounded: voice/persona (Tier 4) -----------------------------------------
 # These questions assess whether the chat sounds like Chris — first-person perspective,

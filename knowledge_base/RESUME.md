@@ -19,6 +19,17 @@ IT infrastructure professional with 26 years managing enterprise systems at scal
 
 ---
 
+## Education
+
+### The College of New Jersey (TCNJ)
+Chris attended school at **The College of New Jersey (TCNJ)**, Ewing, NJ.
+**Bachelor of Science (B.S.), Business Information Systems Management** (2000–2004)
+
+Supplementary coursework: 18 credits in Computer Science  
+Focus: Systems administration, help desk support
+
+---
+
 ## Core Expertise Areas
 
 ### Enterprise Infrastructure (26 years)
@@ -93,16 +104,6 @@ Provided proactive infrastructure management and strategic consulting to 50+ ent
 - **Disaster Recovery:** BDR implementation, backup automation, business continuity testing
 - **Automation:** PowerShell-based software deployment via N-Central RMM, complex infrastructure automation
 - **Project Management:** Planning, implementation, stakeholder communication across multiple client sites
-
----
-
-## Education
-
-### The College of New Jersey
-**Bachelor of Science (B.S.), Business Information Systems Management** (2000–2004)
-
-Supplementary coursework: 18 credits in Computer Science  
-Focus: Systems administration, help desk support
 
 ---
 

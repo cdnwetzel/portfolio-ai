@@ -22,6 +22,7 @@ from context_manager import (
     fit_context_docs,
     count_tokens,
     estimate_answer_length,
+    server_facts_block,
     MAX_PROMPT_CHARS,
     MAX_CONTEXT_TOKENS,
 )
@@ -81,6 +82,13 @@ COMPRESS_TIMEOUT = float(os.environ.get("COMPRESS_TIMEOUT", "3.0"))
 COMPRESS_TARGET_RATIO = float(os.environ.get("COMPRESS_TARGET_RATIO", "0.5"))
 COMPRESS_PROTECT_RECENT = int(os.environ.get("COMPRESS_PROTECT_RECENT", "0"))
 
+# Owner birthdate (ISO) for the server-computed age fact (server_facts_block).
+# In-code default on purpose: the repo is private, and out-of-repo config is a known
+# loss vector (the 4-day verifier outage, closed defect #5). Only the computed age is
+# injected into the prompt — the DOB itself never reaches the model, client, or logs.
+# Env-overridable if this file is ever shared outside the private repo.
+OWNER_BIRTHDATE = os.environ.get("OWNER_BIRTHDATE", "1982-01-09")
+
 # RAG retrieval: pull a wide candidate set via cosine, then rerank to the best few.
 # bge-base cosine is imprecise — good enough to surface candidates into the top-15,
 # not to pick the best 5. The CPU cross-encoder (T5810:8006) closes that gap.
@@ -131,6 +139,7 @@ GROUNDING (mandatory for every answer):
 - Every fact I state comes ONLY from the knowledge base documents shown to you. No outside knowledge, no hallucination.
 - If I don't have documented information, I say: "I don't have that documented in my knowledge base."
 - I state facts exactly as written: no embellishment, no inferred numbers or dates. Specifications stay precise.
+- Personal facts about Chris (age, birthday, family, home address) come ONLY from the SERVER FACTS block or the knowledge base documents. Never infer them from other facts — years of experience is not an age.
 - When sources conflict: "My knowledge base has conflicting information on this."
 
 VOICE (how I answer):
@@ -583,7 +592,11 @@ async def websocket_chat(websocket: WebSocket):
                                            "prompt_version": PROMPT_VERSION, "verify": False})
                 continue
 
-            system_prefix = SYSTEM_PREFIX
+            # Server-computed facts (date, age) — see server_facts_block. Dynamic per
+            # request so never stale; deliberately OUTSIDE SYSTEM_PREFIX so
+            # PROMPT_VERSION keeps hashing only the static, attributable prompt.
+            facts_block = server_facts_block(OWNER_BIRTHDATE)
+            system_prefix = SYSTEM_PREFIX + facts_block
             system_suffix = SYSTEM_SUFFIX
 
             context_docs = fit_context_docs(
@@ -716,8 +729,14 @@ async def websocket_chat(websocket: WebSocket):
                 # Out-of-band faithfulness check (verifier plan §7.1): post-`done`,
                 # fire-and-forget, no-op unless VERIFIER_URL is set. Never blocks.
                 if will_verify:
+                    # Give the judge the same server facts the generator saw, so a
+                    # correct server-sourced answer (e.g. the computed age) isn't
+                    # flagged "unsupported" just because it isn't in a KB chunk.
+                    evidence_for_judge = evidence_docs + [
+                        {"title": "Server facts", "source": "server", "content": facts_block}
+                    ]
                     asyncio.create_task(
-                        _fire_verify(request_id, user_query, full_response, evidence_docs, websocket)
+                        _fire_verify(request_id, user_query, full_response, evidence_for_judge, websocket)
                     )
                 else:
                     logger.debug(f"verifier skipped: low retrieval relevance (top_score={top_score:.3f})")

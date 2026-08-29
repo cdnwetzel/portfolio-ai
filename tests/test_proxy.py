@@ -15,6 +15,7 @@ from context_manager import (
     count_tokens,
     truncate_text_to_tokens,
     format_doc_block,
+    server_facts_block,
     MAX_PROMPT_CHARS,
     MAX_HISTORY_CHARS,
 )
@@ -194,3 +195,46 @@ def test_compact_history_by_tokens_drops_pairs():
     ]
     result = compact_history_by_tokens(messages, max_tokens=10)
     assert result == [msg("user", "short"), msg("assistant", "short")]
+
+
+# --- server_facts_block ---
+# Deterministic age/date facts injected into the system prompt (2026-08-22 live
+# confabulation: "how old is Chris" answered "26 years old" by pattern-matching
+# "26 years of experience"). Age math must be exact — never the model's job.
+
+from datetime import date
+
+
+def test_server_facts_age_before_birthday():
+    # Jan 9 1982 birthdate; on Jan 8 2026 the birthday hasn't happened yet -> 43
+    block = server_facts_block("1982-01-09", today=date(2026, 1, 8))
+    assert "43 years old" in block
+
+
+def test_server_facts_age_on_birthday():
+    block = server_facts_block("1982-01-09", today=date(2026, 1, 9))
+    assert "44 years old" in block
+
+
+def test_server_facts_age_after_birthday():
+    block = server_facts_block("1982-01-09", today=date(2026, 8, 22))
+    assert "44 years old" in block
+    assert "2026-08-22" in block  # today's date is always stated
+
+
+def test_server_facts_never_contains_birthdate():
+    # Only the computed age reaches the prompt — the DOB itself must not.
+    block = server_facts_block("1982-01-09", today=date(2026, 8, 22))
+    assert "1982" not in block
+    assert "01-09" not in block
+
+
+def test_server_facts_empty_birthdate_omits_age():
+    block = server_facts_block("", today=date(2026, 8, 22))
+    assert "years old" not in block
+    assert "2026-08-22" in block  # date line still present
+
+
+def test_server_facts_invalid_birthdate_omits_age():
+    block = server_facts_block("not-a-date", today=date(2026, 8, 22))
+    assert "years old" not in block

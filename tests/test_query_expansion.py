@@ -51,3 +51,13 @@ def test_no_duplicate_terms():
     assert len(terms) == len(set(terms))
     # 'inference server' already present, so it isn't re-added
     assert "inference server" not in terms
+
+
+def test_school_alias_group():
+    # "school" must pull in the KB's own education vocabulary (2026-08-22 live
+    # retrieval miss: "where did Chris go to school" never surfaced the resume's
+    # Education chunk).
+    terms = expansion_terms("where did chris go to school")
+    assert "education" in terms
+    assert "college" in terms
+    assert "school" not in terms  # already in the query
