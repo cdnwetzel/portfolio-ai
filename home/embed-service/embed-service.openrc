@@ -4,16 +4,36 @@
 # CPU embedding service (BAAI/bge-base-en-v1.5, 768-d) on port 8005. Sibling of rerank-service (8006).
 
 name="Embedding Service"
-description="SentenceTransformers bge-base-en-v1.5 FastAPI server"
+description="bge-base-en-v1.5 (768-d) CPU embedding server on :8005"
 
 supervisor="supervise-daemon"
 command="/home/chris/miniforge3/bin/python3"
 command_args="/opt/embed-service/embed.py"
 pidfile="/run/embed-service.pid"
-respawn_delay=5
-respawn_max=5
-respawn_period=30
 command_user="chris:chris"
+: "${EMBED_LOG:=/var/log/embed-service.log}"
+output_log="${EMBED_LOG}"
+error_log="${EMBED_LOG}"
+
+# Respawn/logging discipline — set from failures observed 2026-08-29/30:
+#   * respawn_max=0 (UNLIMITED). A bounded cap does not "give up gracefully", it
+#     LATCHES THE SERVICE OFF permanently after a transient squeeze. qdrant hit
+#     exactly this (its unit records "respawn_max exceeded -> service latched off")
+#     and rerank-service hit it too. Both were fixed in isolation; the lesson had
+#     not propagated here.
+#   * output_log/error_log. Without them a crash leaves NOTHING behind — the
+#     rerank-service outage was undiagnosable for precisely this reason, and the
+#     vLLM investigation lost time to an OpenRC log that had been empty since Aug 23
+#     while the real process logged somewhere undeclared.
+#   * respawn_delay=15, not 5. With unlimited respawns, 5s hammers a hard-failing
+#     service ~12x/min and floods the log it now writes.
+#
+# EMBED IS THE ONE WITH NO FAIL-OPEN PATH. The reranker degrades to cosine and the
+# verifier is fully fail-open, but no embeddings means no query vector, which means
+# no retrieval at all and every answer becomes "I don't have that documented".
+# Latching this off is a total outage, so it must never latch off.
+respawn_delay=15
+respawn_max=0
 
 depend() {
     need localmount
@@ -21,6 +41,6 @@ depend() {
 }
 
 start_pre() {
-    mkdir -p /opt/embed-service
-    chown -R chris:chris /opt/embed-service
+    checkpath -d -m 0755 -o chris:chris /opt/embed-service
+    checkpath -f -m 0644 -o chris:chris "${EMBED_LOG}"
 }

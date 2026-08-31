@@ -13,10 +13,29 @@ supervisor="supervise-daemon"
 command="/home/chris/miniforge3/bin/python3"
 command_args="/opt/verifier-service/verifier.py"
 pidfile="/run/verifier-service.pid"
-respawn_delay=5
-respawn_max=5
-respawn_period=30
 command_user="chris:chris"
+: "${VERIFIER_LOG:=/var/log/verifier-service.log}"
+output_log="${VERIFIER_LOG}"
+error_log="${VERIFIER_LOG}"
+
+# Respawn/logging discipline — set from failures observed 2026-08-29/30:
+#   * respawn_max=0 (UNLIMITED). A bounded cap does not "give up gracefully", it
+#     LATCHES THE SERVICE OFF permanently after a transient squeeze. qdrant hit
+#     exactly this (its unit records "respawn_max exceeded -> service latched off")
+#     and rerank-service hit it too. Both were fixed in isolation; the lesson had
+#     not propagated here.
+#   * output_log/error_log. Without them a crash leaves NOTHING behind — the
+#     rerank-service outage was undiagnosable for precisely this reason, and the
+#     vLLM investigation lost time to an OpenRC log that had been empty since Aug 23
+#     while the real process logged somewhere undeclared.
+#   * respawn_delay=15, not 5. With unlimited respawns, 5s hammers a hard-failing
+#     service ~12x/min and floods the log it now writes.
+#
+# The verifier is fully fail-open — chat is unaffected if it dies — so its failure
+# is SILENT by design. That makes logging more important here, not less: a latched-off
+# verifier looks exactly like a verifier with nothing to flag.
+respawn_delay=15
+respawn_max=0
 
 # Config (override in /etc/conf.d/verifier-service):
 #   VERIFIER_BIND=<asrock-lan-ip>   # THIS box's LAN IP — bind here (not 0.0.0.0) so the
@@ -37,6 +56,6 @@ depend() {
 }
 
 start_pre() {
-    mkdir -p /opt/verifier-service
-    chown -R chris:chris /opt/verifier-service
+    checkpath -d -m 0755 -o chris:chris /opt/verifier-service
+    checkpath -f -m 0644 -o chris:chris "${VERIFIER_LOG}"
 }
