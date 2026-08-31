@@ -1,0 +1,119 @@
+#!/sbin/openrc-run
+# vLLM backend slot — qwen3.8-27b, T5810, port 8007.
+#
+# Install:  cp vllm-qwen38.openrc /etc/init.d/vllm-qwen38   (root:root, 0755)
+#           cp conf.d-vllm-qwen38 /etc/conf.d/vllm-qwen38
+#           rc-update add vllm-qwen38 default
+#
+# THIS REPLACES /etc/init.d/vllm, WHICH MUST BE DELETED. That unit was written in
+# June for a different model and never updated. It pointed at
+# /opt/pscode/vllm-serve-env (deleted), served qwen2.5-coder-32b-awq (not the
+# current model), and bound --port 8004 — labrouter's stable contract port. Running
+# it would have taken 8004 from labrouter and broken every chat request while
+# appearing to be a networking problem.
+#
+# Architecture (see /home/chris/ai/inference/FLEET-ENDPOINTS.md on the T5810):
+#   :8004  labrouter        <- STABLE CONTRACT PORT, the VPS tunnel forwards this
+#   :8007  vLLM backend     <- this unit (qwen3.8-27b)
+#   :8008  vLLM backend     <- Qwen3.6-35B-A3B-FP8 (not running)
+#   :8009  vLLM backend     <- pscode-14b (not running)
+# Models are swapped BEHIND labrouter so the VPS is never touched. Copy this unit
+# for a sibling slot; change VLLM_PORT and VLLM_MODEL in its conf.d, nothing else.
+#
+# Deliberate choices, each from a failure actually observed on 2026-08-29/30:
+#   * respawn_max=0 — UNLIMITED restarts. A bounded cap is how a transient squeeze
+#     becomes a permanent silent outage; qdrant and rerank-service were both bitten
+#     by exactly this, and embed-service/verifier-service still carry the old cap.
+#   * output_log/error_log — the previous unit set NEITHER. The live server had been
+#     logging to a hand-picked path with no unit to say so, and the OpenRC-era log
+#     (/var/log/pscode/vllm.log) had sat empty since Aug 23, which cost real time
+#     during diagnosis.
+#   * start_pre waits for VRAM to actually free. Stopping a 29 GB model does not
+#     release VRAM instantly; starting into the tail of a shutdown is a CUDA OOM
+#     crash-loop that looks like a broken config.
+#   * No `need net`. The backend binds 0.0.0.0 but only ever serves labrouter on
+#     localhost; a net dependency would delay boot for no benefit.
+
+name="vLLM qwen3.8-27b"
+description="vLLM backend slot serving Qwen3.8-27B-FP8 on :8007 (behind labrouter)"
+
+: "${VLLM_HOME:=/opt/vllm-service}"
+: "${VLLM_USER:=chris}"
+: "${VLLM_PORT:=8007}"
+: "${VLLM_LOG:=/var/log/qwen38/writer.log}"
+: "${VLLM_MIN_FREE_MIB:=19000}"   # ~full card; a 27B FP8 at TP=2 needs both A4500s
+: "${VLLM_VRAM_WAIT:=180}"
+: "${VLLM_READY_WAIT:=600}"       # 29 GB load + CUDA graph capture is not fast
+
+supervisor="supervise-daemon"
+command="${VLLM_HOME}/start-qwen38.sh"
+command_user="${VLLM_USER}:${VLLM_USER}"
+directory="${VLLM_HOME}"
+pidfile="/run/vllm-qwen38.pid"
+
+output_log="${VLLM_LOG}"
+error_log="${VLLM_LOG}"
+
+respawn_delay=30
+respawn_max=0
+
+depend() {
+    need localmount
+    after bootmisc
+}
+
+start_pre() {
+    if [ "${VLLM_PORT}" = "8004" ]; then
+        eerror "VLLM_PORT=8004 is labrouter's contract port; backend slots are 8007/8008/8009"
+        return 1
+    fi
+    [ -x "${command}" ] || { eerror "launcher not executable: ${command}"; return 1; }
+
+    checkpath -d -m 0755 -o "${VLLM_USER}:${VLLM_USER}" "$(dirname "${VLLM_LOG}")"
+    checkpath -f -m 0640 -o "${VLLM_USER}:${VLLM_USER}" "${VLLM_LOG}"
+
+    # Refuse to start if something already holds our port — better an honest
+    # failure than two servers fighting over one slot.
+    if ss -lnt 2>/dev/null | grep -q ":${VLLM_PORT} "; then
+        eerror "port ${VLLM_PORT} is already bound — refusing to start a second backend"
+        return 1
+    fi
+
+    # Wait for VRAM rather than crash-looping into a CUDA OOM.
+    if command -v nvidia-smi >/dev/null 2>&1; then
+        _waited=0
+        while [ "${_waited}" -lt "${VLLM_VRAM_WAIT}" ]; do
+            _free=$(nvidia-smi --query-gpu=memory.free --format=csv,noheader,nounits 2>/dev/null | sort -n | head -1 | tr -d ' ')
+            case "${_free}" in ''|*[!0-9]*) _free=0 ;; esac
+            [ "${_free}" -ge "${VLLM_MIN_FREE_MIB}" ] && break
+            [ "${_waited}" -eq 0 ] && ewarn "waiting for VRAM: ${_free} MiB free on the tightest GPU, need ${VLLM_MIN_FREE_MIB} MiB"
+            sleep 5
+            _waited=$((_waited + 5))
+        done
+        if [ "${_free:-0}" -lt "${VLLM_MIN_FREE_MIB}" ]; then
+            ewarn "proceeding after ${VLLM_VRAM_WAIT}s with ${_free} MiB free — may OOM; supervise-daemon will retry"
+        else
+            einfo "VRAM ok: ${_free} MiB free"
+        fi
+    fi
+    einfo "starting vLLM backend on :${VLLM_PORT} (log: ${VLLM_LOG})"
+}
+
+start_post() {
+    # Do not report "started" until the model is actually loaded and serving.
+    # supervise-daemon returns as soon as the process exists, which for a 29 GB
+    # model is several minutes before it can answer anything.
+    local waited=0
+    einfo "waiting for /health on :${VLLM_PORT} (up to ${VLLM_READY_WAIT}s)"
+    while [ "${waited}" -lt "${VLLM_READY_WAIT}" ]; do
+        if curl -sf -m 3 "http://127.0.0.1:${VLLM_PORT}/health" >/dev/null 2>&1; then
+            einfo "vLLM healthy on :${VLLM_PORT} after ${waited}s"
+            return 0
+        fi
+        sleep 5
+        waited=$((waited + 5))
+        [ $((waited % 60)) -eq 0 ] && einfo "  still loading ... ${waited}s  (tail -f ${VLLM_LOG})"
+    done
+    eerror "vLLM did not become healthy within ${VLLM_READY_WAIT}s — see ${VLLM_LOG}"
+    return 1
+}

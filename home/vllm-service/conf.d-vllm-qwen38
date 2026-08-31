@@ -1,0 +1,47 @@
+# /etc/conf.d/vllm-qwen38 — per-machine config for the qwen3.8-27b backend slot.
+#
+# Values below reproduce the configuration recovered from /proc/96627/cmdline on
+# 2026-08-30 (the hand-started process that had been serving since Aug 26). Do not
+# change them casually: the throughput this box gets is the result of measured
+# tuning, not defaults. See ../psaios/tools/t5810-vllm/ for the measurements.
+
+# --- paths ---------------------------------------------------------------
+VLLM_HOME=/opt/vllm-service
+VLLM_VENV=/opt/pscode/vllm-serve-env-0.27.1
+VLLM_MODEL=/data/models/Qwen3.8-27B-FP8
+VLLM_USER=chris
+
+# --- serving -------------------------------------------------------------
+VLLM_SERVED_NAME=qwen3.8-27b   # labrouter routes to this id; cwdotcom's proxy
+                               # pins the same string via MODEL_ID. Changing it
+                               # here means changing it in BOTH of those places.
+VLLM_HOST=0.0.0.0
+VLLM_PORT=8007                 # backend slot. NEVER 8004 — labrouter owns that
+                               # (the unit and launcher both refuse 8004).
+
+# --- model / GPU ---------------------------------------------------------
+VLLM_TP=2                      # both A4500s, NVLink
+VLLM_UTIL=0.93                 # 0.95 OOMs on this box
+VLLM_CTX=32768                 # model max_model_len
+VLLM_SEQS=4
+VLLM_GDN=triton
+
+# CUDA graphs ON. This is the tuning win — capturing these batch sizes is worth
+# roughly 4x over eager mode on this hardware. Do not "simplify" it away.
+VLLM_CUDAGRAPH_SIZES=[1,2,4,8]
+
+# --- qwen3-specific parsers ---------------------------------------------
+# This is a reasoning model: it emits chain-of-thought into a separate `reasoning`
+# field. cwdotcom's proxy sends chat_template_kwargs.enable_thinking=false, because
+# with thinking ON the model spends the whole max_tokens budget reasoning and
+# returns EMPTY content on long answers (observed 2026-08-29).
+VLLM_REASONING_PARSER=qwen3
+VLLM_TOOLPARSER=qwen3_coder
+
+# --- startup timing ------------------------------------------------------
+VLLM_MIN_FREE_MIB=19000        # wait for a nearly-free card before starting
+VLLM_VRAM_WAIT=180
+VLLM_READY_WAIT=600            # 29 GB load + graph capture
+
+# --- logging -------------------------------------------------------------
+VLLM_LOG=/var/log/qwen38/writer.log
