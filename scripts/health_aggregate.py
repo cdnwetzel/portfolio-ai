@@ -69,6 +69,18 @@ RERANK_URL   = os.environ.get("RERANK_URL",   "http://127.0.0.1:8016")
 VERIFIER_URL = os.environ.get("VERIFIER_URL", "http://127.0.0.1:8007")
 
 NTFY_URL         = os.environ.get("NTFY_URL", "").rstrip("/")
+# Separate topic for pages that demand action (DOWN / recovered). The routine daily
+# heartbeat stays on NTFY_URL.
+#
+# WHY: on 2026-08-26 the monitor correctly detected a total outage and paged
+# "[urgent] Portfolio AI DOWN" on Aug 27 AND Aug 28. Nothing happened. Detection was
+# never the problem — the urgent page arrived on the same topic as a daily "all
+# services green" heartbeat, and a channel that pings you every day teaches you to
+# ignore it. This topic must stay SILENT unless something is actually wrong, so that
+# any notification on it is worth opening.
+#
+# Falls back to NTFY_URL when unset, so an un-migrated deployment behaves as before.
+NTFY_CRITICAL_URL = os.environ.get("NTFY_CRITICAL_URL", "").rstrip("/") or NTFY_URL
 HEALTHCHECKS_URL = os.environ.get("HEALTHCHECKS_URL", "").rstrip("/")
 STATE_FILE       = os.environ.get("STATE_FILE", "/var/lib/portfolio-health/state.json")
 SMOKE_WS_URL     = os.environ.get("SMOKE_WS_URL", "ws://127.0.0.1:8000/ws/chat")
@@ -154,9 +166,20 @@ def probe_smoke():
     st = load_state()
     last = st.get("last_smoke_ts", 0)
     now = time.time()
+    # A last_smoke_ts in the FUTURE (clock skew, a corrupted or hand-edited state
+    # file) would make `now - last` negative forever and silently disable the E2E
+    # probe — the one check that catches a generation-layer outage. Treat any
+    # future timestamp as "never ran" and run now. Found 2026-08-31 when a seeded
+    # test state produced "next E2E in 8211820844s".
+    if last > now:
+        last = 0
     if SMOKE_INTERVAL_SEC > 0 and last and (now - last) < SMOKE_INTERVAL_SEC:
         prev_sev = st.get("severities", {}).get("e2e_smoke", OK)
         prev_detail = st.get("details", {}).get("e2e_smoke", "no prior E2E result")
+        # Strip any suffix a previous throttled cycle added, or each cycle appends
+        # another and the detail grows without bound:
+        #   "... [cached, next E2E in 1497s] [cached, next E2E in 1194s] [cached...]"
+        prev_detail = prev_detail.split(" [cached,")[0]
         wait = int(SMOKE_INTERVAL_SEC - (now - last))
         return prev_sev, f"{prev_detail} [cached, next E2E in {wait}s]"
 
@@ -195,10 +218,13 @@ def build_checks(run_smoke):
 
 
 # --- alerting ---------------------------------------------------------------
-def ntfy(title, message, priority="default", tags=""):
+def ntfy(title, message, priority="default", tags="", url=None):
+    """Post to ntfy. `url` defaults to the routine topic; pass NTFY_CRITICAL_URL for
+    anything that should wake someone up."""
+    target = url if url is not None else NTFY_URL
     line = f"[{priority}] {title}: {message}"
-    if not NTFY_URL:
-        print(f"  (dry, no NTFY_URL) {line}")
+    if not target:
+        print(f"  (dry, no ntfy URL) {line}")
         return
     # HTTP headers are latin-1, not UTF-8 — emoji in Title/Tags raise UnicodeEncodeError.
     # ntfy renders the *named* Tags (e.g. "rotating_light") as emoji, so keep the Title
@@ -206,7 +232,7 @@ def ntfy(title, message, priority="default", tags=""):
     safe_title = title.encode("ascii", "ignore").decode("ascii").strip() or "Portfolio AI"
     try:
         req = urllib.request.Request(
-            NTFY_URL, data=message.encode("utf-8"),
+            target, data=message.encode("utf-8"),
             headers={"Title": safe_title, "Priority": priority, "Tags": tags},
             method="POST")
         urllib.request.urlopen(req, timeout=HTTP_TIMEOUT).read()
@@ -281,10 +307,14 @@ def main():
         body = "\n".join(f"• {n}: {d}" for n, d in new_criticals)
         if degraded:
             body += "\n(also degraded: " + ", ".join(degraded) + ")"
-        ntfy("Portfolio AI DOWN", body, priority="urgent", tags="rotating_light")
+        ntfy("Portfolio AI DOWN", body, priority="urgent", tags="rotating_light",
+             url=NTFY_CRITICAL_URL)
     if recovered:
         body = "\n".join(f"• {n}: {d}" for n, d in recovered)
-        ntfy("Portfolio AI recovered", body, priority="default", tags="white_check_mark")
+        # Recovery goes to the SAME topic as the page. Being told it is down and then
+        # left wondering is how you end up SSHing in to check something already fixed.
+        ntfy("Portfolio AI recovered", body, priority="default", tags="white_check_mark",
+             url=NTFY_CRITICAL_URL)
 
     all_ok = not criticals
     if all_ok:
