@@ -170,6 +170,51 @@ config uses `--reasoning-parser qwen3`, `--tool-call-parser qwen3_coder` and
 - *Phase 2 — needs a maintenance window:* write a correct supervised OpenRC unit (see
   §3.2), stop the zombie, start under supervision, verify streaming, run the self-test.
 
+#### Phase 1 — ✅ COMPLETE 2026-08-30, verified at each step
+
+The psaios script could **not** be used as-is: `_common.sh` sets
+`OLD_VENV=/opt/pscode/vllm-serve-env` and `01-build-venv.sh` dies on
+`[ -d "$OLD_VENV" ]` at line 13 — the guard fires precisely because the thing it guards
+against has already happened. Its *method* was followed manually instead.
+
+| Step | Action | Verification |
+|---|---|---|
+| 1 | Read scripts, find the blocker | `OLD_VENV` guard + missing `PSCODE_HOME` |
+| 2 | `install -d -o pscode -g pscode -m 0755 /opt/pscode` | owns correctly; write-tested as `pscode` |
+| 3 | `uv python install 3.12` | CPython **3.12.13** installed |
+| 4 | `uv venv --python 3.12 …-0.27.1.new` | interpreter 3.12.13, prefix correct |
+| 5 | `uv pip install vllm==0.27.1` | 7.6 GB, exit 0 |
+| 6 | Import verification | **PASS** — see below |
+| 7 | Confirm production untouched | pid 96627 alive (4d), GPU 696/698 MiB free, site HTTP 200 |
+
+**Step 6 results — the decisive check:**
+```
+vllm  0.27.1                    (matches the running server exactly)
+torch 2.13.0+cu130   cuda_available=True devices=2
+anyio 4.14.2  ->  _backends._asyncio imports OK   <== the exact production failure
+create_task_group + get_async_backend: OK
+starlette 1.6.0   fastapi 0.136.3
+```
+
+**Gotcha for anyone repeating this:** `uv` walks up from the CWD and hits root-only
+`/root/uv.toml` (`Permission denied`) when invoked via `sudo -u pscode` from `/root`.
+Run it with `cd /opt/pscode` first. Also, modern `anyio` has no `__version__` attribute —
+use `importlib.metadata.version("anyio")`, or a verification script fails on its own
+`print` and looks like a build failure when the build was fine.
+
+**The venv is deliberately left at `…-0.27.1.new`, NOT the canonical path.** Renaming it
+into `/opt/pscode/vllm-serve-env-0.27.1` while the zombie runs would put that path back on
+the live process's `sys.path`, and its next lazy import would load
+`anyio._backends._asyncio` from the **new** anyio (4.14.2) into a process whose
+`anyio._core` is already resident from the **old, unknown-version** anyio. That might
+silently fix streaming — or produce a subtle cross-version mismatch inside a process
+serving users. Not worth it. **The rename belongs in the cutover, with vLLM stopped.**
+
+> **If the zombie dies before cutover:** recovery is
+> `mv /opt/pscode/vllm-serve-env-0.27.1{.new,}` then start with the §3.1 command line.
+> The unrecoverable-outage condition is now gone; only the rename stands between a dead
+> process and a working restart.
+
 **Read the tuning outcome before choosing a version.** That README records:
 > *"OUTCOME (2026-08-19): the upgrade LOST, the tuning WON. vLLM 0.27.1 measured slower
 > (5.2 tok/s) than the installed 0.14.0 (6.2). Turning CUDA graphs ON for 0.14.0 gave
