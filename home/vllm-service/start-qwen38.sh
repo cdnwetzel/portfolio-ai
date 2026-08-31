@@ -60,6 +60,27 @@ export OMP_NUM_THREADS="${OMP_NUM_THREADS:-4}"
 export TOKENIZERS_PARALLELISM="${TOKENIZERS_PARALLELISM:-false}"
 export TORCHINDUCTOR_COMPILE_THREADS="${TORCHINDUCTOR_COMPILE_THREADS:-32}"
 
+# PATH must carry `ninja`. psaios/tools/bl343/serve.sh records the failure mode:
+# the sampler's forward_cuda JIT-compiles during profile_run and dies with
+# `FileNotFoundError: 'ninja'` when it is absent. An interactive shell has it via
+# /usr/bin; an OpenRC service inherits a narrower PATH and would not. Set it
+# explicitly — the venv ships its own ninja, and /usr/bin/ninja exists as backup.
+# /opt/cuda/bin matches the known-good process's PATH.
+export PATH="${VLLM_VENV}/bin:/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/usr/sbin:/sbin:/opt/bin:/opt/cuda/bin${PATH:+:${PATH}}"
+command -v ninja >/dev/null 2>&1 || echo "WARN: ninja not on PATH — sampler JIT may fail during profile_run" >&2
+
+# DELIBERATELY NOT SET — read before adding.
+# psaios/tools/pscode/bin/start-vllm.sh exports NCCL_P2P_LEVEL=NVL,
+# VLLM_WORKER_MULTIPROC_METHOD=spawn and CUDA_VISIBLE_DEVICES=0,1 to satisfy its
+# INV-B NVLink-P2P invariant. Those belong to the *pscode-vllm* service (14B +
+# LoRA), and the qwen3.8 process that has been serving since Aug 26 has **none of
+# them** — its entire environment is 32 vars, none NCCL/CUDA. This config also
+# passes --disable-custom-all-reduce, which addresses the same all-reduce concern
+# a different way. Since the running configuration is the measured-good one,
+# reproducing it exactly beats importing settings from a different service.
+# If NVLink P2P enforcement is wanted here, add it as a deliberate, benchmarked
+# change — not as a silent copy.
+
 echo "starting vllm: model=${VLLM_MODEL} name=${VLLM_SERVED_NAME} ${VLLM_HOST}:${VLLM_PORT} tp=${VLLM_TP} util=${VLLM_UTIL} ctx=${VLLM_CTX}"
 
 exec "${VLLM_VENV}/bin/python" "${VLLM_VENV}/bin/vllm" serve "${VLLM_MODEL}" \

@@ -32,7 +32,18 @@
 #     release VRAM instantly; starting into the tail of a shutdown is a CUDA OOM
 #     crash-loop that looks like a broken config.
 #   * No `need net`. The backend binds 0.0.0.0 but only ever serves labrouter on
-#     localhost; a net dependency would delay boot for no benefit.
+#     localhost; a net dependency would delay boot for no benefit. (psaios's
+#     pscode-vllm uses `need net`; harmless either way, noted so the difference
+#     is a choice rather than an oversight.)
+#
+# DELIBERATE DEVIATION FROM THE psaios PATTERN — supervision.
+# psaios/tools/pscode/openrc/pscode-vllm uses `command_background="yes"` with no
+# `supervisor=` line, i.e. start-stop-daemon. Its `respawn_max=3` is then INERT:
+# without a supervisor nothing respawns anything. labrouter's unit has the same
+# shape and the same inert setting. That is exactly how this fleet keeps losing
+# processes silently. This unit uses supervise-daemon so respawn is real, and
+# sets respawn_max=0 so it never latches off. If you are copying this file to
+# create the :8008 or :8009 slot, keep that difference.
 
 name="vLLM qwen3.8-27b"
 description="vLLM backend slot serving Qwen3.8-27B-FP8 on :8007 (behind labrouter)"
@@ -60,6 +71,9 @@ respawn_max=0
 depend() {
     need localmount
     after bootmisc
+    # Matches psaios/tools/pscode/openrc/pscode-vllm: persistence mode keeps the
+    # driver resident, so the first CUDA init does not race a cold driver load.
+    use nvidia-persistenced
 }
 
 start_pre() {
