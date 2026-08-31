@@ -244,8 +244,9 @@ CUDAHOSTCXX=/usr/bin/g++-14      # Gentoo ships gcc 15; CUDA hard-fails above 14
                                  # flashinfer JIT-compiles at engine init
 # Verify after any restart:  /opt/vllm-service/bench-vllm.sh 8007 3   -> expect ~27-30 tok/s
 
-# labrouter (OpenRC: labrouter) — :8004, the contract port. NOTE: no `supervisor=` line,
-# so nothing respawns it if it dies. Known gap.
+# labrouter (OpenRC: labrouter) — :8004, the contract port. Supervised since 2026-08-31
+# (supervise-daemon, respawn_max=0); validates labrouter.yaml before start and waits
+# for /health. `rc-service labrouter reload` SIGHUPs config only, never code.
 # Qdrant (OpenRC) 6333, embed-service 8005 (bge-base, CPU), compress 8788
 QDRANT_PORT=6333
 ```

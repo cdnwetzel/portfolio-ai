@@ -176,20 +176,6 @@ Superseded numbers: 4.80/4.70 grounding, the base-vs-LoRA A/B (0.983 vs 1.000), 
 
 ---
 
-### 7. labrouter is not supervised
-**Status:** OPEN
-**Severity:** MEDIUM-HIGH — it is the single chokepoint every chat request passes through
-**Issue:** `/etc/init.d/labrouter` sets `command_background="yes"` with **no `supervisor=`
-line**, so it runs under start-stop-daemon and its `respawn_max=5` is inert. The process is
-PPID 1. If labrouter dies, nothing restarts it and generation stops entirely.
-**Fix:** add `supervisor="supervise-daemon"` + `respawn_max=0`, mirroring
-`home/vllm-service/vllm-qwen38.openrc`. It already has logging.
-**Note:** labrouter lives outside this repo (`/home/chris/ai/inference/labrouter`), so the fix
-belongs to the lab lane, not cwdotcom. Flagged here because cwdotcom depends on it.
-**Discovered by:** Claude (2026-08-30 fleet audit)
-
----
-
 ### 8. Alert delivery, not alert generation
 **Status:** OPEN — needs a human decision, not code
 **Severity:** HIGH — this is why a two-day outage went unnoticed
@@ -208,6 +194,26 @@ monitoring was blind)
 ---
 
 ## CLOSED DEFECTS
+
+### 7. labrouter Was Not Supervised — CLOSED 2026-08-31
+**Was:** `/etc/init.d/labrouter` set `command_background="yes"` with **no `supervisor=` line**,
+so start-stop-daemon launched uvicorn and then nothing watched it — the process ran as PPID 1
+and `respawn_max=5` was inert. labrouter is the front door for cwdotcom: the VPS tunnel forwards
+`:8004` and nothing else routes that traffic, so a crash meant generation stopped with no
+recovery. The most externally visible component in the lab had the weakest supervision.
+**Resolution:** `supervisor="supervise-daemon"`, `respawn_max=0`, `respawn_delay=15`. Also found
+that `restart_delay` was never a supervise-daemon key — the correct name is `respawn_delay`, so
+the old backoff did nothing even in intent.
+**Second fix, easy to miss:** under supervise-daemon the pidfile holds the SUPERVISOR's pid, not
+uvicorn's, so the existing `reload()` (`start-stop-daemon --signal HUP --pidfile`) would have
+SIGHUPed the wrong process and silently done nothing. `reload()` now resolves the child by
+parentage. Same trap that made an earlier respawn test kill a supervisor instead of its child.
+**Verified by test:** SIGKILL the child → respawned and healthy in ~20 s; `rc-service labrouter
+reload` reaches the child and the service stays up; live site returns 5 sources streaming
+(`ttft_ms=1928`); aggregator 7/7 green including E2E.
+**Where it lives:** `/etc/init.d/labrouter` on the T5810 — the lab lane, NOT this repo. It is
+deliberately not vendored here; a copy would drift, which is the failure mode this week's doc
+work exists to stop. Backup: `/root/init.d-labrouter.bak-20260831`.
 
 ### 9. Answers Truncated Mid-Word — CLOSED 2026-08-31 (b6efc2e)
 **Was:** `estimate_answer_length()` scaled the generation cap by the QUESTION's word count

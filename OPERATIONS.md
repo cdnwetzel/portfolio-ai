@@ -22,7 +22,7 @@
 
 | Service | Port | Status | Usage |
 |---------|------|--------|-------|
-| labrouter | 8004 | ✅ Running | contract port; fronts the vLLM slots. NOT supervised — known gap |
+| labrouter | 8004 | ✅ Running | contract port; fronts the vLLM slots. supervise-daemon, respawn_max=0 (2026-08-31) |
 | vllm-qwen38 | 8007 | ✅ Running | Qwen3.8-27B-FP8, 32K ctx, TP=2, CUDA graphs (~29 tok/s) |
 | Qdrant | 6333 | ✅ Running | Vector DB — `home/qdrant/qdrant.openrc` (IaC) |
 | embed-service | 8005 | ✅ Running | BAAI/bge-base-en-v1.5, 768-d (CPU) |
