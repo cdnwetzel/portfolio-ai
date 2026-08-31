@@ -17,8 +17,18 @@ Design choices (see plans/zany-rolling-yao.md):
   - Monitor + ALERT ONLY. No auto-restart of stateful services (blind respawn hid the outage).
   - stdlib-only HTTP probes so the modest VPS needs no new deps. The E2E smoke reuses
     scripts/selftest.py + run_diagnostic_battery.ask and runs ONLY if `websockets` is importable;
-    otherwise it is skipped (the per-service Qdrant points_count probe already catches the
-    outage class on its own).
+    otherwise it is skipped.
+  - The E2E smoke is THROTTLED to SMOKE_INTERVAL_SEC (default 30 min) while the cheap
+    probes run every 5 min, because it drives real GPU generation and writes verifier
+    verdicts. On throttled cycles it reports its LAST severity, never INFO — see
+    probe_smoke() for why that distinction prevents a false "recovered" page.
+
+  *** The E2E smoke is the only check that exercises GENERATION, and it must stay on. ***
+  On 2026-08-29 the site returned an empty answer to every question for an unknown period
+  and this monitor stayed green throughout: the deployed unit ran with `--no-smoke`, and
+  every other probe passes in that failure (the proxy is alive, /v1/models lists a model,
+  Qdrant has points, embed answers). vLLM was serving from a deleted venv and only the
+  streaming path was broken. Nothing short of a real end-to-end query can see that.
 
 Env:
   NTFY_URL           e.g. https://ntfy.sh/<private-topic>  (unset = print alerts only, dry run)
@@ -39,6 +49,7 @@ import json
 import os
 import socket
 import sys
+import time
 import urllib.request
 import urllib.error
 
@@ -49,7 +60,12 @@ PROXY_URL    = os.environ.get("PROXY_URL",    "http://127.0.0.1:8000")
 VLLM_URL     = os.environ.get("VLLM_URL",     "http://127.0.0.1:8004")
 QDRANT_URL   = os.environ.get("QDRANT_URL",   "http://127.0.0.1:6333")
 EMBED_URL    = os.environ.get("EMBED_URL",    "http://127.0.0.1:8005")
-RERANK_URL   = os.environ.get("RERANK_URL",   "http://127.0.0.1:8006")
+# 8016, not 8006: the reranker moved to the asrock (Tier 3) and the VPS tunnel
+# forwards :8016 -> asrock:8006. api-proxy.py already defaults to 8016. This was
+# still pointing at 8006 — a port nothing has listened on since the move — so the
+# monitor reported the reranker degraded regardless of its real state, and would
+# not have noticed the genuine 2026-08-29 outage of it.
+RERANK_URL   = os.environ.get("RERANK_URL",   "http://127.0.0.1:8016")
 VERIFIER_URL = os.environ.get("VERIFIER_URL", "http://127.0.0.1:8007")
 
 NTFY_URL         = os.environ.get("NTFY_URL", "").rstrip("/")
@@ -57,6 +73,11 @@ HEALTHCHECKS_URL = os.environ.get("HEALTHCHECKS_URL", "").rstrip("/")
 STATE_FILE       = os.environ.get("STATE_FILE", "/var/lib/portfolio-health/state.json")
 SMOKE_WS_URL     = os.environ.get("SMOKE_WS_URL", "ws://127.0.0.1:8000/ws/chat")
 QDRANT_COLLECTION = os.environ.get("QDRANT_COLLECTION", "documents")
+
+# How often the expensive end-to-end probe may actually run, in seconds. The probe
+# timer fires every 5 min for the cheap checks; generation is far too costly to
+# drive that often. 0 disables throttling (every cycle runs it).
+SMOKE_INTERVAL_SEC = int(os.environ.get("SMOKE_INTERVAL_SEC", "1800"))
 
 HTTP_TIMEOUT = float(os.environ.get("HEALTH_HTTP_TIMEOUT", "8.0"))
 
@@ -113,14 +134,39 @@ def probe_qdrant():
         return CRITICAL, f"Qdrant bad response: {e}"
 
 
+_smoke_ran_at = None   # set when a real smoke run happens; persisted by main()
+
+
 def probe_smoke():
-    """Best-effort end-to-end WS query. Skipped (INFO) if `websockets` isn't installed."""
+    """End-to-end WS query — the only check that exercises generation.
+
+    THROTTLED, because it is the one expensive probe: it drives real GPU
+    generation and (via the proxy) writes verifier verdicts. At the 5-minute
+    cadence of the probe timer it would burn GPU continuously and skew the verdict
+    corpus, so it runs at most once per SMOKE_INTERVAL_SEC.
+
+    On a throttled cycle it returns the PREVIOUS severity, not INFO. That matters:
+    main() pages on severity transitions, so returning INFO after a CRITICAL smoke
+    would read as a recovery and fire a false "recovered" alert while the site was
+    still down. Carrying the last verdict forward keeps the state machine honest.
+    """
+    global _smoke_ran_at
+    st = load_state()
+    last = st.get("last_smoke_ts", 0)
+    now = time.time()
+    if SMOKE_INTERVAL_SEC > 0 and last and (now - last) < SMOKE_INTERVAL_SEC:
+        prev_sev = st.get("severities", {}).get("e2e_smoke", OK)
+        prev_detail = st.get("details", {}).get("e2e_smoke", "no prior E2E result")
+        wait = int(SMOKE_INTERVAL_SEC - (now - last))
+        return prev_sev, f"{prev_detail} [cached, next E2E in {wait}s]"
+
     try:
         import asyncio
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
         from selftest import run_live, SMOKE  # reuses ask() + invariants
     except ImportError as e:
         return INFO, f"E2E smoke skipped (no websockets client: {e})"
+    _smoke_ran_at = now
     try:
         rows = asyncio.run(run_live(SMOKE_WS_URL, SMOKE))
     except Exception as e:  # noqa: BLE001 — a broken smoke run must not crash the monitor
@@ -251,8 +297,12 @@ def main():
                  priority="low", tags="warning")
         # if criticals, the transition alert above already fired.
 
+    # Preserve last_smoke_ts across cycles that did not run the E2E probe, or the
+    # throttle would reset every run and the smoke would fire on every cycle.
+    prev_smoke_ts = prev.get("last_smoke_ts", 0)
     save_state({"severities": {n: s for n, (s, d) in results.items()},
-                "details": {n: d for n, (s, d) in results.items()}})
+                "details": {n: d for n, (s, d) in results.items()},
+                "last_smoke_ts": _smoke_ran_at if _smoke_ran_at else prev_smoke_ts})
 
     sys.exit(1 if criticals else 0)
 

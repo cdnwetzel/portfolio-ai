@@ -13,12 +13,22 @@ Type=oneshot
 # See cloud/setup-health-monitor.sh.
 EnvironmentFile=/etc/default/portfolio-health
 WorkingDirectory=/opt/portfolio-health
-# --no-smoke: the 5-min probe uses only the CHEAP per-service checks (incl. the Qdrant
-# points_count probe that catches the 2026-06-14 outage class directly). The heavy E2E
-# WS query — 4 real LLM generations — would otherwise run every 5 min and keep the GPU
-# busy self-testing ~half the time. E2E coverage instead comes from the daily heartbeat
-# (portfolio-health-heartbeat.service) and the 30-min T5810 canary (public path).
-ExecStart=/usr/bin/python3 /opt/portfolio-health/health_aggregate.py --no-smoke
+# E2E smoke is ENABLED here as of 2026-08-31. It is no longer gated by --no-smoke
+# because health_aggregate.py now throttles it internally to SMOKE_INTERVAL_SEC
+# (default 30 min), so the cheap per-service probes still run every 5 min while the
+# expensive generation probe runs at most twice an hour. The original objection to
+# running it here — 4 real generations every 5 min would keep the GPU self-testing
+# half the time — was correct and is what the throttle solves.
+#
+# Why this changed: E2E was previously reachable ONLY via the daily heartbeat, so
+# detection latency for a generation-layer failure was up to 24 hours. It worked —
+# the 2026-08-26 vLLM outage was caught and paged as CRITICAL on Aug 27 and Aug 28 —
+# but a day is a long time to serve empty answers. Now it is at most 30 minutes.
+#
+# The comment this replaces also claimed coverage from "the 30-min T5810 canary".
+# That canary is NOT installed on the T5810 (verified 2026-08-31: not in any
+# runlevel, no cron entry). Do not count it as coverage until it exists.
+ExecStart=/usr/bin/python3 /opt/portfolio-health/health_aggregate.py
 # A CRITICAL service makes the script exit 1; that is the normal "something is down"
 # path (it already paged via ntfy), NOT a monitor failure — so don't treat exit 1 as
 # an OnFailure trigger. Only a real crash (signal / unhandled) should fire the alert.

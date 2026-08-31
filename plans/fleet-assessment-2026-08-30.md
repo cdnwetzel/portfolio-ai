@@ -341,11 +341,57 @@ Unchanged from yesterday's audit and still the most likely *next* silent outage:
 
 `qdrant` hit this exact failure and was fixed in isolation; the lesson never propagated.
 
-### 3.5 🟡 Monitoring still cannot see any of this
+### 3.5 🟡 Monitoring — CORRECTED 2026-08-31. It was not blind; it was ignored.
 
-`/health` proves only that the proxy process is alive. Everything above — a zombie vLLM,
-a dead reranker, broken streaming — is invisible to the 5-minute aggregator, the canary,
-and the dead-man's switch. **This is why the outage on the 29th went unnoticed.**
+**An earlier revision of this document said monitoring "cannot see any of this" and that
+every monitor "stayed green through a total outage". That was wrong, and it was wrong in
+a way that would have sent the next person building something that already exists.**
+
+The evidence, from `journalctl -u portfolio-health-heartbeat.service`:
+
+```
+Aug 27 12:00:41  [CRITICAL] E2E smoke: 3 grounded Q(s) returned fallback (outage signature)
+                 ntfy sent: [urgent] Portfolio AI DOWN
+Aug 28 12:00:20  [CRITICAL] E2E smoke: 3 grounded Q(s) returned fallback (outage signature)
+                 ntfy sent: [urgent] Portfolio AI DOWN
+```
+
+`health_aggregate.py` already had an end-to-end probe that drives a real WS query, and it
+named the failure precisely — *"outage signature"*. Pages fired at urgent priority.
+
+`Portfolio AI DOWN` pages since Aug 26, separated by cause (journal times are UTC):
+
+| Window | Pages | Cause |
+|---|---|---|
+| Aug 26 01:22–12:53 | 6 | lab reconfiguration in progress (pre-dates the venv deletion at 21:01) |
+| **Aug 26 23:30 – Aug 28 12:00** | **4** | **genuine outage, detected unprompted** |
+| Aug 31 02:27–03:28 | 3 | our own cutover (expected) |
+
+**So the real defect is not detection. It is that four urgent pages fired over two days
+and nothing happened.** No amount of additional probing fixes that. Worth checking:
+whether the ntfy topic still reaches a device that notifies, and whether "urgent" is
+distinguishable from the routine daily heartbeat that also arrives on the same topic.
+
+**Two real gaps did exist, and both are now fixed:**
+
+1. **E2E ran only once a day.** The 5-minute unit was launched with `--no-smoke`, so the
+   only generation-layer check was the daily heartbeat — up to 24 h of detection latency.
+   The original reasoning was sound (4 generations every 5 min would keep the GPU
+   self-testing half the time); the fix is to throttle rather than disable.
+   `SMOKE_INTERVAL_SEC` (default 1800) now runs E2E at most twice an hour while the cheap
+   probes stay at 5 minutes. **Detection latency 24 h → 30 min.**
+2. **The reranker probe pointed at a dead port.** `RERANK_URL` defaulted to `:8006`, but
+   the reranker moved to the asrock and the tunnel exposes it on `:8016`. The monitor
+   reported `rerank unreachable` every day regardless of the reranker's real state — so
+   when it genuinely died, the signal was indistinguishable from the standing false one.
+   A true alarm hidden inside a permanent false one is worse than no alarm.
+
+**Also false in the old comment:** `portfolio-health.service` claimed E2E coverage from
+"the 30-min T5810 canary". That canary is **not installed** — not in any runlevel, no cron
+entry (verified 2026-08-31). Do not count it as coverage until it exists.
+
+**Still true:** `/health` alone proves only that the proxy process is alive. That part of
+the original criticism stands — it is just not what the monitoring stack relies on.
 
 ### 3.6 🟡 Deploy stamp is stale
 `DEPLOY_GIT_SHA=0b10cae` while running code is newer, so the version endpoint misreports.
@@ -359,13 +405,16 @@ supervises, whose failure is silent.**
 
 | | what happened | how it was found |
 |---|---|---|
-| reranker | stopped; retrieval silently degraded to cosine | noticed days later, by accident |
-| vLLM | installation deleted under a live process | only when streaming broke |
-| model rename | frontend hardcoded a model id that vanished | total outage, monitors green |
+| reranker | stopped; retrieval silently degraded to cosine | monitor said "unreachable" daily — but it said that anyway, pointing at a dead port |
+| vLLM | installation deleted under a live process | **monitor caught it and paged urgent on Aug 27 and Aug 28**; nobody acted |
+| model rename | frontend hardcoded a model id that vanished | same pages |
 | embed/verifier | bounded respawn + no logs | not yet — this is the next one |
 
-The common fix is not more services. It is: **supervise everything on the critical path,
-give every unit a log, and probe the system end-to-end rather than process-by-process.**
+The common fix is not more services, and — corrected 2026-08-31 — it is not more probes
+either. End-to-end probing already existed and worked. It is: **supervise everything on
+the critical path, give every unit a log, make sure an alarm that fires is an alarm
+someone sees, and never let a standing false alarm (the dead rerank port) sit next to a
+real one.**
 
 ---
 
@@ -375,8 +424,10 @@ give every unit a log, and probe the system end-to-end rather than process-by-pr
    parallel, zero risk, touches nothing running. This alone removes the "one process death
    from an unrecoverable outage" condition, which is the whole point. Match 0.27.1; see
    §3.1 on why the README's 0.14.0 recommendation does not apply to this model.
-2. **Synthetic generation probe in the health aggregator** — one real question, assert a
-   non-empty answer with sources. Would have caught every incident above.
+2. ~~**Synthetic generation probe**~~ — ✅ it already existed and already caught these
+   incidents. Corrected 2026-08-31: enabled on the 5-min timer with internal throttling
+   (24 h → 30 min detection latency) and the rerank probe repointed to :8016. The
+   remaining work is **alert delivery**, not detection.
 3. **Fix/delete `/etc/init.d/vllm`**, then cut the running server over to a supervised
    unit at a maintenance moment. This also restores streaming.
 4. **`respawn_max=0` + logging** on `embed-service`, `verifier-service`, `labrouter`;
