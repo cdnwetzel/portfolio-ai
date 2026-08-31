@@ -22,7 +22,8 @@
 
 | Service | Port | Status | Usage |
 |---------|------|--------|-------|
-| pscode vLLM | 8004 | ✅ Running | BF16, 16K context, 18GB/GPU |
+| labrouter | 8004 | ✅ Running | contract port; fronts the vLLM slots. NOT supervised — known gap |
+| vllm-qwen38 | 8007 | ✅ Running | Qwen3.8-27B-FP8, 32K ctx, TP=2, CUDA graphs (~29 tok/s) |
 | Qdrant | 6333 | ✅ Running | Vector DB — `home/qdrant/qdrant.openrc` (IaC) |
 | embed-service | 8005 | ✅ Running | BAAI/bge-base-en-v1.5, 768-d (CPU) |
 | rerank-service | 8006 | ✅ Running | bge-reranker-base (CPU) |
@@ -99,7 +100,8 @@ second, public-path vantage.
 | `portfolio-health-heartbeat.timer` | VPS | daily 12:00 UTC | full run **incl. E2E WS query**; sends one "all green" ntfy/day so silence never means "monitor dead"; feeds healthchecks.io |
 | `portfolio-health-alert.service` | VPS | `OnFailure=` | monitor-of-monitor: pages if the probe process itself crashes |
 | healthchecks.io ping | external | on every green run | dead-man's switch — alerts if the VPS/monitor stops pinging |
-| `scripts/selftest-canary.sh` (cron) | T5810 | every 30 min | public Apache→proxy→tunnel path (SSL/DNS) from the home network |
+| ~~`scripts/selftest-canary.sh` (cron)~~ | T5810 | **NOT INSTALLED** | verified 2026-08-31: not in any runlevel, no cron entry. Do not count as coverage. |
+| E2E smoke inside `health_aggregate.py` | VPS | every 30 min (`SMOKE_INTERVAL_SEC`) | real WS query; this is what actually caught the 2026-08-26 outage |
 
 **Alert channel:** ntfy.sh push to a private topic. Config (not in the repo):
 `/etc/default/portfolio-health` on the VPS (`NTFY_URL`, `HEALTHCHECKS_URL`) and

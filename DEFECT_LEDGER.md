@@ -176,7 +176,69 @@ Superseded numbers: 4.80/4.70 grounding, the base-vs-LoRA A/B (0.983 vs 1.000), 
 
 ---
 
+### 7. labrouter is not supervised
+**Status:** OPEN
+**Severity:** MEDIUM-HIGH — it is the single chokepoint every chat request passes through
+**Issue:** `/etc/init.d/labrouter` sets `command_background="yes"` with **no `supervisor=`
+line**, so it runs under start-stop-daemon and its `respawn_max=5` is inert. The process is
+PPID 1. If labrouter dies, nothing restarts it and generation stops entirely.
+**Fix:** add `supervisor="supervise-daemon"` + `respawn_max=0`, mirroring
+`home/vllm-service/vllm-qwen38.openrc`. It already has logging.
+**Note:** labrouter lives outside this repo (`/home/chris/ai/inference/labrouter`), so the fix
+belongs to the lab lane, not cwdotcom. Flagged here because cwdotcom depends on it.
+**Discovered by:** Claude (2026-08-30 fleet audit)
+
+---
+
+### 8. Alert delivery, not alert generation
+**Status:** OPEN — needs a human decision, not code
+**Severity:** HIGH — this is why a two-day outage went unnoticed
+**Issue:** the monitor did its job. It detected the 2026-08-26 vLLM outage and paged
+`[urgent] Portfolio AI DOWN — outage signature` on **Aug 27 and Aug 28**. Nothing happened.
+**Likely cause:** the routine daily heartbeat lands on the **same ntfy topic** as urgent
+pages. A channel that pings you every day with "all green" trains you to ignore it, so the
+one message that mattered looked like the ninety that didn't.
+**Fix options:** separate topic for CRITICAL vs heartbeat; drop the daily heartbeat to weekly
+(the healthchecks.io dead-man's switch already covers "the monitor itself died"); or verify
+the topic still reaches a device that actually notifies.
+**Do not** respond to this by adding more probes. Detection is not the failure.
+**Discovered by:** Claude (2026-08-31, correcting an earlier wrong claim in this ledger that
+monitoring was blind)
+
+---
+
 ## CLOSED DEFECTS
+
+### 9. Answers Truncated Mid-Word — CLOSED 2026-08-31 (b6efc2e)
+**Was:** `estimate_answer_length()` scaled the generation cap by the QUESTION's word count
+(≤5 words → 256 tokens). "What has Chris built?" is four words, so the most important question
+a visitor can ask was cut off mid-word at ~279 tokens.
+**Root cause was the premise, not the thresholds.** Its goal was "short questions get short
+answers to avoid verbose responses", but `max_tokens` does not make a model concise — it makes
+it stop mid-sentence. Brevity is a prompt concern; the cap only decides where the cut lands.
+**Resolution:** flat `DEFAULT_ANSWER_TOKENS=2048`. Verified live: the same question now
+returns 569 tokens ending cleanly, while "What GPU?" self-terminates at 192 — proving a
+generous cap costs nothing, because the model stops on its own.
+**Lesson — third instance this week of one pattern:** a heuristic keyed on *surface form*,
+silently wrong on the highest-value input. See also #6 (router default deflecting a third of
+the golden set) and #5 (favourite-language). When a rule keys on question shape rather than
+meaning, test it against the questions that matter most.
+
+### 10. Supervision Gaps Across the Fleet — CLOSED 2026-08-31 (1c3fc6e, and 2026-08-30)
+**Was:** four incidents in one week shared a root cause — critical-path processes that nothing
+supervised, failing silently. vLLM ran unsupervised from a **deleted** installation for four
+days; the reranker was stopped and retrieval silently degraded to cosine; `embed-service` and
+`verifier-service` both carried `respawn_max=5` and wrote **no logs**.
+**Why `respawn_max=N` is wrong here:** it does not "give up gracefully", it latches the service
+OFF permanently after a transient squeeze. qdrant hit this (its unit still records
+"respawn_max exceeded → service latched off"), then rerank-service, then these two. Fixed in
+isolation each time; the lesson never propagated.
+**Resolution:** `respawn_max=0` + `output_log`/`error_log` on embed, verifier, rerank and the
+new `vllm-qwen38` unit. vLLM additionally needed an **orphan reaper**: its TP workers are
+separate processes that survive a SIGKILL of the API server and hold ~19 GB VRAM each, so every
+respawn found a full card and refused — the service supervised itself into a permanent outage.
+Proven by SIGKILL → self-heal in 225 s.
+**Still open:** labrouter (#7).
 
 ### 5. "Favorite Language" Answers Neither Way — CLOSED 2026-08-29 (0cf8af1)
 **Was:** `"What is Chris's favorite programming language?"` scored g=1, "neither cleanly
@@ -324,7 +386,7 @@ This is why "mine query logs for trends" doesn't work here — and why the verif
 
 ---
 
-**Last Updated:** 2026-08-19  
+**Last Updated:** 2026-08-31  
 **Owner:** Claude (reviews weekly), Kimi (discovers during tests)  
 **Next Review:** 2026-08-26 (weekly flagged-queue)  
 **Next Full Review:** 2026-09-05 (monthly ops review)

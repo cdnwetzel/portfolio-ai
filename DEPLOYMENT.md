@@ -27,7 +27,8 @@ cwetzel.com VPS (Ubuntu, systemd)
 └─ portfolio-ai-tunnel.service  SSH forward tunnel to the T5810
     ↓ SSH tunnel (initiated by the VPS; home services stay LAN-only)
 T5810 (Gentoo/OpenRC) — Xeon E5-2699v4, 256 GB ECC, 2x RTX A4500 20 GB (NVLink)
-├─ pscode-vllm (OpenRC)     vLLM :8004 — Qwen2.5-Coder-14B-Pscode, BF16, 16K ctx, TP=2
+├─ labrouter (OpenRC)       :8004 — CONTRACT PORT the tunnel forwards; fronts vLLM
+├─ vllm-qwen38 (OpenRC)     vLLM :8007 — Qwen3.8-27B-FP8, 32K ctx, TP=2, CUDA graphs on
 ├─ qdrant (OpenRC)          Qdrant :6333 — dense 768-d cosine, collection `documents`
 ├─ embed-service            bge-base-en-v1.5, CPU, :8005
 └─ rerank-service           bge-reranker-base, CPU, :8006
@@ -41,7 +42,7 @@ The asrock GPU was upgraded from a 3060 Ti to the RTX 5060 Ti 16 GB and the judg
 Qwen2.5-7B to Qwen2.5-14B-Instruct (Tier 2, deployed 2026-07-28).
 
 **RAG pipeline:** query → alias-expand → embed (8005) → Qdrant cosine top-15 (6333) →
-rerank top-15→5 (8006, ≤2 chunks/doc) → token-budget fit → vLLM stream (8004) →
+rerank top-15→5 (via 8016→asrock:8006, ≤2 chunks/doc) → token-budget fit → labrouter (8004) → vLLM stream →
 fire-and-forget faithfulness verify (8007, out-of-band, never blocks the answer).
 
 ---
@@ -54,7 +55,7 @@ VPS to the T5810 and forwards, all bound to `127.0.0.1` on the VPS:
 | VPS port | Target | Service |
 |----------|--------|---------|
 | 8001 | T5810:8001 | reserved, unused |
-| 8004 | T5810:8004 | vLLM |
+| 8004 | T5810:8004 | labrouter (fronts vLLM :8007/:8008/:8009) |
 | 8005 | T5810:8005 | embed-service |
 | 8006 | T5810:8006 | rerank-service |
 | 6333 | T5810:6333 | Qdrant |
@@ -121,7 +122,9 @@ Dependency order — each step's verification must pass before the next matters:
 **1. T5810 services (OpenRC):**
 ```bash
 rc-service qdrant status && curl -s http://127.0.0.1:6333/collections
-rc-service pscode-vllm status && curl -s http://127.0.0.1:8004/v1/models
+rc-service vllm-qwen38 status && curl -s http://127.0.0.1:8004/v1/models
+# throughput must be ~27-30 tok/s; ~6 means the CUDA-graph tuning was lost:
+/opt/vllm-service/bench-vllm.sh 8007 3
 rc-service embed-service status && curl -s http://127.0.0.1:8005/health
 rc-service rerank-service status && curl -s http://127.0.0.1:8006/health
 ```
@@ -141,7 +144,7 @@ from the T5810, not from the internet. (Provisioning: `home/provision-verifier-a
 ```bash
 systemctl status portfolio-ai-tunnel
 ss -tlnp | grep -E ':(8004|8005|8006|6333|8007)'   # all five LISTEN on 127.0.0.1
-curl -s http://127.0.0.1:8004/v1/models            # vLLM through the tunnel
+curl -s http://127.0.0.1:8004/v1/models            # labrouter through the tunnel
 systemctl restart api-proxy && curl -s http://127.0.0.1:8000/health
 curl -s https://dev.cwetzel.com/ | head -c 200     # Apache serves the React build
 ```

@@ -1,9 +1,16 @@
 # Portfolio AI Chat
 
 A single-tenant **portfolio RAG chat** at [dev.cwetzel.com](https://dev.cwetzel.com): a React
-frontend and a FastAPI proxy on an Ubuntu VPS, talking over an SSH tunnel to vLLM
-(Qwen2.5-Coder-14B — base, *not* the pscode LoRA; see below), Qdrant, a CPU embedder and a CPU reranker on a T5810 in a home
-office, plus a faithfulness verifier on a second home box.
+frontend and a FastAPI proxy on an Ubuntu VPS, talking over an SSH tunnel to a **labrouter**
+front-end that fans out to vLLM backends (**Qwen3.8-27B-FP8**, 32K context), Qdrant and a CPU
+embedder on the T5810 in a home office, plus a GPU reranker and a faithfulness verifier on the
+asrock B550.
+
+> **Ground truth for the fleet lives on the T5810**, not here:
+> `/home/chris/ai/inference/FLEET-ENDPOINTS.md` (topology, port contracts) and
+> `MODEL-LEDGER.md` (which model holds which role, and why). This file describes how *cwdotcom*
+> uses that fleet. When the two disagree, those files win — they are edited by the person
+> changing the hardware. See also `plans/fleet-assessment-2026-08-30.md` for a verified snapshot.
 
 It is a professional-portfolio showcase running on owned hardware (2x A4500 GPUs, ~400 Mbps
 symmetric Verizon FIOS), not a revenue product. An earlier multi-tenant SaaS scope (tenants,
@@ -11,7 +18,13 @@ Postgres, JWT/API keys, Stripe billing) was **cut**: its code is on the `legacy/
 branch and its design docs are in [`docs/archive/`](docs/archive/). Nothing in the running system
 has a database, an account, or a tenant — so if you find `tenant_id` anywhere, it's archaeology.
 
-**Status:** deployed and in production, 7-tier quality upgrade complete. All tiers live:
+**Status:** deployed and in production. Model is **Qwen3.8-27B-FP8** as of 2026-08-26 (see
+`MODEL-LEDGER.md` on the T5810, which marks it FINAL for this role). Quality baseline re-measured
+against it on 2026-08-29: graded eval PASSED, 32 grounded evals, **mean grounding 4.78**, 0 safety
+hard-fails; consistency battery 7/7. Numbers predating the model change are void.
+
+The 7-tier quality upgrade below is complete and still describes the software; the hardware and
+model beneath it have since changed. All tiers live:
 1. Credibility gates (6/6 passed), 2. 14B judge on RTX 5060 Ti (9/9 fixtures), 3. GPU reranker
 (15.8x faster), 4. First-person voice & query routing, 5. UX polish (stop button, textarea, 
 auto-scroll, sources readability), 6. KB expansion (35 docs / 94 chunks; indexer post-loading
@@ -29,27 +42,49 @@ cwetzel.com Cloud Server (Ubuntu VPS)
 ├─ FastAPI API proxy (port 8000, systemd: api-proxy.service)
 └─ Static React build (/var/www/dev.cwetzel.com/) — Tier 5 UX: stop button, textarea, auto-scroll
     ↓ [SSH tunnel — portfolio-ai-tunnel.service, initiated by the VPS]
-T5810 Home Server (Gentoo/OpenRC)
-├─ vLLM (port 8004, LAN-only) — Qwen2.5-Coder-14B-Pscode, BF16, 16K context
-│  └─ 2x RTX A4500, NVLink, tensor parallel
-├─ Qdrant (port 6333) — dense 768-d cosine, 62 docs indexed
-└─ Embedding service (port 8005) — BAAI/bge-base-en-v1.5, CPU
+T5810 Home Server / precision-t5810 (Gentoo/OpenRC) — 2x RTX A4500 NVLink, 256 GB RAM
+├─ labrouter (port 8004, loopback) — **THE STABLE CONTRACT PORT.** The tunnel forwards
+│  │  this and only this for generation. Models are swapped BEHIND it, so changing a
+│  │  model never touches the VPS. Never bind a model directly on 8004.
+│  └─ routes to vLLM backend slots:
+│     ├─ :8007 — Qwen3.8-27B-FP8, 32K ctx, TP=2  ← what cwdotcom uses (MODEL_ID)
+│     ├─ :8008 — Qwen3.6-35B-A3B-FP8   (slot defined; not running)
+│     └─ :8009 — pscode-14b            (slot defined; not running)
+├─ Qdrant (port 6333) — dense 768-d cosine, 94 chunks / 34 docs
+├─ Embedding service (port 8005) — BAAI/bge-base-en-v1.5, 768-d, CPU
+└─ compress service (port 8788) — token compression (COMPRESS_URL)
     ↓ tunnel also forwards :8016 → asrock:8006 (GPU reranker) and :8007 → asrock (verifier)
-asrock B550 (Gentoo/OpenRC)
-├─ Reranker service (port 8006) — bge-reranker-base on GPU, 15.8x faster (259ms vs 4077ms CPU)
-│  └─ RTX 5060 Ti, 1.3GB VRAM, coexists with verifier
-└─ Faithfulness verifier (port 8007) — Qwen2.5-14B-Instruct via Ollama (independent of Coder model)
-   └─ RTX 5060 Ti, 16GB total (headroom: 14.7GB after both services)
+asrock B550 (Gentoo/OpenRC) — RTX 5060 Ti 16 GB, 64 GB RAM
+├─ Reranker service (port 8006, GPU) — bge-reranker-base, 15.8x faster than CPU
+├─ Faithfulness verifier (port 8007) — Qwen2.5-14B-Instruct via Ollama
+└─ Ollama (11434) — judge backend + other lab models
 ```
 
+**Port-numbering trap:** vLLM's backend slot on the T5810 is `:8007`, and the *verifier* on the
+asrock is also `:8007`. They are different hosts. The VPS's `:8007` is the **verifier** (the
+tunnel maps it to `asrock:8007`); the VPS reaches generation only via `:8004` → labrouter.
+
 **RAG pipeline:** query → alias-expand → embed (8005, bge-base 768-d) → Qdrant cosine top-15 →
-rerank to top-5 (8006, CPU cross-encoder, ≤2 chunks/doc) → fit to token budget → vLLM stream →
-(out-of-band) fire-and-forget faithfulness verify (8007).
+rerank to top-5 (via VPS :8016 → asrock:8006, GPU cross-encoder, ≤2 chunks/doc) → fit to token
+budget → labrouter :8004 → vLLM stream → (out-of-band) fire-and-forget faithfulness verify (8007).
 
 The reranker adds precision the bi-encoder can't: cosine surfaces candidates, the cross-encoder
-picks the best 5. It runs CPU-only on the T5810's idle 256 GB DDR4, so it never contends with vLLM
-for VRAM. It **fails open** to cosine top-5 if the reranker is down; the verifier is fully fail-open
-(chat is unaffected if asrock is down).
+picks the best 5. It **fails open** to cosine top-5 if the reranker is down, and the verifier is
+fully fail-open (chat is unaffected if asrock is down). Failing open is the right behaviour and
+also the reason both can vanish unnoticed — see the supervision note below.
+
+**The proxy pins the model server-side** (`MODEL_ID`, default `qwen3.8-27b`) and ignores whatever
+`model` the browser sends. The client used to choose it, so renaming a model on the T5810 took the
+whole site down while `/health` stayed green (2026-08-29). A client must never select the backend
+model. `DISABLE_THINKING=1` also strips chain-of-thought: Qwen3.8 is a reasoning build that spends
+the whole `max_tokens` budget thinking and returns empty `content` on long answers otherwise.
+
+**Every service on the critical path must be supervised, unlimited-respawn, and logged.** Four
+separate incidents in one week traced to the same root: `respawn_max=N` latches a service OFF
+permanently after a transient squeeze, and a unit with no `output_log` leaves nothing behind to
+diagnose. `respawn_max=0` everywhere. vLLM additionally needs an orphan reaper — its TP workers are
+separate processes that survive the API server and hold ~19 GB of VRAM each, which deadlocks
+restarts. See `home/vllm-service/` and `plans/fleet-assessment-2026-08-30.md` §3.
 
 **Query routing** (`cloud/query_router.py`) runs before retrieval: `meta` and `off_topic` return
 instant canned responses with no GPU call, everything else goes to full RAG. Its default is
@@ -110,8 +145,17 @@ same doc. **`RAG_MAX_PER_DOC` is now 2** (env-overridable), which gives 20/20 at
   answer (metadata only, never content).
 - **Regression-gated** — graded eval, plus a live self-test that `cloud/deploy.sh` runs before it
   finishes.
-- **Monitored** — a 5-minute VPS health aggregator, a 30-minute T5810 canary and an external
-  healthchecks.io dead-man's switch, all paging via ntfy.
+- **Monitored** — a 5-minute VPS health aggregator (`scripts/health_aggregate.py`) probing proxy,
+  labrouter/vLLM, Qdrant `points_count`, embed, rerank and verifier, plus a real end-to-end WS
+  query throttled to every 30 min (`SMOKE_INTERVAL_SEC`), an external healthchecks.io dead-man's
+  switch, and ntfy paging on severity **transitions** only.
+
+  Two things worth knowing. The E2E probe **works** — it caught the 2026-08-26 vLLM outage and
+  paged `[urgent] Portfolio AI DOWN` on Aug 27 and Aug 28 with the message "outage signature". The
+  gap was that nobody acted on it, and that it ran only once a day because the 5-min unit was
+  launched with `--no-smoke`. Detection latency is now ≤30 min. **A "30-minute T5810 canary" is
+  documented in a few places and does not exist** — not in any runlevel, no cron entry. Do not
+  count it as coverage.
 
 ## Directory Structure
 
@@ -145,7 +189,7 @@ cwdotcom/
 
 | Layer | Technology | Purpose |
 |-------|-----------|---------|
-| **GPU inference** | vLLM + Qwen2.5-Coder-14B-Pscode | LLM serving on 2x A4500s (T5810) |
+| **GPU inference** | vLLM 0.27.1 + Qwen3.8-27B-FP8 (32K ctx) | LLM serving on 2x A4500s (T5810), behind labrouter :8004 |
 | **API framework** | FastAPI + Uvicorn | Async Python proxy (cloud server) |
 | **Vector DB** | Qdrant | Dense cosine retrieval, top-15 candidates |
 | **Embeddings** | BAAI/bge-base-en-v1.5 (768-d) | Query/document → vector (CPU, port 8005) |
@@ -172,21 +216,37 @@ The proxy exposes four routes. There is no auth layer — the chat is public and
 
 **On the T5810 (Gentoo/OpenRC):**
 ```bash
-# vLLM (OpenRC: pscode-vllm; config /etc/pscode/pscode.conf + /etc/conf.d/pscode-vllm)
-MODEL=qwen2.5-coder-14b-pscode   # served-model-name of the BASE model. The name misleads:
-                                 # /v1/models shows this id with parent=None and
-                                 # root=/data/pscode/models/qwen2.5-coder-14b-instruct, while the
-                                 # adapter is a SEPARATE id, `pscode-prod` (parent=this). The client
-                                 # sends the base id (useChat.js) and the proxy does not override it,
-                                 # so **production has never used the LoRA** — it is loaded and never
-                                 # requested. Verified 2026-08-19. Consequence: the "pscode" arm of
-                                 # plans/model-faithfulness-ab-qwen3-30b-2026-08.md was actually the
-                                 # base model, and `pscode-prod` has never been evaluated.
-PORT=8004
-TENSOR_PARALLEL_SIZE=2
-GPU_MEMORY_UTILIZATION=0.93      # 0.95 OOMs; 760 MiB free/A4500 — no room for spec-dec draft
+# vLLM backend slot — OpenRC: vllm-qwen38
+#   unit     /etc/init.d/vllm-qwen38      (repo: home/vllm-service/vllm-qwen38.openrc)
+#   config   /etc/conf.d/vllm-qwen38      (repo: home/vllm-service/conf.d-vllm-qwen38)
+#   launcher /opt/vllm-service/start-qwen38.sh
+# The old `pscode-vllm` / `/etc/init.d/vllm` unit is RETIRED — it pointed at a deleted
+# venv, the wrong model, and --port 8004, which would have stolen labrouter's contract
+# port. Backup at /root/init.d-vllm.retired-20260830.bak.
+VLLM_MODEL=/data/models/Qwen3.8-27B-FP8
+VLLM_SERVED_NAME=qwen3.8-27b     # labrouter routes to this id; the proxy pins the same
+                                 # string via MODEL_ID. Change it here and you must change
+                                 # it in BOTH places.
+VLLM_PORT=8007                   # backend slot. NEVER 8004 — unit and launcher refuse it.
+VLLM_TP=2
+VLLM_UTIL=0.93                   # 0.95 OOMs on this box
+VLLM_CTX=32768
 
-# Qdrant (OpenRC), embed-service 8005 (bge-base, CPU)
+# *** DO NOT CHANGE THESE THREE WITHOUT RE-BENCHMARKING — they are the 4.4x. ***
+# Measured: eager 6.2 tok/s -> CUDA graphs on 27.7 tok/s
+# (../psaios/docs/t5810-vllm-cudagraph-tuning-2026-08-19.md). Losing any one is SILENT:
+# the server still answers, just ~4x slower, and no health check notices.
+#   1. CUDA graphs ON        (i.e. NO --enforce-eager)
+#   2. --disable-custom-all-reduce   custom AR breaks graph capture on this A4500 pair
+VLLM_CUDAGRAPH_SIZES=[1,2,4,8]   # 3. vLLM captures ~70 sizes by default; capture memory
+                                 #    scales with the count, which is what OOMed before
+CUDAHOSTCXX=/usr/bin/g++-14      # Gentoo ships gcc 15; CUDA hard-fails above 14 and
+                                 # flashinfer JIT-compiles at engine init
+# Verify after any restart:  /opt/vllm-service/bench-vllm.sh 8007 3   -> expect ~27-30 tok/s
+
+# labrouter (OpenRC: labrouter) — :8004, the contract port. NOTE: no `supervisor=` line,
+# so nothing respawns it if it dies. Known gap.
+# Qdrant (OpenRC) 6333, embed-service 8005 (bge-base, CPU), compress 8788
 QDRANT_PORT=6333
 ```
 
@@ -210,7 +270,10 @@ JUDGE_KEEP_ALIVE=30m                     # ollama evicts idle models after 5m
 **On the cloud server (cwetzel.com):**
 ```bash
 # API proxy (systemd: api-proxy.service; Apache terminates SSL/WSS in front)
-VLLM_URL=http://127.0.0.1:8004      # via SSH tunnel to T5810
+VLLM_URL=http://127.0.0.1:8004      # via SSH tunnel -> T5810 labrouter (NOT vLLM directly)
+MODEL_ID=qwen3.8-27b                # pinned server-side; client-supplied model is ignored
+DISABLE_THINKING=1                  # strip CoT: reasoning builds spend max_tokens thinking
+                                    # and return empty content on long answers
 QDRANT_URL=http://127.0.0.1:6333    # via SSH tunnel to T5810
 EMBED_URL=http://127.0.0.1:8005     # via SSH tunnel to T5810
 RERANK_URL=http://127.0.0.1:8016    # via SSH tunnel (T5810 forwards 8016 → asrock:8006, GPU)
@@ -299,6 +362,13 @@ worth remembering:
 - **2026-08-03** — Updated architecture after Tier 3 (GPU reranker moved T5810 CPU → asrock RTX 5060 Ti,
   15.8x faster at 259ms) and Tier 5 (UX polish: stop button, textarea, auto-scroll, sources readability).
   All 5 tiers live. Self-test gate passing. Health monitoring active with baselines established.
+- **2026-08-31** — Rewrote the architecture from a live audit after the fleet changed underneath
+  the docs. This file had been wrong about the model (Qwen2.5-Coder-14B + pscode LoRA →
+  **Qwen3.8-27B-FP8**), the context window (16K → **32K**), what `:8004` is (**labrouter**, not
+  vLLM — vLLM backends are 8007/8008/8009), the reranker's location, and it omitted labrouter and
+  the compress service entirely. Fleet ground truth now lives in `FLEET-ENDPOINTS.md` /
+  `MODEL-LEDGER.md` **on the T5810**; this file defers to them. Full verified snapshot:
+  `plans/fleet-assessment-2026-08-30.md`.
 - **2026-08-19** — Corrected a claim this file made by implication. The "20/20 end-to-end" figure
   below is a *retrieval* measurement (`compare_retrieval.py`) and never invokes the query router.
   The router was meanwhile defaulting to `off_topic`, deflecting **13 of 40 golden-set `grounded`

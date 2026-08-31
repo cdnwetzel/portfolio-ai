@@ -20,7 +20,7 @@ cwetzel.com (Ubuntu VPS)
        └─ Stream: vLLM WebSocket → browser
             ↓ SSH tunnel
 T5810 Home Server (Gentoo Linux)
-  ├─ vLLM  — Qwen2.5-Coder 14B, tensor parallel, port 8004
+  ├─ labrouter :8004 — contract port; routes to vLLM backends (:8007 Qwen3.8-27B-FP8, TP=2, 32K)
   ├─ Qdrant — vector DB, 768-dim cosine similarity, port 6333
   ├─ bge-base-en-v1.5 — CPU embeddings (768-d), port 8005
   └─ bge-reranker-base — CPU cross-encoder reranker, port 8006
@@ -76,7 +76,7 @@ plans/          Design documents and implementation plans
 
 ## Running Locally
 
-You need vLLM, Qdrant, an embedding service, and a reranker running. The proxy expects them on localhost ports 8004, 6333, 8005, and 8006 respectively (same as the SSH tunnel forwards in production). The reranker is optional — the proxy fails open to cosine top-5 if port 8006 is unreachable.
+You need vLLM, Qdrant, an embedding service, and a reranker running. The proxy expects them on localhost ports 8004 (labrouter, which fronts vLLM), 6333, 8005, and 8016 respectively (same as the SSH tunnel forwards in production). The reranker is optional — the proxy fails open to cosine top-5 if it is unreachable.
 
 ```bash
 # Frontend dev server
