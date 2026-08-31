@@ -28,9 +28,14 @@
 #     logging to a hand-picked path with no unit to say so, and the OpenRC-era log
 #     (/var/log/pscode/vllm.log) had sat empty since Aug 23, which cost real time
 #     during diagnosis.
-#   * start_pre waits for VRAM to actually free. Stopping a 29 GB model does not
-#     release VRAM instantly; starting into the tail of a shutdown is a CUDA OOM
-#     crash-loop that looks like a broken config.
+#   * The VRAM wait lives in the LAUNCHER, not here. supervise-daemon re-execs
+#     the command directly on respawn and never runs start_pre, so a guard here
+#     would cover `rc-service start` (which rarely needs it) and skip every
+#     respawn (which always does). Learned the hard way on 2026-08-30: a killed
+#     child crash-looped because each respawn started into the dying instance's
+#     still-held 19 GB. start_pre keeps a copy for the operator-facing path.
+#   * respawn_delay=60, not 30 — a 29 GB model needs time to release VRAM before
+#     the replacement can claim it.
 #   * No `need net`. The backend binds 0.0.0.0 but only ever serves labrouter on
 #     localhost; a net dependency would delay boot for no benefit. (psaios's
 #     pscode-vllm uses `need net`; harmless either way, noted so the difference
@@ -65,7 +70,7 @@ pidfile="/run/vllm-qwen38.pid"
 output_log="${VLLM_LOG}"
 error_log="${VLLM_LOG}"
 
-respawn_delay=30
+respawn_delay=60
 respawn_max=0
 
 depend() {

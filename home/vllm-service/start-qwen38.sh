@@ -69,6 +69,28 @@ export TORCHINDUCTOR_COMPILE_THREADS="${TORCHINDUCTOR_COMPILE_THREADS:-32}"
 export PATH="${VLLM_VENV}/bin:/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/usr/sbin:/sbin:/opt/bin:/opt/cuda/bin${PATH:+:${PATH}}"
 command -v ninja >/dev/null 2>&1 || echo "WARN: ninja not on PATH — sampler JIT may fail during profile_run" >&2
 
+# nvcc must use gcc<=14. Gentoo's default is 15, and CUDA's host_config.h hard-
+# fails on it: "unsupported GNU version! gcc versions later than 14 are not
+# supported". flashinfer JIT-compiles its sampling kernels at engine init, so
+# without this the engine dies during startup with
+#   FAILED: .../flashinfer/<ver>/86/cached_ops/sampling/csrc_sampling.cuda.o
+#   ninja: build stopped: subcommand failed.
+#   RuntimeError: Engine core initialization failed.
+# and supervise-daemon then crash-loops on it (observed 2026-08-30 during the
+# cutover). The long-running process never hit this because its flashinfer cache
+# was already built; the rebuilt venv ships a newer flashinfer that must compile.
+# Verified: `nvcc -ccbin /usr/bin/g++-14` compiles, plain nvcc does not.
+# Preferred over -allow-unsupported-compiler, which builds against a host
+# compiler CUDA does not support and can miscompile at runtime.
+: "${CUDAHOSTCXX:=/usr/bin/g++-14}"
+if [ -x "${CUDAHOSTCXX}" ]; then
+    export CUDAHOSTCXX
+    export CUDA_NVCC_EXECUTABLE="${CUDA_NVCC_EXECUTABLE:-/opt/cuda/bin/nvcc}"
+    export NVCC_PREPEND_FLAGS="${NVCC_PREPEND_FLAGS:+${NVCC_PREPEND_FLAGS} }-ccbin ${CUDAHOSTCXX}"
+else
+    echo "WARN: CUDAHOSTCXX=${CUDAHOSTCXX} not executable — flashinfer JIT will fail if nvcc sees gcc>14" >&2
+fi
+
 # DELIBERATELY NOT SET — read before adding.
 # psaios/tools/pscode/bin/start-vllm.sh exports NCCL_P2P_LEVEL=NVL,
 # VLLM_WORKER_MULTIPROC_METHOD=spawn and CUDA_VISIBLE_DEVICES=0,1 to satisfy its
@@ -80,6 +102,61 @@ command -v ninja >/dev/null 2>&1 || echo "WARN: ninja not on PATH — sampler JI
 # reproducing it exactly beats importing settings from a different service.
 # If NVLink P2P enforcement is wanted here, add it as a deliberate, benchmarked
 # change — not as a silent copy.
+
+# --- reap orphaned workers from a previous instance ---------------------------
+# vLLM's TP workers are SEPARATE processes (VLLM::Worker_TP0/TP1) under an
+# EngineCore parent. If the API server dies abruptly — SIGKILL, OOM-killer, crash —
+# the workers SURVIVE and keep holding ~19 GB of VRAM each. Nothing reaps them:
+# supervise-daemon only tracks the process it spawned.
+#
+# Observed 2026-08-30: killing the supervised child left both workers orphaned;
+# every respawn then found a full card, refused to start, and the service could
+# not self-heal. The refusal was correct, but with no reaper it was a deadlock —
+# a service that supervises itself into a permanent outage.
+#
+# Anything matching VLLM:: at this point predates the process we are about to
+# exec, so it is by definition an orphan and safe to kill.
+for _pid in $(pgrep -f 'VLLM::' 2>/dev/null); do
+    _ppid="$(ps -o ppid= -p "${_pid}" 2>/dev/null | tr -d ' ')"
+    echo "reaping orphaned vLLM worker ${_pid} (parent ${_ppid:-?}) from a previous instance"
+    [ -n "${_ppid}" ] && [ "${_ppid}" != "1" ] && kill -9 "${_ppid}" 2>/dev/null || true
+    kill -9 "${_pid}" 2>/dev/null || true
+done
+pgrep -f 'VLLM::' >/dev/null 2>&1 && sleep 10 || true
+
+# --- wait for VRAM. THIS MUST LIVE HERE, NOT IN THE UNIT'S start_pre. ---------
+# supervise-daemon re-execs THIS script directly on respawn; OpenRC's start_pre
+# runs only for `rc-service start`. So a VRAM guard in start_pre protects the one
+# case that rarely needs it and skips every case that does.
+#
+# Observed 2026-08-30: killing the child put the unit into a crash loop. A dying
+# 29 GB instance does not release VRAM immediately, so each respawn started into a
+# full card and died with:
+#   ValueError: Free memory on device cuda:0 (0.44/19.57 GiB) on startup is less
+#   than desired GPU memory utilization (0.93, ...)
+# which freed nothing, so the next respawn hit the same wall. Waiting here breaks
+# that cycle: the process simply sleeps until the card is actually available.
+: "${VLLM_MIN_FREE_MIB:=19000}"
+: "${VLLM_VRAM_WAIT:=300}"
+if command -v nvidia-smi >/dev/null 2>&1; then
+    _waited=0
+    while [ "${_waited}" -lt "${VLLM_VRAM_WAIT}" ]; do
+        # tightest card, not the average — TP=2 needs BOTH
+        _free=$(nvidia-smi --query-gpu=memory.free --format=csv,noheader,nounits 2>/dev/null | sort -n | head -1 | tr -d ' ')
+        case "${_free}" in ''|*[!0-9]*) _free=0 ;; esac
+        [ "${_free}" -ge "${VLLM_MIN_FREE_MIB}" ] && break
+        [ "${_waited}" -eq 0 ] && echo "waiting for VRAM: ${_free} MiB free on tightest GPU, need ${VLLM_MIN_FREE_MIB} (previous instance still releasing?)"
+        sleep 10
+        _waited=$((_waited + 10))
+    done
+    if [ "${_free:-0}" -lt "${VLLM_MIN_FREE_MIB}" ]; then
+        # Exiting is better than starting: vLLM would fail the same check and die
+        # anyway, and exiting lets supervise-daemon back off and retry cleanly.
+        echo "FATAL: only ${_free} MiB free after ${VLLM_VRAM_WAIT}s — refusing to start into a full card" >&2
+        exit 75   # EX_TEMPFAIL
+    fi
+    echo "VRAM ok: ${_free} MiB free on tightest GPU"
+fi
 
 echo "starting vllm: model=${VLLM_MODEL} name=${VLLM_SERVED_NAME} ${VLLM_HOST}:${VLLM_PORT} tp=${VLLM_TP} util=${VLLM_UTIL} ctx=${VLLM_CTX}"
 

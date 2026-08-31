@@ -41,7 +41,17 @@ VLLM_TOOLPARSER=qwen3_coder
 # --- startup timing ------------------------------------------------------
 VLLM_MIN_FREE_MIB=19000        # wait for a nearly-free card before starting
 VLLM_VRAM_WAIT=180
-VLLM_READY_WAIT=600            # 29 GB load + graph capture
+VLLM_READY_WAIT=1800           # 29GB load + torch.compile + CUDA graph capture.
+                               # 600 was too short: a COLD torch_compile_cache
+                               # costs ~290s of Dynamo/inductor work on its own
+                               # (measured 2026-08-30). Warm-cache starts are far
+                               # faster, but the first start after any venv
+                               # rebuild is cold because the cache key changes.
+
+# nvcc host compiler. Gentoo defaults to gcc 15; CUDA hard-fails above 14, and
+# flashinfer JIT-compiles sampling kernels at engine init. Without this the engine
+# dies at startup and supervise-daemon crash-loops.
+CUDAHOSTCXX=/usr/bin/g++-14
 
 # --- logging -------------------------------------------------------------
 VLLM_LOG=/var/log/qwen38/writer.log

@@ -255,6 +255,48 @@ result is immediately diagnosable.
 **Gate the cutover on this:** benchmark before, benchmark after, and if the after-number
 is outside the band, the restart is not "done" regardless of what the self-test says.
 
+#### Phase 2 — ✅ COMPLETE 2026-08-30. The tuning survived.
+
+| Check | Before | After | |
+|---|---|---|---|
+| Throughput | 29.6/29.3/29.3, 28.4/27.8/27.4 | **29.1/29.1/29.1** | ✅ dead centre of band |
+| CUDA graphs / disable-custom-AR / capped sizes | present | **all three present** | ✅ |
+| Streaming | HTTP 500 `anyio._backends` | **real SSE frames** | ✅ fixed at source |
+| Live site `ttft_ms` | `None` (non-streaming fallback) | **1856 ms** | ✅ genuinely streaming |
+| Self-test | 3/3 | **3/3** | ✅ |
+| Consistency battery | 7/7 @ 5/5 | 6/7; favourite-language 4/5 | see note |
+| Supervision | none (PID 1 zombie) | **self-healed from SIGKILL in 225 s** | ✅ |
+| Survives reboot | no | `rc-update add` done | ✅ |
+
+*Consistency note:* the one sub-5/5 probe was a **refusal**, not the old confabulation. A
+6-sample re-run returned Python 6/6 with zero "Bash" answers, so 10/11 overall with one
+refusal — stochastic variance at temperature 0.2. The dangerous failure mode is gone; a
+refusal is a safe failure.
+
+**Three defects in my own unit, found by testing rather than by reasoning.** Each would
+have shipped silently:
+
+1. **`VLLM_READY_WAIT=600` too short.** A venv rebuild changes the torch build, which
+   changes the `torch_compile_cache` key, so the first start recompiles from scratch —
+   ~290 s of Dynamo/inductor alone, ~9 min total. OpenRC declared failure while the engine
+   was loading normally. Now 1800.
+2. **flashinfer JIT vs gcc 15.** The rebuilt venv ships flashinfer 0.6.16.post3 (the old
+   cache was 0.5.3), which compiles sampling kernels at engine init. Gentoo's gcc is 15;
+   CUDA hard-fails above 14 → `Engine core initialization failed` → crash loop. Fixed with
+   `CUDAHOSTCXX=/usr/bin/g++-14`, verified by compiling a test kernel both ways.
+   Preferred over `-allow-unsupported-compiler`, which can miscompile.
+3. **The VRAM guard was in the wrong place, and orphans deadlocked it.**
+   `supervise-daemon` re-execs the command directly and never runs `start_pre`, so the
+   guard covered `rc-service start` and skipped every respawn. Worse: vLLM's TP workers
+   are *separate processes* that survive a SIGKILL of the API server and keep ~19 GB of
+   VRAM each. Every respawn found a full card and refused — correctly, but with nothing to
+   free the memory, the service supervised itself into a permanent outage. Fixed by moving
+   the VRAM wait into the launcher **and** adding an orphan reaper that kills any `VLLM::`
+   process predating the exec. Proven by SIGKILL → self-heal in 225 s.
+
+**Cost:** roughly 90 minutes of downtime, against the 30+ authorised. Most of it was the
+three defects above, each found only because the cutover was tested rather than assumed.
+
 **Read the tuning outcome before choosing a version.** That README records:
 > *"OUTCOME (2026-08-19): the upgrade LOST, the tuning WON. vLLM 0.27.1 measured slower
 > (5.2 tok/s) than the installed 0.14.0 (6.2). Turning CUDA graphs ON for 0.14.0 gave
