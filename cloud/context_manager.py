@@ -49,6 +49,12 @@ from typing import Optional
 # Total context budget for vLLM. Default 14384 leaves ~2K tokens for the
 # model's response under a 16K context window.
 MAX_CONTEXT_TOKENS = int(os.getenv("MAX_CONTEXT_TOKENS", "14384"))
+
+# Generation cap for every answer. A ceiling, not a target — see
+# estimate_answer_length() for why scaling this by question length truncated the
+# site's most important question mid-word. Raise via env if answers ever hit it;
+# the served model allows 32768 total, so there is ample headroom above this.
+DEFAULT_ANSWER_TOKENS = int(os.getenv("DEFAULT_ANSWER_TOKENS", "2048"))
 RESERVE_RESPONSE_TOKENS = int(os.getenv("RESERVE_RESPONSE_TOKENS", "2048"))
 
 _tokenizer = None  # type: ignore
@@ -198,28 +204,41 @@ def fit_context_docs(
 
 
 def estimate_answer_length(query: str) -> int:
-    """Estimate appropriate max_tokens for an answer based on query length/complexity.
+    """Return the generation token CAP for a query.
 
-    Short questions get short answers to avoid verbose responses.
-    Long questions get more tokens for thorough explanation.
+    THIS IS A CEILING, NOT A TARGET — and that distinction is the whole point.
+
+    The original version scaled the cap by the QUESTION's word count: <=5 words got
+    256 tokens, <=15 got 1024, else 2048. Its stated goal was "short questions get
+    short answers to avoid verbose responses". That reasoning does not hold:
+    lowering max_tokens does not make a model concise, it makes it stop MID-SENTENCE.
+    Brevity is a prompt concern; the cap only decides where the guillotine falls.
+
+    Worse, question length is a poor proxy for answer length, and it fails hardest
+    on exactly the questions this site exists to answer. Observed live 2026-08-31:
+
+        "What has Chris built?"   -> 4 words -> 256 tokens
+        -> answer truncated at "**Scope" mid-word, ~279 tokens in
+
+    That is the single most important question a visitor can ask, and the shortest
+    way to ask it was penalised. Same shape as the query-router default that
+    deflected a third of the golden set (DEFECT_LEDGER #6): a heuristic keyed on
+    surface form, silently wrong on the highest-value input.
+
+    A high cap is nearly free. The model emits its stop token when it has finished;
+    the cap only binds when the answer would otherwise run longer. So the cost of
+    being generous is bounded worst-case latency, while the cost of being stingy is
+    visibly broken answers. We take the former.
 
     Args:
-        query: the user's question
+        query: the user's question (kept in the signature; callers pass it, and a
+               future length policy may legitimately want it)
 
     Returns:
-        Recommended max_tokens for generation
+        max_tokens for generation
     """
-    query_words = len(query.split())
-
-    if query_words <= 5:
-        # Very short question: "What GPU?" -> brief answer (256 tokens ~100-150 words)
-        return 256
-    elif query_words <= 15:
-        # Medium question: "Tell me about the AVD migration" -> substantial answer (1024 tokens ~400-500 words)
-        return 1024
-    else:
-        # Long/complex question -> full answer with details (2048 tokens ~800-1000 words)
-        return 2048
+    # Deliberately not scaled by query length. See above.
+    return DEFAULT_ANSWER_TOKENS
 
 
 def server_facts_block(birthdate: str = "", today: "date | None" = None) -> str:

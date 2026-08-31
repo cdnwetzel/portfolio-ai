@@ -238,3 +238,35 @@ def test_server_facts_empty_birthdate_omits_age():
 def test_server_facts_invalid_birthdate_omits_age():
     block = server_facts_block("not-a-date", today=date(2026, 8, 22))
     assert "years old" not in block
+
+
+class TestAnswerTokenCap:
+    """estimate_answer_length must not scale the cap by question length.
+
+    Regression for 2026-08-31: the cap was tiered on the QUESTION's word count
+    (<=5 words -> 256 tokens), so "What has Chris built?" — four words, and the
+    single most important question a visitor can ask — was truncated mid-word at
+    ~279 tokens. max_tokens is a ceiling, not a brevity control: lowering it does
+    not make a model concise, it cuts it off. Brevity belongs in the prompt.
+    """
+
+    def test_short_broad_question_gets_full_cap(self):
+        from context_manager import estimate_answer_length, DEFAULT_ANSWER_TOKENS
+        assert estimate_answer_length("What has Chris built?") == DEFAULT_ANSWER_TOKENS
+
+    def test_cap_is_independent_of_question_length(self):
+        from context_manager import estimate_answer_length
+        caps = {
+            estimate_answer_length("What GPU?"),
+            estimate_answer_length("Tell me about the AVD migration"),
+            estimate_answer_length(
+                "Walk me through the hardest infrastructure problem you have "
+                "solved, how you approached it, and what you would do differently"
+            ),
+        }
+        assert len(caps) == 1, f"cap still varies with question length: {caps}"
+
+    def test_cap_is_generous_enough_for_a_real_answer(self):
+        # 256 was the value that truncated a real answer in production.
+        from context_manager import estimate_answer_length
+        assert estimate_answer_length("What has Chris built?") >= 1024
