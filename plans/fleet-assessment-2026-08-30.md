@@ -215,6 +215,46 @@ serving users. Not worth it. **The rename belongs in the cutover, with vLLM stop
 > The unrecoverable-outage condition is now gone; only the rename stands between a dead
 > process and a working restart.
 
+#### 3.1.1 — Protecting the 4.4x CUDA-graph tuning across the restart
+
+**This is the highest-value thing to not break, and it is silent when broken.** The box
+is fast because of measured tuning, not defaults
+(`../psaios/docs/t5810-vllm-cudagraph-tuning-2026-08-19.md`). Three flags must survive
+*together*; losing any one collapses throughput to roughly a quarter, and the server keeps
+answering — just slowly. Neither `/health` nor the self-test would notice.
+
+| # | Element | Why it is required |
+|---|---|---|
+| 1 | **CUDA graphs ON** (no `--enforce-eager`) | the 4.4x itself |
+| 2 | `--disable-custom-all-reduce` | custom AR **breaks graph capture** on this 2x A4500 NVLink pair (upstream vLLM bug, not an A4500 quirk) |
+| 3 | `--compilation-config {"cudagraph_capture_sizes":[1,2,4,8]}` | vLLM captures ~70 sizes by default and capture memory scales with the count — this is why every `gpu-memory-utilization` still OOMed until it was capped |
+
+Historical measurements (14B, 0.14.0): eager **6.2 / 6.3** → graphs on **27.7 / 28.1 /
+27.3 / 26.5** tok/s. Output byte-identical at temp=0, so it is pure throughput with no
+quality trade.
+
+**Verified 2026-08-30:** all three flags are present in the running process's argv **and**
+in the replacement launcher's argv, which diffs byte-identical (29/29 args). The
+`--compilation-config` JSON is exactly why the launcher exists rather than
+`command_args`: OpenRC's word-splitting would strip its double quotes, and vLLM would fall
+back to default capture sizes — silently losing element 3 and, with it, the tuning.
+
+**Measured baseline before any cutover** (256 tok, temp=0, single stream, `ignore_eos`,
+`home/vllm-service/bench-vllm.sh`):
+
+| session | tok/s |
+|---|---|
+| run A | 29.6 / 29.3 / 29.3 |
+| run B | 28.4 / 27.8 / 27.4 |
+
+**Accept band: ~27–30 tok/s.** Some run-to-run variance is normal. A result near **6–7
+tok/s means the graph tuning was lost**, not that the box is busy — check the three flags
+before anything else. `bench-vllm.sh` prints their presence alongside the number so a slow
+result is immediately diagnosable.
+
+**Gate the cutover on this:** benchmark before, benchmark after, and if the after-number
+is outside the band, the restart is not "done" regardless of what the self-test says.
+
 **Read the tuning outcome before choosing a version.** That README records:
 > *"OUTCOME (2026-08-19): the upgrade LOST, the tuning WON. vLLM 0.27.1 measured slower
 > (5.2 tok/s) than the installed 0.14.0 (6.2). Turning CUDA graphs ON for 0.14.0 gave
