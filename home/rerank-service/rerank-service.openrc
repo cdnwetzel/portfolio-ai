@@ -1,41 +1,88 @@
 #!/sbin/openrc-run
-# Reranker service — bge-reranker-base cross-encoder (RAG precision), port 8006.
-# Install to /etc/init.d/rerank-service (root-owned, 0755)
-# Enable: rc-update add rerank-service default
+# Reranker service — BAAI/bge-reranker-base cross-encoder (RAG precision), port 8006.
 #
-# Two deployments share this unit:
-#   T5810 (original):  CPU, 127.0.0.1 — vLLM owns the GPUs there.
-#   asrock (Tier 3):   GPU (RERANK_DEVICE=cuda), bound to the LAN IP so the
-#                      T5810's tunnel -L forward reaches it (mirrors verifier).
-# Per-machine config lives in /etc/conf.d/rerank-service, e.g. on the asrock:
+# Per-machine config lives in /etc/conf.d/rerank-service:
 #   RERANK_DEVICE=cuda
-#   RERANK_BIND=<asrock-lan-ip>
+#   RERANK_BIND=10.0.1.115        # MUST be the LAN IP — the cwdotcom VPS tunnel
+#                                 # forwards its :8016 to this host's :8006.
 #   RERANK_PORT=8006
-#   RERANK_PYTHON=/home/chris/rerank-venv/bin/python3   # GPU venv (torch cu128)
-#   RERANK_HOME=/home/chris/rerank-service              # where rerank.py lives
+#   RERANK_PYTHON=/home/chris/rerank-venv/bin/python3
+#   RERANK_HOME=/home/chris/rerank-service
+# Optional:
+#   RERANK_MIN_FREE_MIB=2400      # VRAM headroom to wait for before starting
+#   RERANK_VRAM_WAIT=300          # max seconds to wait for it
+#
+# Deliberate choices (measured 2026-08-29):
+#   * start_pre waits for real free VRAM. The 5060 Ti's 16 GB is shared with
+#     ollama, which holds ~12 GB for the verifier's judge. Waiting is strictly
+#     better than crash-looping into a CUDA OOM, and this is a single-consumer
+#     lab box where a slower start is free.
+#   * respawn_max=0 — UNLIMITED restarts. The old 5-in-30s gave up in under a
+#     minute, which is how a transient squeeze became a silent outage.
+#   * output_log/error_log — the previous unit set NEITHER, so every crash was
+#     invisible. That is what made the original failure undiagnosable.
+#   * No RERANK_BIND default. A loopback default would let the service look
+#     healthy locally while being unreachable from the VPS — precisely the
+#     silent degradation this unit exists to prevent.
 
 name="Reranker Service"
 description="bge-reranker-base cross-encoder FastAPI server (RAG precision)"
 
-supervisor="supervise-daemon"
-command="${RERANK_PYTHON:-/home/chris/miniforge3/bin/python3}"
-command_args="${RERANK_HOME:-/opt/rerank-service}/rerank.py"
-pidfile="/run/rerank-service.pid"
-respawn_delay=5
-respawn_max=5
-respawn_period=30
-command_user="chris:chris"
-
+: "${RERANK_PYTHON:=/home/chris/rerank-venv/bin/python3}"
+: "${RERANK_HOME:=/home/chris/rerank-service}"
 : "${RERANK_DEVICE:=cpu}"
-: "${RERANK_BIND:=127.0.0.1}"
 : "${RERANK_PORT:=8006}"
+: "${RERANK_MIN_FREE_MIB:=2400}"
+: "${RERANK_VRAM_WAIT:=300}"
 export RERANK_DEVICE RERANK_BIND RERANK_PORT
 
+supervisor="supervise-daemon"
+command="${RERANK_PYTHON}"
+command_args="${RERANK_HOME}/rerank.py"
+command_user="chris:chris"
+directory="${RERANK_HOME}"
+pidfile="/run/rerank-service.pid"
+
+output_log="/var/log/rerank-service.log"
+error_log="/var/log/rerank-service.log"
+
+respawn_delay=15
+respawn_max=0
+
 depend() {
-    need localmount
-    after bootmisc
+    need localmount net
+    after bootmisc ollama
 }
 
 start_pre() {
-    checkpath -d -m 0755 -o chris:chris "${RERANK_HOME:-/opt/rerank-service}"
+    if [ -z "${RERANK_BIND:-}" ]; then
+        eerror "RERANK_BIND is not set in /etc/conf.d/rerank-service."
+        eerror "Refusing to start: a loopback default would be unreachable from the cwdotcom VPS tunnel."
+        return 1
+    fi
+    [ -x "${RERANK_PYTHON}" ] || { eerror "RERANK_PYTHON not executable: ${RERANK_PYTHON}"; return 1; }
+    [ -f "${RERANK_HOME}/rerank.py" ] || { eerror "rerank.py not found in ${RERANK_HOME}"; return 1; }
+
+    checkpath -d -m 0755 -o chris:chris "${RERANK_HOME}"
+    checkpath -f -m 0644 -o chris:chris "/var/log/rerank-service.log"
+
+    # Wait for VRAM rather than crash-looping into a CUDA OOM.
+    if [ "${RERANK_DEVICE}" = "cuda" ] && command -v nvidia-smi >/dev/null 2>&1; then
+        _waited=0
+        while [ "${_waited}" -lt "${RERANK_VRAM_WAIT}" ]; do
+            _free=$(nvidia-smi --query-gpu=memory.free --format=csv,noheader,nounits 2>/dev/null | head -1 | tr -d ' ')
+            case "${_free}" in ''|*[!0-9]*) _free=0 ;; esac
+            [ "${_free}" -ge "${RERANK_MIN_FREE_MIB}" ] && break
+            [ "${_waited}" -eq 0 ] && ewarn "waiting for VRAM: ${_free} MiB free, need ${RERANK_MIN_FREE_MIB} MiB (ollama likely holds a model)"
+            sleep 5
+            _waited=$((_waited + 5))
+        done
+        if [ "${_free:-0}" -lt "${RERANK_MIN_FREE_MIB}" ]; then
+            ewarn "proceeding after ${RERANK_VRAM_WAIT}s with only ${_free} MiB free — start may OOM; supervise-daemon will retry"
+        else
+            einfo "VRAM ok: ${_free} MiB free"
+        fi
+    fi
+
+    einfo "reranker: device=${RERANK_DEVICE} bind=${RERANK_BIND}:${RERANK_PORT}"
 }

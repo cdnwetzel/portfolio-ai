@@ -14,7 +14,7 @@ exists (see P3).
 | Embedder :8005 | Working | `http=200` from VPS |
 | Qdrant :6333 | Working | retrieval returns 5 sources |
 | Verifier :8007 | Working | `{"status":"ok","backend":"ollama","model":"qwen2.5:14b-instruct-q4_k_m"}` |
-| **Reranker** | **Restored 12:21, unmanaged** | `/rerank 200 OK`, "Reranked 15 candidates"; `nohup` process, no supervisor — see P0.3 |
+| **Reranker** | **Supervised, verified 2026-08-30** | `supervise-daemon`, default runlevel, respawn proven by killing the child (77654 → 77799) |
 | Compress :8788 | Listening, no `/health` | `COMPRESS_URL` set in unit; undocumented |
 | Deploy stamp | **Stale** | `DEPLOY_GIT_SHA=0b10cae`, actual code `199a639` |
 
@@ -47,7 +47,53 @@ is genuinely running again.
 
 **Still open — see P0.3.** It is a `nohup` process, not a supervised service.
 
-### P0.3 — The rerank OpenRC wrapper is broken (NEW)
+### P0.3 — The rerank OpenRC wrapper — ✅ RESOLVED 2026-08-30, verified by test
+**What was actually true:** yesterday's "it's a nohup" report was already stale. By the
+time it was checked, the unit had been rewritten on the box and was running properly
+under `supervise-daemon`, in the default runlevel. The rewrite is good work: it waits for
+real free VRAM instead of crash-looping into a CUDA OOM, sets `respawn_max=0` (unlimited)
+in place of the old 5-in-30s that "gave up in under a minute", writes
+`output_log`/`error_log` where the previous unit set **neither** (which is why the
+original failure was undiagnosable), and refuses to start when `RERANK_BIND` is unset so
+it cannot silently bind loopback and look healthy while being unreachable from the VPS.
+
+**But it existed nowhere in git** — same production-ahead-of-repo drift as the 08-21/22
+work. Now captured in `home/rerank-service/rerank-service.openrc`.
+
+**Verified by test, not by status line:** killed the supervised child (77654);
+`supervise-daemon` respawned it as 77799 and the port rebound. End-to-end after that:
+tunnel `:8016` healthy, live query reranked, 0 `Rerank error` entries, retrieval 545 ms.
+
+**Process note, recorded because it cost real time:** the first respawn test was invalid
+and destructive. The pgrep pattern matched `supervise-daemon` itself — its cmdline
+contains the python path and `rerank.py` — so `head -1` selected the *supervisor*. Killing
+it orphaned the child to PPID 1 and left the service genuinely `unsupervised`; the
+subsequent `restart` then could not stop the orphan, and the new supervisor's child
+crash-looped on `address already in use` every 15 s, reloading the model onto the GPU each
+time. Recovery was stop → kill orphan → clean start. **When testing a supervisor, resolve
+the child by its PPID, never by a command-line pattern the supervisor also matches.**
+
+### P0.4 — Same latent failure in embed-service and verifier-service (NEW, not fixed)
+**Found by auditing sibling units after the rerank fix.** Both still carry the exact
+config that caused this outage: `respawn_max=5` and **no `output_log`/`error_log`**.
+
+| Unit | respawn_max | logging | risk if it latches off |
+|---|---|---|---|
+| `embed-service` | 5 | **none** | **Total outage.** No embeddings → no retrieval at all. Worse than the reranker, which fails open to cosine. |
+| `verifier-service` | 5 | **none** | Faithfulness checking stops silently; chat unaffected (fully fail-open). |
+| `ollama` | 5 | has log | verifier's judge backend |
+| `qdrant` | 8 | has log | already learned this — its comments record "respawn_max exceeded → service latched off" |
+| `rerank-service` | 0 | has log | fixed |
+
+`qdrant` hit this precise bug before and was fixed in isolation; the lesson was never
+applied across the fleet. `embed-service` is the one that matters: a bounded respawn on a
+service with no logging means a transient squeeze latches it off permanently and
+invisibly, and unlike the reranker there is no fail-open path.
+**Fix:** `respawn_max=0` + `output_log`/`error_log` on embed and verifier, mirroring the
+rerank unit. **Not done — needs authorization**, since it changes restart behaviour on
+home boxes the user did not ask me to touch.
+
+### P0.3 (original diagnosis, retained for context) — The rerank OpenRC wrapper is broken
 **Impact:** the reranker is alive only because of a manual `nohup`. It will not come back
 after a reboot, an OOM kill, or a crash — and its absence is silent, because the proxy
 fails open to cosine. That is precisely how it went missing the first time and stayed
@@ -199,7 +245,7 @@ reconcile CLAUDE.md against measured reality instead of guessing.
 1. ~~**P0.2** reranker~~ — ✅ done 2026-08-29 12:21.
 2. **P1.1** monitoring — so the next outage is visible. Everything else is guesswork
    without it, and P0.3 makes it urgent: an unmanaged reranker can vanish silently again.
-3. **P0.3** rerank OpenRC wrapper — the reranker is one reboot from disappearing.
+3. ~~**P0.3** rerank OpenRC wrapper~~ — ✅ done 2026-08-30. **New: P0.4** — embed-service carries the same bounded-respawn + no-logging config, and unlike the reranker it has no fail-open path.
 4. **P0.1** streaming — small fix, large UX win, needs someone on the vLLM host.
 5. **P2.1** re-baseline — now unblocked (reranker is back; streaming affects UX, not
    answer quality). **In progress 2026-08-29.**
