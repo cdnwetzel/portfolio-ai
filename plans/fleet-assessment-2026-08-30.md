@@ -89,9 +89,86 @@ backend*, the proxy decides *which model name it asks for*.
    directly and through labrouter `:8004`, so labrouter is not implicated.
 3. The site is currently up **only** because the proxy falls back to non-streaming.
 
-**Recovery path exists:** `../psaios/tools/t5810-vllm/01-build-venv.sh` builds a parallel
-venv without touching the running one — it is written for exactly this, and guards on
-`hostname = precision-t5810`.
+#### Verification (done 2026-08-30 — every alternative explanation ruled out)
+
+Asked to be certain before acting, so each claim was tested rather than inferred:
+
+| Hypothesis | Test | Result |
+|---|---|---|
+| `/opt/pscode` merely **unmounted**, data recoverable | `mount`, `/etc/fstab` | **Ruled out.** No mounts under `/opt` or `/data`, no fstab entries. `/opt/pscode` does not exist as a directory. |
+| Directory exists but unreadable | `ls -ld /opt/pscode` | **Ruled out.** `No such file or directory`. `/opt` mtime is **Aug 26 21:01** — ~33 min *after* vLLM started (20:28). |
+| anyio broken for some other reason (version skew, bad install) | live traceback | **Ruled out.** Traceback resolves inside the deleted path. |
+| Wider damage than anyio | all distinct `No module named` in log | **Only** `anyio._backends`. 493 occurrences, no other missing module. |
+
+**The exact failure chain, from `/var/log/qwen38/writer.log`:**
+```
+starlette/responses.py:273  __call__                    ← StreamingResponse
+starlette/_utils.py:85      create_collapsing_task_group
+anyio/_core/_tasks.py:200   create_task_group
+anyio/_core/_eventloop.py:206 get_async_backend         ← dynamic import
+importlib/__init__.py:90    import_module
+ModuleNotFoundError: No module named 'anyio._backends'
+```
+Every frame resolves under `/opt/pscode/vllm-serve-env-0.27.1/`, and the interpreter
+frames under `/opt/pscode/.local/share/uv/python/cpython-3.12.13-.../`. Both are gone.
+This is the `StreamingResponse` path specifically, which is exactly why streaming fails
+while `/v1/models` and non-streaming completions still work. **Diagnosis confirmed.**
+
+#### The running configuration — preserved here because it exists nowhere else
+
+This was reconstructed from `/proc/96627/cmdline`. **If that process dies, this is lost.**
+Recording it is the single cheapest risk reduction available:
+
+```
+vllm serve /data/models/Qwen3.8-27B-FP8
+  --served-model-name qwen3.8-27b
+  --host 0.0.0.0 --port 8007
+  --tensor-parallel-size 2
+  --gpu-memory-utilization 0.93
+  --max-model-len 32768
+  --max-num-seqs 4
+  --gdn-prefill-backend triton
+  --reasoning-parser qwen3
+  --enable-auto-tool-choice --tool-call-parser qwen3_coder
+  --disable-custom-all-reduce
+  --compilation-config {"cudagraph_capture_sizes":[1,2,4,8]}
+  --limit-mm-per-prompt {"image":0,"video":0}
+  --trust-remote-code
+```
+
+Note `--compilation-config` — **CUDA graphs are already enabled**, so the psaios tuning
+win is applied and does not need re-deriving.
+
+#### Recovery — viable, but the cutover is a one-way door
+
+Prerequisites verified present: `uv` at `/usr/bin/uv`, the `pscode` user (uid 992, in
+`video`), and **893 GB free**. `../psaios/tools/t5810-vllm/01-build-venv.sh` builds a
+parallel venv, guards on `hostname = precision-t5810`, and touches nothing running.
+
+**But two facts make the cutover irreversible, and they were not obvious:**
+
+1. **No GPU headroom for a parallel instance.** Both A4500s have **~697 MiB free** of
+   20,470 MiB (`--gpu-memory-utilization 0.93`). A second vLLM cannot be started to test
+   against — the new server can only be validated by *replacing* the old one.
+2. **No fallback backend.** labrouter's other slots (`:8008` 35B-A3B, `:8009` pscode-14b)
+   are **not running**. There is nothing to route to during a cutover.
+
+Therefore: **stopping the current vLLM cannot be undone** — there is no venv on disk to
+restart it from, and no second GPU slot to prove a replacement works first. The window is
+a genuine generation outage lasting a 29 GB model load.
+
+**Version choice — do NOT follow the psaios README reflexively.** It recommends 0.14.0
+with CUDA graphs over 0.27.1, but that was measured on `qwen2.5-coder`. The running
+config uses `--reasoning-parser qwen3`, `--tool-call-parser qwen3_coder` and
+`--gdn-prefill-backend triton`, which are 0.27.x-era flags, and the model is FP8. **Rebuild
+0.27.1 to match what is running.** Downgrading would likely not support this model at all.
+
+**Safe sequencing:**
+- *Phase 1 — zero risk, do anytime:* build the 0.27.1 venv alongside; verify with
+  `python -c "import vllm, anyio._backends"`. Proves the venv is complete without
+  touching the GPU or the running server.
+- *Phase 2 — needs a maintenance window:* write a correct supervised OpenRC unit (see
+  §3.2), stop the zombie, start under supervision, verify streaming, run the self-test.
 
 **Read the tuning outcome before choosing a version.** That README records:
 > *"OUTCOME (2026-08-19): the upgrade LOST, the tuning WON. vLLM 0.27.1 measured slower
@@ -167,9 +244,10 @@ give every unit a log, and probe the system end-to-end rather than process-by-pr
 
 ## 5. Recommended order
 
-1. **Rebuild the vLLM venv** (`psaios/tools/t5810-vllm/01-build-venv.sh`) — parallel,
-   touches nothing running. Removes the "one process death from an unrecoverable outage"
-   condition. Decide 0.14.0-with-CUDA-graphs vs 0.27.1 using the psaios measurements.
+1. **Rebuild the vLLM venv at 0.27.1** (`psaios/tools/t5810-vllm/01-build-venv.sh`) —
+   parallel, zero risk, touches nothing running. This alone removes the "one process death
+   from an unrecoverable outage" condition, which is the whole point. Match 0.27.1; see
+   §3.1 on why the README's 0.14.0 recommendation does not apply to this model.
 2. **Synthetic generation probe in the health aggregator** — one real question, assert a
    non-empty answer with sources. Would have caught every incident above.
 3. **Fix/delete `/etc/init.d/vllm`**, then cut the running server over to a supervised
