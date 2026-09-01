@@ -7,6 +7,25 @@
 
 ---
 
+
+## Power / UPS constraint (measured 2026-09-01)
+
+**The T5810 currently exceeds its UPS under inference load.** Measured, not estimated:
+GPUs draw **135 W idle** with the model resident and **330 W under inference** (165 W each,
+at the cap); CPU package is **59 W** under the same load. Whole-box AC draw is
+**~500-545 W**. The UPS is rated **330 W**.
+
+On line power this is invisible. The failure mode is an actual outage: an overloaded UPS
+drops the load instead of transferring to battery, so a one-second blip becomes an abrupt
+cut on a box holding a 29 GB model, an open Qdrant collection and a live `verdicts.db`.
+The risk is corruption, not downtime.
+
+**Until a larger UPS is fitted, avoid deliberately sustained GPU load** (graded eval runs,
+benchmark sweeps, soak tests). Normal visitor traffic is the same 330 W but intermittent.
+
+Sizing, integration requirements and the resume procedure for the paused context-window
+experiment: [`plans/ups-sizing-2026-09-01.md`](plans/ups-sizing-2026-09-01.md).
+
 ## System Status
 
 ### Services (cwetzel.com)
