@@ -175,7 +175,44 @@ warn and prompt when load average >= 2. Both verified to parse under the Mini's
 **bash 3.2** with BSD userland — the box has no `timeout`, `gtimeout`, `gsed` or `gawk`,
 and needs `stat -f%z` / `sed -i ''` rather than the GNU forms.
 
-**Deferred** until the box is idle. Expectations remain low: 21.6 tok/s is ~85% of the
+### Follow-up 2026-08-31 (later): models moved off the USB drive
+
+The storm was self-inflicted and temporary — the Photos library had just been moved to the
+external volume, so Spotlight and Photos were re-indexing it. Once it settled (load 5.9 -> 1.3)
+the box became measurable, and the storage layout turned out to be backwards.
+
+`~/.ollama/models` was a **symlink** to `/Volumes/MiniExt1TB/AI/ollama/models`, an enclosure on
+**USB 3.2 Gen 2, not USB4** — both 40 Gb/s Thunderbolt ports read "No device connected". Measured
+on the same 8.4 GB blob, reading the external copy first so any cache advantage favoured it:
+
+| | throughput | 6 GB read |
+|---|---|---|
+| external (USB 3.2 Gen 2) | **612 MB/s** | 10.0 s |
+| internal NVMe | **2,215 MB/s** | 2.8 s |
+
+**3.6x.** Models moved to internal (`scripts/tuning/08-mini-models-to-internal.sh`); the 22 GB
+Photos library deliberately stays external as cold archival data. That also ends the bus
+contention — `photoanalysisd` scanning 22 GB no longer competes with model loads.
+
+`qwen3-coder:30b` deleted: 18 GB on a 16 GB machine, it could never fit. 17 GB reclaimed, and
+every remaining model now fits in RAM.
+
+**Two measurement traps hit here, both recorded because they nearly produced false results:**
+
+1. **The symlink would have made rsync copy a directory into itself** — and the src-vs-dst blob
+   count check would have PASSED, because they were the same directory. The script now resolves
+   both paths with `pwd -P` and refuses when they match.
+2. **The before/after load benchmark measured page cache, not disk.** Unloading a model from
+   Metal does not evict it from the filesystem cache, so both arms read from RAM and reported
+   0.83 s vs 0.85 s — no difference, on a change that is genuinely 3.6x. On a 16 GB machine the
+   practical gain therefore appears only on cold starts (post-reboot, or after cache pressure),
+   not on every load.
+
+Side effect worth noting: the restart finally applied the ollama env stranded in the plist since
+the earlier failed run — `FLASH_ATTENTION=1`, `NUM_PARALLEL=1`, `KV_CACHE_TYPE=q8_0` are now live
+in the process, confirmed by reading `ps eww`, not the plist.
+
+**Still deferred:** the throughput benchmark. Expectations remain low: 21.6 tok/s is ~85% of the
 ~25.5 tok/s roofline for a 4.7 GB q4 model on M4's ~120 GB/s, so roughly 4 tok/s exists
 in total. The reason to run it is memory — 858 MB of active swap, and `qwen3-coder:30b`
 at 18 GB on a 16 GB machine — not throughput.
