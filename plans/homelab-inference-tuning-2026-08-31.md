@@ -129,17 +129,35 @@ graded eval, not a perf tweak.
 ## Remaining, ranked
 
 1. **Answer length via the system prompt** (~12 s/turn) — gate on `scripts/eval_graded.py`.
-2. **Symm-mem all-reduce.** `--disable-custom-all-reduce` (needed for graph capture) leaves
-   the engine on `PYNCCL`, the slowest option for the small messages decode generates:
-   `Using ['PYNCCL'] ... out of potential ['NCCL_SYMM_MEM', ..., 'SYMM_MEM', 'PYNCCL']`.
-   Try `VLLM_ALLREDUCE_USE_SYMM_MEM=1`. Graph-capturable, unlike custom AR.
-3. **Prefix caching.** `enable_prefix_caching=False` at every engine init, hit rate 0.0%
-   always. The launcher never passes a flag, `CacheConfig` defaults it `True`, the RISC-V
-   gate doesn't apply, and "Disabling prefix caching" is logged **zero** times. Unexplained —
-   worth one experiment with an explicit `--enable-prefix-caching`, since the constant
-   system prefix is shared by every request including single-turn ones.
-4. **ngram speculative decoding.** No draft model, no extra VRAM; RAG quoting is the
-   ideal workload. `plans/rag-improvements.md` §2.3 ruled out only the *draft-model* variant.
+2. **Symm-mem all-reduce — CLOSED, not viable.** `--disable-custom-all-reduce` leaves the
+   engine on `PYNCCL`, which looked like a missed opportunity because the log lists
+   `NCCL_SYMM_MEM` and `SYMM_MEM` among "potential backends". It is not. That list
+   enumerates what vLLM knows about, not what the hardware supports.
+   `SYMM_MEM_ALL_REDUCE_MAX_SIZES` is keyed on device capability and contains only
+   `9.0` (Hopper) and `10.x` (Blackwell). The A4500 is **8.6**, so `SymmMemCommunicator`
+   disables itself and falling through to PYNCCL is correct behaviour, not a misconfiguration.
+   `VLLM_ALLREDUCE_USE_SYMM_MEM` already defaults to `True`, so setting it would have been
+   a no-op restart. Settled from source; no downtime spent.
+
+3. **Prefix caching — EXPLAINED, worth testing.** `enable_prefix_caching=False` at every
+   engine init is not a bug. `engine/arg_utils.py:2604` computes the default as
+   *is_prefix_caching_supported AND NOT is_hybrid* — hybrid models (this GDN architecture)
+   support prefix caching but 0.27.1 keeps it **opt-in while the feature matures**.
+   `--enable-prefix-caching` should therefore enable it. Worth measuring because the
+   constant system prompt is a shared prefix on every single request, including
+   single-turn ones. Baseline: repeated-prefix TTFT is flat at ~1,300 ms across three
+   runs, i.e. no reuse at all today.
+
+4. **ngram speculative decoding — untested, harness ready.** No draft model, no extra VRAM.
+   `plans/rag-improvements.md` §2.3 ruled out only the *draft-model* variant on VRAM grounds.
+   Baseline from `exp_probe.py`: quoting-heavy decode and a non-quoting control both sit at
+   **34.4 tok/s**, so any ngram gain should separate them. `bench-vllm.sh` alone would show
+   nothing — its prompt has nothing to copy.
+
+**Method note that paid for itself here:** two of these three were resolved by reading vLLM's
+source rather than restarting production. The one that looked most promising (symm-mem) was
+impossible on this hardware, and the one that looked like a defect (prefix caching) was a
+documented default. Neither cost a minute of downtime to find out.
 5. **labrouter availability — ACCEPTED RISK, do not reopen.** `:8008`/`:8009` are down and
    the fallback loop lives only in the non-streaming branch, so it never applies to cwdotcom.
    Decision (Chris, 2026-08-31): this is a home lab, not a product with an SLA. A single
