@@ -25,7 +25,11 @@ Aider is a powerful AI coding assistant but it's stateless — every session sta
 ## Fleet It Runs On
 
 - **Mac Studio** (M4 Max, 36GB) — primary machine. Runs pxx and Ollama locally. Default model: `devstral:24b`. Also available: `qwen2.5:32b`, `qwen2.5-coder:7b`
-- **T5810** (Dell Precision, 2× RTX A4500) — remote vLLM serving `qwen2.5-coder-14b` via SSH tunnel on `:8003`. Used for tier-2/3 sessions requiring more GPU headroom
+- **T5810** (Dell Precision, 2× RTX A4500) — remote vLLM over an SSH tunnel, used for tier-2/3
+  sessions requiring more GPU headroom. *(Historical detail: this described a
+  `qwen2.5-coder-14b` backend. The T5810 was re-provisioned in Aug 2026 and now serves
+  Qwen3.8-27B-FP8 for the portfolio chat; which backend pxx targets today is documented with
+  pxx, not here.)*
 
 ---
 

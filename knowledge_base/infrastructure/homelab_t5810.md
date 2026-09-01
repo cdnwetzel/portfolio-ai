@@ -53,11 +53,26 @@ The **A4500 NVLink pair belongs to the T5810**; the **single 5060 Ti belongs to 
 They are not the same box, and their CPUs differ (Intel Xeon vs AMD Ryzen 9). Never attribute one
 machine's GPU or CPU to the other.
 
-### asrock B550 — verifier node
+### asrock B550 — verifier + reranker node
+It runs **two different things, and they are constantly confused with each other.** They are not
+the same model, not the same size, and not the same job:
+
+| | Reranker | Faithfulness judge |
+|---|---|---|
+| Model | **`bge-reranker-base`** — a small cross-encoder, a few hundred MB | **Qwen2.5-14B-Instruct** — a 14-billion-parameter LLM |
+| Port | 8006 | 8007 |
+| Job | scores retrieved chunks for relevance, picks the best 5 of 15 | reads a finished answer and scores whether each claim is supported |
+| When | *before* the answer is written | *after* the answer is written |
+
+**The reranker is `bge-reranker-base`.** It is a small cross-encoder, roughly 1.3 GB of VRAM.
+**The judge is Qwen2.5-14B-Instruct**, and it is the reason the 5060 Ti needs 16 GB — the judge
+holds about 11.7 GB. Two separate models, two separate ports, two separate jobs.
+
 - **OS:** Gentoo Linux / OpenRC
 - **Role:** hosts `verifier-service` (port 8007) + Ollama serving **Qwen2.5-14B-Instruct** as an
-  *independent* faithfulness judge — a different variant than the 14B-Coder that writes answers,
-  to avoid self-grading bias.
+  *independent* faithfulness judge — a different model family than the one that writes answers,
+  to avoid self-grading bias — and `rerank-service` (port 8006) running `bge-reranker-base` on
+  the same GPU.
   The judge runs on the **RTX 5060 Ti** (GPU). After every answer, the
   cloud proxy fire-and-forgets the answer + its retrieved chunks here; the judge scores whether
   each claim is supported. Fail-open: if this box is down, the chat is unaffected.
@@ -71,21 +86,46 @@ on the **asrock B550 (Ryzen 9 + RTX 5060 Ti)** — two distinct GPU boxes, one h
 
 ## AI Inference Stack
 
-### vLLM (Primary LLM Serving)
-- **Service name:** `pscode-vllm` (OpenRC)
-- **Model:** `qwen2.5-coder-14b-instruct` (served as `qwen2.5-coder-14b-pscode`)
-- **Port:** 8004 (LAN only — not exposed to internet)
-- **Tensor Parallel:** Both A4500s in tensor-parallel mode (TENSOR_PARALLEL_SIZE=2)
-- **Context window:** 16,384 tokens (PSCODE_MAX_MODEL_LEN=16384)
-- **GPU utilization target:** 93% (PSCODE_GPU_UTIL=0.93; 0.90 too tight for vLLM v0.14.0 KV cache at 16K context; 0.95 OOM with CUDA graphs)
-- **Enforce eager:** Enabled (PSCODE_ENFORCE_EAGER=1) — disabling would enable CUDA graphs for faster inference at cost of ~1 GB VRAM
+### vLLM (Primary LLM Serving) — current as of 2026-09-01
+- **Service name:** `vllm-qwen38` (OpenRC, supervised). The older `pscode-vllm` unit is retired.
+- **Model:** **Qwen3.8-27B-FP8**, served as `qwen3.8-27b`
+- **vLLM version:** 0.27.1
+- **Port:** 8007 — a *backend slot*, not the port callers use. See labrouter below.
+- **Tensor Parallel:** both A4500s, TP=2 over the NVLink bridge
+- **Context window:** **32,768 tokens**
+- **GPU memory utilization:** 0.93 (0.95 OOMs on this box)
+- **CUDA graphs:** **ENABLED** — this is the single biggest performance decision on the box.
+  See "GPU tuning" below. An older revision of this page said `enforce_eager=1`; that was the
+  previous 14B configuration and is no longer true.
+
+### labrouter — the stable contract port
+- **Port:** 8004, and this is what the cloud VPS tunnel forwards for generation.
+- **Why it exists:** models are swapped *behind* labrouter, so changing which model serves the
+  site never requires touching the cloud server. Backend slots sit on 8007 (Qwen3.8-27B-FP8),
+  8008 and 8009. Nothing binds a model directly on 8004.
+
+### GPU tuning — where the throughput comes from
+Measured on this hardware, not inherited defaults:
+- **~33 tokens/sec** generation on the 27B, single stream. The same box ran ~6 tok/s before
+  tuning — a **~4.4x** improvement that came from CUDA graphs, not from new hardware.
+- Three settings produce it and must survive together: CUDA graphs on (no `--enforce-eager`),
+  `--disable-custom-all-reduce` (custom all-reduce *breaks* graph capture on this A4500 NVLink
+  pair), and a **capped** set of captured batch sizes (`[1,2,4,8]` — vLLM captures ~70 by
+  default and capture memory scales with the count, which caused OOM at every utilization
+  setting until it was capped).
+- **Power cap: 165 W per card** (default is 200 W), set at boot. Measured trade-off:
+  130 W → 29.4 tok/s, 150 W → 32.6, **165 W → 33.4 at 71 °C**, 200 W → 34.2 at 79 °C. 165 W
+  keeps 97.7% of the throughput with an 8 °C thermal margin instead of 1 °C. It replaced an
+  older *crypto-mining* efficiency profile that was power-starving the cards.
+- **Power draw:** ~28 W total at idle with the model resident; **~330 W total under load**
+  (both cards at the cap). Whole machine is roughly 150 W idle / 520 W under inference.
 
 ### Qdrant Vector Database
 - **Service name:** `qdrant` (OpenRC)
 - **Port:** 6333 (LAN only)
 - **Storage:** `/home/chris/qdrant-data/`
 - **Collection:** `documents` — 768-dim cosine similarity vectors
-- **Content:** ~65 chunks indexed from LinkedIn posts, case studies, resume, KB documents
+- **Content:** ~100 chunks indexed from case studies, resume, infrastructure notes and posts
 
 ### Embedding Service
 - **Model:** `BAAI/bge-base-en-v1.5` (sentence-transformers)
@@ -128,8 +168,11 @@ Gentoo allows full kernel customization for the T5810 hardware: NVLink driver su
 
 ### GPU Service Stability
 - Only one vLLM service can run at a time (both GPUs needed per instance)
-- Previously had two competing services (`vllm` 32B AWQ + `pscode-vllm` 14B) which caused OOM and GPU dirty-state crashes requiring physical PSU power cycle
-- Resolution: disabled 32B service, kept only `pscode-vllm` in default runlevel
+- Previously had two competing vLLM services, which caused OOM and GPU dirty-state crashes
+  requiring a physical PSU power cycle. Resolution: exactly one vLLM backend runs at a time.
+- Every service on the critical path is supervised with **unlimited respawn** and writes a log.
+  A bounded respawn cap does not fail gracefully — it latches a service OFF permanently after a
+  transient problem, which is how several outages here started.
 - LightDM (display manager) disabled headless — no GUI needed, saves ~200 MB VRAM
 
 ### PSU Configuration
