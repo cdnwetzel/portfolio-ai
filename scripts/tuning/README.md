@@ -18,6 +18,9 @@ symlink, and takes `--rollback`. Nothing is persistent until `05-persist.sh` run
 | `06-ttft-bench.sh` | T5810 | for `--ab` | TTFT vs prompt size, cold-start cost, old-vs-new A/B |
 | `ttft_probe.py` | T5810 | no | helper for 06; streams and times first token |
 | `00-mini-measure.sh` | mini | no | Mini-local before/after: tok/s, load time, swap, GPU residency |
+| `08-mini-models-to-internal.sh` | mini | no | move ollama models USB -> internal NVMe (3.6x) |
+| `09-vllm-experiments.sh` | T5810 | yes | one vLLM flag experiment: apply, restart, verify, measure, auto-revert |
+| `exp_probe.py` | T5810 | no | workload probes for 09 — repeated-prefix TTFT and quoting decode |
 | `03-asrock-freebies.sh` | asrock | yes | governor, ollama flash-attn + q8_0 KV, keep-alive 60s→30m |
 | `04-mini-freebies.sh` | mini | for step D | ollama flash-attn/KV/parallel, Metal wired limit |
 
