@@ -71,6 +71,12 @@ rollback() {
     echo ">>> ROLLBACK: repointing ollama back at the external drive"
     [ -f "$BAK" ] && cp "$BAK" "$PLIST" && echo "  plist restored from $BAK"
     # Restore the original layout: ~/.ollama/models was a symlink to the external store.
+    if [ ! -d "$SRC" ]; then
+        echo "  !! the external copy at $SRC no longer exists (it was reclaimed)."
+        echo "     Rollback would create a DANGLING symlink and break ollama. Refusing."
+        echo "     To go back to external storage, re-download the models there instead."
+        return 1
+    fi
     if [ -d "$DST" ] && [ ! -L "$DST" ]; then
         mv "$DST" "${DST}.internal-copy-$(date +%Y%m%d-%H%M%S)"
         ln -s "$SRC" "$DST"
