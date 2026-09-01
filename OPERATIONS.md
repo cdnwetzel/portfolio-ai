@@ -27,6 +27,26 @@ UPS is over its rating and drops the load instead of transferring. That risks co
 benchmark sweeps, soak tests) — those push the duty cycle from ~2 % to ~100 % and turn an
 unlikely coincidence into a near-certainty. Normal visitor traffic is fine.
 
+### TEMPORARY measures while the UPS is undersized (2026-09-01, revert after fitting)
+
+| Change | From | To | Effect |
+|---|---|---|---|
+| GPU power cap (`nvidia-smi -pl`) | 165 W | **130 W** | burst draw 330 W → **259 W**; throughput 30.6 → **28.7 tok/s** (−6 %) |
+| `SMOKE_INTERVAL_SEC` | 1800 (30 min) | **7200 (2 h)** | removes ~25 min/day of self-inflicted burst load |
+
+**The cap is deliberately NOT persistent.** `/usr/local/bin/gpu-tune.sh` still sets 165 W at
+boot, which is the measured knee and the right long-term value — a reboot restores it. Applied
+live only, on request, to reduce burst draw before the new UPS arrives.
+
+**The E2E interval mattered more than the cap.** Raising the smoke probe to every 30 min on
+2026-08-31 added ~25 min/day of GPU burst load — organic traffic is only ~26-49 min/day, so it
+roughly *doubled* the duty cycle of a box that overloads its UPS on every burst. Detection
+latency goes 30 min → 2 h, still far better than the 24 h it was before. **Revert both once the
+1500VA/1000W unit is in.**
+
+Even at 130 W the box still peaks at ~440 W against a 330 W UPS (133 %). No achievable GPU cap
+fits — that would need ~79 W/card. The cap reduces the overload; it does not remove it.
+
 Power/utilisation metrics are sampled every minute to `/var/log/power-metrics.csv`
 (metadata only — watts, temps, utilisation; never request content, per red-lines #2).
 Report with `/usr/local/bin/power-report.py`.
