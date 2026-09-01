@@ -76,17 +76,29 @@ PY
 }
 
 set_extra() {
-    sed -i '/^VLLM_EXTRA_ARGS=/d' "$CONF"
-    [ -n "$1" ] && echo "VLLM_EXTRA_ARGS=$1" >> "$CONF"
+    # MUST be `export`. OpenRC sources conf.d into the INIT SCRIPT's shell; an
+    # unexported assignment never reaches the daemon. Verified 2026-08-31: the running
+    # vLLM has ZERO VLLM_* vars in /proc/<pid>/environ, so every value in this conf.d
+    # has been inert and the launcher's own defaults are what actually run. They happen
+    # to be identical, which is why nobody noticed.
+    sed -i '/^\(export \)\?VLLM_EXTRA_ARGS=/d' "$CONF"
+    [ -n "$1" ] && echo "export VLLM_EXTRA_ARGS=$1" >> "$CONF"
     echo "  VLLM_EXTRA_ARGS=${1:-<empty>}"
 }
 
 wait_ready() {
-    local w=0
+    # $1 = PID before the restart. Without this, a restart that silently did nothing
+    # returns "ready after 0s" because the OLD process is still serving — which is
+    # exactly what happened on the first `prefix` run.
+    local want_new="${1:-}" w=0 now
     printf "  waiting for :%s " "$PORT"
     while [ "$w" -lt "$READY_WAIT" ]; do
         if curl -sf -m 5 "http://127.0.0.1:$PORT/v1/models" >/dev/null 2>&1; then
-            echo " ready after ${w}s"; return 0
+            now=$(pgrep -f "bin/vllm serve" | head -1)
+            if [ -n "$want_new" ] && [ "$now" = "$want_new" ]; then
+                printf "!"; sleep 10; w=$((w+10)); continue   # old process, not a restart
+            fi
+            echo " ready after ${w}s (pid ${now:-?})"; return 0
         fi
         printf "."; sleep 10; w=$((w+10))
     done
@@ -97,8 +109,9 @@ revert() {
     banner "REVERT — restoring original launcher and conf"
     [ -f "$BAKDIR/start-qwen38.sh.orig" ] && cp -a "$BAKDIR/start-qwen38.sh.orig" "$LAUNCHER" && echo "  launcher restored"
     [ -f "$BAKDIR/vllm-qwen38.orig" ]     && cp -a "$BAKDIR/vllm-qwen38.orig"     "$CONF"     && echo "  conf restored"
-    rc-service vllm-qwen38 restart >/dev/null 2>&1
-    wait_ready && echo "  reverted and serving" || echo "  !! DID NOT COME BACK — check /var/log/qwen38/writer.log"
+    _op=$(pgrep -f "bin/vllm serve" | head -1)
+    rc-service vllm-qwen38 restart 2>&1 | sed 's/^/    /'
+    wait_ready "$_op" && echo "  reverted and serving" || echo "  !! DID NOT COME BACK — check /var/log/qwen38/writer.log"
 }
 [ "$EXP" = "revert" ] && { revert; exit 0; }
 
@@ -115,15 +128,29 @@ backup_once
 set_extra "$EXTRA"
 
 echo; echo "--- restarting vLLM (the site is down for this window) ---"
-rc-service vllm-qwen38 restart >/dev/null 2>&1
-if ! wait_ready; then
+OLDPID=$(pgrep -f "bin/vllm serve" | head -1); echo "  pid before: ${OLDPID:-none}"
+rc-service vllm-qwen38 restart 2>&1 | sed 's/^/    /'
+if ! wait_ready "$OLDPID"; then
     echo "!! engine did not come back — AUTO-REVERTING"; revert; exit 2
 fi
 
 echo; echo "--- live argv assertion (never trust the file you edited) ---"
 ps -eo args | grep -F 'bin/vllm serve' | grep -v grep | tr ' ' '\n' \
   | grep -E "enable-prefix-caching|speculative-config|ngram|method" | sed 's/^/    /' \
-  || echo "    (no experimental flags in argv — expected for baseline)"
+  || echo "    (none present)"
+if [ "$EXP" != baseline ]; then
+    _pid=$(pgrep -f "bin/vllm serve" | head -1)
+    case "$EXP" in
+      prefix) _need="enable-prefix-caching" ;;
+      ngram)  _need="speculative-config" ;;
+    esac
+    if ! tr '\0' '\n' < "/proc/$_pid/cmdline" | grep -q -- "$_need"; then
+        echo "    !! '$_need' is NOT in the live argv — the experiment did NOT apply."
+        echo "       Reverting rather than reporting a meaningless measurement."
+        revert; exit 6
+    fi
+    echo "    ok: '$_need' confirmed in live argv"
+fi
 
 echo; echo "--- engine config as RESOLVED (not as requested) ---"
 grep -a "Initializing a V1 LLM engine" /var/log/qwen38/writer.log | tail -1 \
