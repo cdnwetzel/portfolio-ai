@@ -10,18 +10,26 @@
 
 ## Power / UPS constraint (measured 2026-09-01)
 
-**The T5810 currently exceeds its UPS under inference load.** Measured, not estimated:
-GPUs draw **135 W idle** with the model resident and **330 W under inference** (165 W each,
-at the cap); CPU package is **59 W** under the same load. Whole-box AC draw is
-**~500-545 W**. The UPS is rated **330 W**.
+**The T5810 exceeds its UPS during generation bursts.** Measured, not estimated:
 
-On line power this is invisible. The failure mode is an actual outage: an overloaded UPS
-drops the load instead of transferring to battery, so a one-second blip becomes an abrupt
-cut on a box holding a 29 GB model, an open Qdrant collection and a live `verdicts.db`.
-The risk is corruption, not downtime.
+| | GPU total | Whole box (AC) | vs 330 W UPS |
+|---|---|---|---|
+| True idle, model resident | 28 W | **~152 W** | 46 % — fine |
+| Generation burst (~8 s) | 330 W | **~520 W** | **158 % — overload** |
+
+This workload is **bursty**: ~193-367 generations/day at ~8 s each is a **~2-3 % duty
+cycle**, so the box is idle 97 % of the time. On line power the overload is just an alarm.
+The real exposure is the compound event — an outage that lands *during* a burst, when the
+UPS is over its rating and drops the load instead of transferring. That risks corrupting a
+29 GB model load, the Qdrant collection and `verdicts.db`.
 
 **Until a larger UPS is fitted, avoid deliberately sustained GPU load** (graded eval runs,
-benchmark sweeps, soak tests). Normal visitor traffic is the same 330 W but intermittent.
+benchmark sweeps, soak tests) — those push the duty cycle from ~2 % to ~100 % and turn an
+unlikely coincidence into a near-certainty. Normal visitor traffic is fine.
+
+Power/utilisation metrics are sampled every minute to `/var/log/power-metrics.csv`
+(metadata only — watts, temps, utilisation; never request content, per red-lines #2).
+Report with `/usr/local/bin/power-report.py`.
 
 Sizing, integration requirements and the resume procedure for the paused context-window
 experiment: [`plans/ups-sizing-2026-09-01.md`](plans/ups-sizing-2026-09-01.md).

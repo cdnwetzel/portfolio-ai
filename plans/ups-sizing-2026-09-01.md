@@ -8,15 +8,36 @@ the note to resume from.
 
 ## 1. Measured draw
 
+> **CORRECTED 2026-09-01, later the same day.** The first version of this note put idle
+> GPU draw at 135 W. That reading was taken moments after a generation, while the cards
+> were still spinning down — it was decay, not idle. Continuous sampling puts **true idle
+> at 28 W GPU total**. The correction matters: it moves average whole-box draw from ~300 W
+> to **~152 W**, which changes the runtime expectation substantially (though not the peak
+> rating, which is what the purchase hinges on).
+
 Taken on the box while it was actually serving (`nvidia-smi` + Intel RAPL), not estimated
 from TDP:
 
-| Component | Idle (model resident) | Under inference |
+| Component | True idle (model resident) | Under inference |
 |---|---|---|
-| GPU 0 (RTX A4500) | 72 W | **165 W** (at cap) |
-| GPU 1 (RTX A4500) | 63 W | **165 W** (at cap) |
-| CPU package (Xeon E5-2699v4, RAPL) | — | **59 W** |
-| **GPU subtotal** | **135 W** | **330 W** |
+| GPU 0 (RTX A4500) | 21 W | **165 W** (at cap) |
+| GPU 1 (RTX A4500) | 7 W | **165 W** (at cap) |
+| CPU package (Xeon E5-2699v4, RAPL) | 28 W | **59 W** |
+| **GPU subtotal** | **28 W** | **330 W** |
+
+### This workload is BURSTY, and that is the whole point
+
+From the proxy log (metadata only — request counts and timestamps, never content):
+
+| | |
+|---|---|
+| generations/day | **193–367** |
+| time per generation | **~8 s** (request → `Response: GROUNDED`) |
+| GPU-busy time/day | **~26–49 min** |
+| **duty cycle** | **~2–3 %** |
+
+So the box sits at ~152 W AC about 97 % of the time and spikes to ~520 W for eight-second
+bursts. It is a public portfolio chat with light traffic, not a training rig.
 
 The CPU stays modest under this workload — vLLM is GPU-bound, so the 145 W TDP is not the
 figure to plan around. 59 W was measured *while both GPUs were pegged*.
@@ -24,32 +45,44 @@ figure to plan around. 59 W was measured *while both GPUs were pegged*.
 **Not directly measured** (no wall meter): 256 GB of DDR4 ECC, internal drives, chassis
 fans, NVLink, and the motherboard. For a box of this class that is roughly 60–100 W.
 
-**Estimated totals:**
+**Totals:**
 
-| | DC (components) | AC (at the wall, ~90 % PSU efficiency) |
-|---|---|---|
-| Idle, model resident | ~250–290 W | **~280–320 W** |
-| Under inference | ~450–490 W | **~500–545 W** |
+| | DC (components) | AC (at the wall, ~90 % PSU efficiency) | vs 330 W UPS |
+|---|---|---|---|
+| True idle, model resident | ~136 W | **~152 W** | 46 % — comfortable |
+| Under inference (burst) | ~470 W | **~520 W** | **158 % — overload** |
 
-**The current UPS is rated 330 W.** The two GPUs alone consume its entire capacity under
-load, before the CPU or anything else. Even *idle with the model resident* is at or over it.
+**The current UPS is rated 330 W.** It carries the box comfortably at idle and is overloaded
+during every generation burst. My earlier claim that even idle exceeded it was wrong — that
+came from the spin-down misreading above.
 
 ---
 
-## 2. Why this matters more than the beeping
+## 2. The actual risk, stated honestly
 
 On line power the machine runs fine — the UPS is a pass-through and the overload alarm is
-just an alarm. **The failure is what happens during an actual outage:** an overloaded UPS
-drops its load immediately rather than transferring to battery. So a one-second utility blip
-becomes an abrupt power cut on a machine holding
+just an alarm. **The failure is a compound event:** an outage that happens *during* a
+generation burst. The UPS is over its rating at that instant, so instead of transferring to
+battery it drops the load.
+
+Given a ~2–3 % duty cycle, that coincidence is unlikely per outage — this is not an
+emergency. But two things keep it worth fixing rather than tolerating:
+
+- the consequence is **data corruption, not downtime**, and
+- traffic growth or any deliberate sustained load (an eval sweep, a benchmark soak, a
+  reindex) raises the duty cycle and therefore the odds directly. This note exists because
+  a 10-minute eval run pushed it to ~100 %.
+
+When it does coincide, a one-second utility blip becomes an abrupt power cut on a machine
+holding
 
 - a 29 GB model mid-inference,
 - an open Qdrant collection (the entire retrieval index),
 - a live SQLite verdict DB (`verdicts.db`), and
 - a Gentoo root filesystem.
 
-In other words, the UPS is currently providing approximately **none** of the protection it
-exists for, and the risk is data corruption rather than downtime.
+In other words: the UPS protects the box for the 97 % of the time it is idle, and provides
+nothing during the bursts. The exposure is data corruption, not downtime.
 
 ---
 
@@ -57,10 +90,12 @@ exists for, and the risk is data corruption rather than downtime.
 
 Both options under consideration are 1500 VA; the difference is real-power output.
 
-| Option | Load at ~525 W | Verdict |
-|---|---|---|
-| 1500 VA / **900 W** | **58 %** | Works. Acceptable headroom. |
-| 1500 VA / **1000 W** | **53 %** | **Preferred.** |
+| Option | Load at **peak** (~520 W) | Load at **average** (~152 W) | Verdict |
+|---|---|---|---|
+| 1500 VA / **900 W** | **58 %** | 17 % | Works. Acceptable headroom. |
+| 1500 VA / **1000 W** | **52 %** | 15 % | **Preferred.** |
+
+Both clear the peak, which is the thing that decides whether you get protection at all.
 
 **Take the 1000 W.** The price delta is small and it buys headroom for things already on the
 table:
@@ -89,13 +124,20 @@ long enough to be useful.
 
 ## 4. The part that actually protects the data
 
-**A bigger UPS alone does not fix this.** At ~525 W, a 1500 VA unit gives roughly 5–10
-minutes — enough to shut down cleanly, nowhere near enough to ride out a real outage.
-Without automatic shutdown integration a bigger UPS just delays the same abrupt cut by a few
-minutes.
+**A bigger UPS alone does not fix this.** Runtime follows the *average*, and at ~152 W a
+1500 VA unit will hold this box far longer than the peak-based estimate suggests — likely
+tens of minutes rather than the 5–10 I first wrote. That is genuinely useful: it turns most
+outages into a non-event.
+
+But it is still finite, and an unattended box that runs the battery flat ends in exactly the
+abrupt cut you bought the UPS to avoid. Without automatic shutdown integration, a bigger UPS
+converts a corruption risk into a *slower* corruption risk.
 
 So the purchase is only half the work:
 
+0. **Verify the numbers first.** `/usr/local/bin/power-report.py` now reports peak, average
+   and duty cycle from continuously sampled data (`home/power-metrics/`). Let it collect for
+   a few days and buy against the observed peak, not against this note's estimate.
 1. Pick a UPS with a USB/serial data port supported by **NUT** (`sys-power/nut` on Gentoo)
    or apcupsd.
 2. Configure a graceful shutdown at a battery threshold — stop `vllm-qwen38` and `qdrant`
