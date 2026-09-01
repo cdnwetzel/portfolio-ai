@@ -419,6 +419,41 @@ async def search_knowledge_base(query: str, retrieve_limit: int = RAG_RETRIEVE_L
         return [], []
 
 
+class ClientGone(Exception):
+    """The browser closed the socket while we were still streaming to it.
+
+    Not an error — it is the normal result of Stop, "New chat", a navigation, or a
+    closed tab. It is raised so the caller can ABORT the generation instead of
+    finishing it for nobody.
+
+    Why that matters: before 2026-09-01 a failed send was logged and the loop
+    continued, so the proxy kept pulling tokens from vLLM for a client that had
+    gone. That produced 1,456 log lines of `Cannot call "send" once a close message
+    has been sent` in 24 hours, and — more importantly — kept the GPUs generating
+    an answer nobody would read. On a box whose duty cycle is ~2-3% and which
+    exceeds its UPS during every burst, finishing abandoned work is real waste.
+
+    Raising out of the chunk loop exits the `async with _http.stream(...)` block,
+    which closes the upstream connection and lets vLLM stop generating.
+    """
+
+
+def _is_client_gone(exc: Exception) -> bool:
+    """True if `exc` means the WebSocket is already closed.
+
+    Matched on message text because Starlette raises a bare RuntimeError here; there
+    is no dedicated exception type to catch. Kept narrow on purpose — a broad match
+    would swallow genuine send failures and make them look like a user leaving.
+    """
+    msg = str(exc)
+    return (
+        "close message has been sent" in msg
+        or "WebSocket is not connected" in msg
+        or "Cannot call \"send\"" in msg
+        or "websocket.close" in msg
+    )
+
+
 class StreamRejected(RuntimeError):
     """vLLM refused the streaming request itself, rather than dropping mid-stream.
 
@@ -504,6 +539,13 @@ async def _stream_completion(websocket: WebSocket, body: dict) -> tuple[str, boo
             except json.JSONDecodeError:
                 pass
             except Exception as chunk_error:
+                if _is_client_gone(chunk_error):
+                    # Abort rather than finish an answer nobody is waiting for.
+                    logger.info(
+                        "client disconnected mid-stream after %d tokens; aborting generation",
+                        completion_tokens or count_tokens(full_response),
+                    )
+                    raise ClientGone() from chunk_error
                 logger.error(f"Chunk error: {chunk_error}")
     generation_ms = int((time.perf_counter() - t_start) * 1000)
     # Fallback token count if vLLM didn't report usage (lightweight estimate; no content leaves here).
@@ -769,9 +811,16 @@ async def websocket_chat(websocket: WebSocket):
             # duplicate visible output); we surface the partial answer instead.
             full_response, got_token, last_error = "", False, None
             stream_meta = {}
+            client_gone = False
             for attempt in (1, 2):
                 try:
                     full_response, got_token, stream_meta = await _stream_completion(websocket, body)
+                    last_error = None
+                    break
+                except ClientGone:
+                    # Never retry: the socket is gone, so a second attempt would
+                    # regenerate the same answer for the same absent client.
+                    client_gone = True
                     last_error = None
                     break
                 except StreamRejected as reject:
@@ -794,6 +843,15 @@ async def websocket_chat(websocket: WebSocket):
                         logger.warning(f"Stream failed pre-token (attempt 1); retrying once: {stream_error}")
                         continue
                     logger.error(f"Stream error after retry: {stream_error}")
+
+            if client_gone:
+                # No `done` frame (the send would fail), and no verifier: judging an
+                # answer nobody received wastes the judge's GPU too. Leaving the
+                # receive loop drops to `finally`, which releases this IP's rate-limit
+                # slot — important, because holding it would reject the visitor's next
+                # question with a 429 they see as "Connection lost" (DEFECT_LEDGER #7).
+                logger.info("client gone; skipping done frame and verification")
+                break
 
             # `not got_token` is the condition, not just `last_error` — a request that
             # produced zero tokens WITHOUT raising used to fall through to the success

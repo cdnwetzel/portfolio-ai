@@ -195,6 +195,40 @@ monitoring was blind)
 
 ## CLOSED DEFECTS
 
+### 11. Answers Appeared Cut Off — Prompt Scaffold Leak — CLOSED 2026-09-01
+**Was:** answers ended with a dangling `**Mandatory`, reading as truncation.
+**It was not truncation** — the reply was 838 tokens against a 2048 cap. The model
+sometimes reproduces the system prompt's own `MANDATORY OUTPUT — append this after every
+answer:` heading immediately before the FOLLOWUPS block. The client strips from
+`FOLLOWUPS:` onward, so anything the model wrote *before* that marker survived into the
+visible answer. Also a small prompt leak: internal instruction text reaching a visitor.
+**Resolution:** `stripTrailingScaffold()` in `useChat.js`, applied on both the
+FOLLOWUPS and no-FOLLOWUPS paths. Deliberately conservative — a trailing line is dropped
+only if it lacks terminal punctuation AND is either pure markdown decoration or carries
+scaffold wording. A real closing sentence always ends in punctuation and is never touched.
+Six cases tested including "must keep" negatives.
+**Not fixed at the prompt level on purpose:** rewording SYSTEM_PREFIX changes
+PROMPT_VERSION and would need a graded-eval re-baseline, which costs sustained GPU the
+box cannot spend while on an undersized UPS. Worth revisiting after.
+
+### 12. Proxy Finished Generations Nobody Was Waiting For — CLOSED 2026-09-01
+**Was:** 1,456 log lines in 24 h of `Cannot call "send" once a close message has been
+sent`. When a visitor pressed Stop, hit New chat, or navigated away, the send failed, the
+error was logged, **and the loop continued** — so the proxy kept pulling tokens from vLLM
+and the GPUs kept generating an answer that could never be delivered.
+**Why it mattered more than the log noise:** on a box with a ~2-3 % duty cycle that
+exceeds its UPS during every burst, finishing abandoned work is real waste — it extends
+exactly the window in which an outage would cause corruption.
+**Resolution:** a `ClientGone` exception raised from the chunk loop, which exits the
+`async with _http.stream(...)` block and closes the upstream connection so vLLM stops.
+The caller skips the `done` frame and the verifier (judging an undelivered answer wastes
+the judge's GPU too) and leaves the receive loop, which releases the IP's rate-limit slot
+— important, because holding it would 429 the visitor's next question as
+"Connection lost" (defect #7).
+**Detector tested** against the real Starlette strings and against genuine failures
+("Connection reset by peer", "vLLM HTTP 500") so a broad match cannot silently
+reclassify a real error as a user leaving.
+
 ### 7. labrouter Was Not Supervised — CLOSED 2026-08-31
 **Was:** `/etc/init.d/labrouter` set `command_background="yes"` with **no `supervisor=` line**,
 so start-stop-daemon launched uvicorn and then nothing watched it — the process ran as PPID 1
@@ -392,7 +426,7 @@ This is why "mine query logs for trends" doesn't work here — and why the verif
 
 ---
 
-**Last Updated:** 2026-08-31  
+**Last Updated:** 2026-09-01  
 **Owner:** Claude (reviews weekly), Kimi (discovers during tests)  
 **Next Review:** 2026-08-26 (weekly flagged-queue)  
 **Next Full Review:** 2026-09-05 (monthly ops review)

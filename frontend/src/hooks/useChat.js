@@ -44,12 +44,37 @@ function loadMessages() {
   }
 }
 
+// The model sometimes reproduces the system prompt's own heading before emitting
+// the block — "…privacy red line.\n\n**Mandatory OUTPUT…FOLLOWUPS:[…]". Stripping
+// from FOLLOWUPS: onward leaves that heading behind, so the visible answer ends
+// with a dangling "**Mandatory" and reads as if it were cut off mid-sentence.
+// (Reported 2026-09-01 as a truncated answer; it was not truncation — the reply was
+// 838 tokens against a 2048 cap.) It is also a small prompt leak: internal
+// instruction text reaching a visitor.
+//
+// Deliberately conservative. A trailing line is dropped ONLY if it lacks terminal
+// punctuation AND is either pure markdown decoration or carries scaffold wording.
+// A real closing sentence ends in punctuation and is never touched.
+const SCAFFOLD_WORDS = /\b(mandatory|append this|nothing after|follow[-\s]?ups?)\b/i
+function stripTrailingScaffold(text) {
+  const lines = text.replace(/\s+$/, '').split('\n')
+  const last = (lines[lines.length - 1] || '').trim()
+  if (!last) return text.replace(/\s+$/, '')
+  const looksFinished = /[.!?:;)\]`"'\u2019\u201d]$/.test(last)
+  const isDecoration = /^[*_#>\-\s]+$/.test(last)
+  if (!looksFinished && (isDecoration || SCAFFOLD_WORDS.test(last))) {
+    lines.pop()
+    return lines.join('\n').replace(/\s+$/, '')
+  }
+  return text.replace(/\s+$/, '')
+}
+
 function parseFollowups(content) {
   const marks = [...content.matchAll(FOLLOWUPS_MARKER)]
-  if (marks.length === 0) return { content, suggestions: [] }
+  if (marks.length === 0) return { content: stripTrailingScaffold(content), suggestions: [] }
 
   const mark = marks[marks.length - 1]   // last occurrence = the trailing block
-  const clean = content.slice(0, mark.index).trimEnd()
+  const clean = stripTrailingScaffold(content.slice(0, mark.index))
   const block = content.slice(mark.index + mark[0].length).trim()
 
   let suggestions = []
@@ -114,7 +139,12 @@ export function useChat() {
         type: 'chat',
         payload: {
           messages: history,
-          model: 'qwen2.5-coder-14b-pscode',
+          // The proxy PINS the model server-side (MODEL_ID) and ignores whatever
+          // arrives here. This field is kept only for wire-format compatibility.
+          // It used to be a real model id, and when the T5810 renamed that model
+          // the whole site returned blank answers while /health stayed green
+          // (2026-08-29). A client must never choose the backend model.
+          model: 'server-pinned',
           max_tokens: 2048
         }
       }))
