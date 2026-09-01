@@ -140,8 +140,10 @@ graded eval, not a perf tweak.
    system prefix is shared by every request including single-turn ones.
 4. **ngram speculative decoding.** No draft model, no extra VRAM; RAG quoting is the
    ideal workload. `plans/rag-improvements.md` §2.3 ruled out only the *draft-model* variant.
-5. **labrouter availability.** `:8008`/`:8009` are both down, and the fallback loop lives
-   only in the non-streaming branch — cwdotcom always streams, so it never applies.
+5. **labrouter availability — ACCEPTED RISK, do not reopen.** `:8008`/`:8009` are down and
+   the fallback loop lives only in the non-streaming branch, so it never applies to cwdotcom.
+   Decision (Chris, 2026-08-31): this is a home lab, not a product with an SLA. A single
+   backend is the accepted design. Recorded so it stops being re-raised as a finding.
 6. **Mac Mini `04`** — 21.6 tok/s is 85% of its ~25.5 roofline; ~4 tok/s exists in total.
    The real issue is memory: 858 MB of active swap, and `qwen3-coder:30b` is 18 GB on a
    16 GB machine.
