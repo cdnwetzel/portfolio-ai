@@ -31,21 +31,25 @@ unlikely coincidence into a near-certainty. Normal visitor traffic is fine.
 
 | Change | From | To | Effect |
 |---|---|---|---|
-| GPU power cap (`nvidia-smi -pl`) | 165 W | **130 W** | burst draw 330 W → **259 W**; throughput 30.6 → **28.7 tok/s** (−6 %) |
-| `SMOKE_INTERVAL_SEC` | 1800 (30 min) | **7200 (2 h)** | removes ~25 min/day of self-inflicted burst load |
+| `SMOKE_INTERVAL_SEC` | 1800 (30 min) | **86400** | E2E parked to ~1/day (pre-2026-08-31 cadence); removes ~25 min/day of self-inflicted burst load |
+| GPU power cap | — | **left at 165 W** | see below — the cap is not the lever |
 
-**The cap is deliberately NOT persistent.** `/usr/local/bin/gpu-tune.sh` still sets 165 W at
-boot, which is the measured knee and the right long-term value — a reboot restores it. Applied
-live only, on request, to reduce burst draw before the new UPS arrives.
+**The power cap is NOT the lever, and was deliberately restored to 165 W.** Both settings
+overload the UPS during a burst — 165 W → ~520 W (158 %), 130 W → ~440 W (133 %) — and a UPS on
+battery trips at either. Lowering it changes the depth of an overload that trips regardless.
 
-**The E2E interval mattered more than the cap.** Raising the smoke probe to every 30 min on
-2026-08-31 added ~25 min/day of GPU burst load — organic traffic is only ~26-49 min/day, so it
-roughly *doubled* the duty cycle of a box that overloads its UPS on every burst. Detection
-latency goes 30 min → 2 h, still far better than the 24 h it was before. **Revert both once the
-1500VA/1000W unit is in.**
+Worse, it is marginally *counterproductive*: a generation takes ~8.4 s at 165 W versus ~8.9 s at
+130 W, so the higher cap finishes sooner and leaves a **shorter window** in which an outage
+would hurt. Same energy, less time exposed. Fitting under 330 W would need ~79 W/card, which is
+not a usable configuration.
 
-Even at 130 W the box still peaks at ~440 W against a 330 W UPS (133 %). No achievable GPU cap
-fits — that would need ~79 W/card. The cap reduces the overload; it does not remove it.
+**Duty cycle is the lever.** Exposure is "fraction of the day spent in a burst", and the only
+thing that moved it materially was self-inflicted load: the E2E probe at 30-min intervals added
+~25 min/day against organic traffic of ~26-49 min/day, roughly *doubling* it. Parking that is
+worth far more than any cap change.
+
+**Until the 1500VA/1000W lands:** no evals, benchmark sweeps, soak tests or reindex-plus-eval
+cycles. Organic traffic is fine. **Revert `SMOKE_INTERVAL_SEC` to 1800 after fitting.**
 
 Power/utilisation metrics are sampled every minute to `/var/log/power-metrics.csv`
 (metadata only — watts, temps, utilisation; never request content, per red-lines #2).
