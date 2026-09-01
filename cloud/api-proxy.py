@@ -113,8 +113,12 @@ OWNER_BIRTHDATE = os.environ.get("OWNER_BIRTHDATE", "1982-01-09")
 # architectural limit, not a tunable — while the indexer's 400-word chunks tokenize to a
 # ~640-token median. So the reranker scores most chunks on their first ~75%. It affects
 # RANKING only: rerank_documents() returns indices, so the LLM still receives full chunks.
-RAG_RETRIEVE_LIMIT = 15   # candidates from Qdrant (bi-encoder cosine); ~3s CPU rerank
-RAG_TOP_K = 5             # final chunks after cross-encoder reranking
+# Env-overridable so retrieval breadth can be A/B'd against the graded eval without a
+# redeploy. Do not raise these on intuition — on this KB, "more context" has LOST every
+# A/B so far: hybrid dense+BM25 (4.41 vs 4.82) and chunk_size=250 (19/20 vs 20/20) were
+# both reverted on evidence. Measure, then keep or revert.
+RAG_RETRIEVE_LIMIT = int(os.environ.get("RAG_RETRIEVE_LIMIT", "15"))  # Qdrant candidates
+RAG_TOP_K = int(os.environ.get("RAG_TOP_K", "5"))                     # after reranking
 # Cap chunks from one source doc in the final context, so a multi-chunk doc (e.g. the resume)
 # can't hog the top-5. Raised 1 -> 2 on evidence: scripts/compare_retrieval.py over the golden
 # set's expect_substrings scored 19/20 at max_per_doc=1 and 20/20 at 2, for essentially the same

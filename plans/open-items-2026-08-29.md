@@ -192,7 +192,51 @@ thinking enabled, long answers returned **completely empty**. Mitigated today wi
 **Open question:** whether thinking-on plus a larger budget produces *better* grounded
 answers. Worth one A/B now that the harness exists — but only after P2.1 gives a baseline.
 
-### P2.3 — Context window is still sized for 16K
+### P2.3 — Context window A/B — PAUSED 2026-09-01 on a POWER constraint, not a technical one
+
+**Stopped mid-experiment because the T5810 exceeds its UPS under inference load.**
+Measured on the box while the graded eval ran:
+
+| state | GPU draw |
+|---|---|
+| idle, model resident | 72 W + 63 W = **135 W** |
+| under inference | 165 W + 165 W = **330 W** (pegged at the cap) |
+
+The UPS is rated **330 W**. So the two GPUs alone consume its entire capacity before the
+Xeon E5-2699v4, drives or fans. Estimated whole-box draw under inference is **~480-510 W**.
+
+**The risk is not the beeping.** On line power the box runs fine. The problem is what an
+overloaded UPS does during an actual outage: it drops the load immediately rather than
+riding through, so a brief blip becomes an abrupt power cut on a machine holding a 29 GB
+model, an open Qdrant collection and a live SQLite verdict DB. The UPS is currently
+providing approximately none of the protection it exists for.
+
+**Worth knowing:** the 165 W cap is deliberate and measured
+(`/usr/local/bin/gpu-tune.sh`, 2026-08-31) — it replaced an old *crypto-mining* profile
+(130 W + locked 1200 MHz) that was power-starving the cards. 165 W is the measured knee:
+33.43 tok/s at 71 °C, versus 34.23 tok/s at 79 °C for 200 W (1 °C from abort). It is
+applied at boot via `/etc/local.d/gpu-tune.start`, so it survives reboots. The old profile
+drew 260 W — still over the same UPS, just less obviously.
+
+**Sizing guidance:** size for ~500 W sustained, not 330 W. A UPS run at 100 % of rating has
+almost no runtime and ages its battery fast; 50-60 % loading is the usual target. That puts
+the requirement around **1500 VA / ~900-1000 W**.
+
+**Stopgap if needed before then:** lowering the cap costs measured throughput —
+130 W gives 29.43 tok/s vs 33.43 at 165 W (~12 % slower). But no achievable GPU cap fits
+this box under a 330 W UPS once the CPU is counted, so this is a purchase, not a tuning
+problem.
+
+**Where the experiment got to:** baseline captured at the current settings —
+**mean grounding 4.72**, 32 grounded evals, 0 safety hard-fails (one review-level flag on
+"How old is Chris?"). The wider-context arm (`RAG_TOP_K=8`, `RAG_RETRIEVE_LIMIT=20`,
+`MAX_CONTEXT_TOKENS=28000`) was started and **killed partway**, so it has no result. Config
+is reverted to code defaults; nothing is left half-applied.
+
+**To resume when the UPS is sorted:** the knobs are now env-overridable, so it is a
+systemd drop-in plus two eval runs — no redeploy.
+
+### P2.3 (original) — Context window is still sized for 16K
 The new model has 32K (`max_model_len: 32768`) but `MAX_CONTEXT_TOKENS` is unchanged.
 More evidence per answer is the single cheapest quality lever available, and it directly
 offsets P0.2's loss of reranker precision.
