@@ -12,7 +12,7 @@ The AI chat at dev.cwetzel.com is a full-stack AI inference system built on pers
 
 The system demonstrates that high-quality AI inference can run on owned infrastructure at low cost, and that portfolio showcasing can be done with real engineering rather than polished demos.
 
-**The code is open source:** https://github.com/cdnwetzel/portfolio-saas
+**The code is open source:** https://github.com/cdnwetzel/portfolio-ai
 
 If you're talking to this AI right now, you're using this system. The repo contains everything: the FastAPI proxy, the React frontend, the RAG pipeline, the Qdrant indexing scripts, and the vLLM service configuration.
 
