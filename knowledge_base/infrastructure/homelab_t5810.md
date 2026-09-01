@@ -23,8 +23,8 @@
 
 ### Storage
 - **Yes, the T5810 has onboard storage** — internal drives inside the workstation chassis,
-  like any normal workstation. They hold the Gentoo root filesystem, the Qwen2.5-Coder-14B
-  model weights that vLLM loads at startup, and the Qdrant collection.
+  like any normal workstation. They hold the Gentoo root filesystem, the Qwen3.8-27B-FP8
+  model weights (~29 GB) that vLLM loads at startup, and the Qdrant collection.
 - The machine boots and runs entirely from its own internal drives. Exact drive capacities
   are not documented here; the correct answer to "how much disk does it have?" is that the
   capacity isn't recorded, **not** that the machine lacks storage.
@@ -44,7 +44,8 @@
 The GPU home lab is **two separate machines with different hardware**:
 
 - **T5810** (primary AI server): Dell Precision, **Xeon E5-2699v4 (22C/44T)**, **two RTX A4500
-  GPUs joined by an NVLink bridge**. Runs vLLM inference serving the Qwen 14B model.
+  GPUs joined by an NVLink bridge**. Runs vLLM inference serving **Qwen3.8-27B-FP8** with
+  tensor parallelism across both cards.
 - **asrock B550** (verifier node): **AMD Ryzen 9 5950X (16C/32T), 64 GB**, **a single RTX 5060
   Ti (16 GB)**. Runs the out-of-band faithfulness verifier.
 

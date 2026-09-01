@@ -2,7 +2,7 @@
 
 ## At a Glance
 
-Portfolio AI (dev.cwetzel.com) is a self-hosted, full-stack Retrieval-Augmented Generation platform serving a personalized digital twin of my work. It runs on a secure, low-latency hybrid-cloud topology: **Apache** on an edge VPS terminates SSL/WSS and proxies traffic through an encrypted **SSH reverse tunnel** to a bare-metal **Gentoo Linux** home server — zero cloud compute cost. Inference is served by **vLLM** running **Qwen2.5-Coder 14B Instruct** with **tensor parallelism across an NVLink-bridged dual RTX A4500** GPU array. A custom **FastAPI** backend manages a 24K-character sliding-window context history, streams tokens over **WebSocket**, and grounds every response in a **Qdrant** vector database — **bge-base-en-v1.5 (768-d) cosine retrieval, reranked by a bge-reranker-base CPU cross-encoder** — with an out-of-band faithfulness verifier independently scoring each answer's grounding.
+Portfolio AI (dev.cwetzel.com) is a self-hosted, full-stack Retrieval-Augmented Generation platform serving a personalized digital twin of my work. It runs on a secure, low-latency hybrid-cloud topology: **Apache** on an edge VPS terminates SSL/WSS and proxies traffic through an encrypted **SSH reverse tunnel** to a bare-metal **Gentoo Linux** home server — zero cloud compute cost. Inference is served by **vLLM** running **Qwen3.8-27B-FP8** with **tensor parallelism across an NVLink-bridged dual RTX A4500** GPU array. A custom **FastAPI** backend manages a 24K-character sliding-window context history, streams tokens over **WebSocket**, and grounds every response in a **Qdrant** vector database — **bge-base-en-v1.5 (768-d) cosine retrieval, reranked by a bge-reranker-base cross-encoder on a second GPU** — with an out-of-band faithfulness verifier independently scoring each answer's grounding.
 
 ---
 
@@ -18,16 +18,25 @@ If you're talking to this AI right now, you're using this system. The repo conta
 
 ---
 
+## Where is the source code? Is this open source?
+
+Yes. The full source is public at **https://github.com/cdnwetzel/portfolio-ai** — the FastAPI
+proxy, the React frontend, the RAG pipeline, the Qdrant indexing scripts, the evaluation harness
+and the vLLM service configuration. If you are talking to this AI right now, you are using the
+code in that repository.
+
+---
+
 ## Full Stack
 
 | Layer | Technology | Where It Runs |
 |---|---|---|
 | Frontend | React + Vite + Tailwind CSS | Browser |
 | Edge | Apache (SSL/WSS) + FastAPI (api-proxy.py) | cwetzel.com VPS |
-| LLM | vLLM + Qwen2.5-Coder 14B Instruct | T5810 home server (2× A4500) |
+| LLM | vLLM 0.27.1 + Qwen3.8-27B-FP8 | T5810 home server (2× A4500) |
 | Vector DB | Qdrant (dense cosine, 768-d) | T5810 home server |
 | Embeddings | BAAI/bge-base-en-v1.5 (768-d) | T5810 home server (CPU) |
-| Reranker | bge-reranker-base (cross-encoder) | T5810 home server (CPU) |
+| Reranker | bge-reranker-base (cross-encoder) | asrock B550 (RTX 5060 Ti, GPU) |
 | Faithfulness verifier | Qwen2.5-14B-Instruct (Ollama, RTX 5060 Ti) | asrock B550 home server |
 | Tunnel | SSH reverse forward (VPS → T5810 → asrock) | VPS ↔ home LAN |
 
@@ -63,15 +72,28 @@ Documents are chunked structure-aware — split on markdown section boundaries (
 
 ---
 
-## Why Qwen2.5-Coder 14B?
+## Why Qwen3.8-27B?
 
-The model was chosen for:
-- **14B parameters:** Fits both A4500s with tensor parallelism, leaves headroom for Qdrant + embeddings
-- **Instruction-tuned:** Follows the system prompt grounding rules reliably
-- **Code understanding:** Strong structured output (JSON for FOLLOWUPS), markdown formatting, technical accuracy
-- **Speed:** Faster streaming than 32B models, perceptibly more responsive for portfolio demos
+The model was selected on measurement, not preference. It replaced Qwen2.5-Coder-14B-Instruct
+on 2026-08-26 after a head-to-head on the production contract:
 
-The `pscode` naming in the service reflects a past experiment with a LoRA adapter trained on Python code. The LoRA is NOT loaded in production — the base instruct model is used with RAG context instead of fine-tuning.
+- **Grounding:** 100% vs 96.4% for the incumbent
+- **Citation:** ~100% vs 71.4%
+- **FOLLOWUPS trailer:** ~100% vs **7.1%** — the incumbent omitted it on 26 of 28 answers, so the
+  site's suggestion chips were absent from roughly 93% of responses
+- **Against the other candidate:** 75.0% vs 64.3% for a 35B mixture-of-experts build
+
+It is a **reasoning model**, and chain-of-thought is deliberately disabled. With thinking on it
+spends the entire token budget reasoning and returns empty content on long answers. The RAG task
+here does not need visible deliberation — the reasoning is "read the retrieved sources and quote
+them accurately."
+
+**FP8 quantization** is what makes a 27B model fit: ~29 GB of weights split across two 20 GB
+A4500s with tensor parallelism, leaving room for the KV cache. The A4500s are Ampere and have no
+FP8 tensor cores, so weights are dequantized on the fly — a compute cost the GPUs absorb.
+
+An earlier `pscode` LoRA experiment is visible in some service names. That adapter was never used
+in production; the base model is grounded with RAG context rather than fine-tuned.
 
 ---
 
@@ -134,23 +156,35 @@ Comparable cloud GPU inference (2× A4500 equivalent) would cost $3-5/hour. At m
 
 | Property | Value |
 |---|---|
-| Base model | Qwen2.5-Coder 14B Instruct |
+| Base model | Qwen3.8-27B-FP8 |
 | Model creator | Alibaba Cloud |
-| Inference engine | vLLM 0.14.0 |
+| Inference engine | vLLM 0.27.1 |
 | Serving host | Dell Precision T5810, Gentoo Linux |
 | GPU layout | 2× NVIDIA RTX A4500 20 GB, NVLink (40 GB aggregate) |
 | Tensor parallelism | 2-way across the A4500 pair |
-| Context window | 16,384 tokens |
+| Quantization | FP8 weights (~29 GB across 40 GB aggregate VRAM) |
+| Context window | 32,768 tokens served (proxy budgets 14,384 for the prompt) |
 | Reserved response budget | 2,048 tokens |
-| Temperature | 0.35 |
+| Temperature | 0.2 |
 | Top-p | 0.7 |
-| Presence penalty | 0.5 |
+| Presence penalty | 0.0 (penalties punish re-using retrieved wording, which causes paraphrase drift on a factual task) |
 
-### Speed (measured)
+### Speed (measured 2026-08-31)
 
-- **Generation throughput:** ~6 tokens/sec (BF16 14B, tensor-parallel on the A4500 pair). Measured ~48s for a 300-token answer.
-- **Time to first token:** a few seconds — the RAG pre-step (embed → Qdrant search → CPU rerank) adds roughly 3–4s before the model starts, then prefill, then streaming begins.
-- **End-to-end per query:** short answers/refusals land in ~7s; typical grounded answers run ~20–50s; long, detailed answers can reach ~100s. It's tuned for grounded quality on a single-user portfolio demo, not raw speed — the GPUs are the bottleneck and that's an accepted trade-off.
+- **Generation throughput:** **33.2 tokens/sec**, sustained over a 10-minute continuous soak.
+- **Time to first token:** **~900 ms** for a realistic retrieval prompt (~2,800 tokens). Prefill
+  runs at roughly 330 ms per 1,000 tokens.
+- **Retrieval pre-step:** ~1 second end to end — embedding ~24 ms, Qdrant search ~1 ms, GPU
+  rerank ~14 ms, plus network hops.
+- **End-to-end per query:** dominated by answer length rather than hardware. A 256-token answer
+  completes in about 8 seconds; a detailed 800-token answer takes roughly 25.
+
+These figures follow a hardware correction on 2026-08-31. The GPUs had been running under a
+leftover power profile that capped them at 130 W of their 200 W rating and locked the SM clock to
+1200 MHz of 2100 — under load they were dragged to 705–810 MHz while sitting at only 50 °C.
+Removing it moved generation from 29.4 to 33.2 tok/s and cut time-to-first-token by 32%. An older
+revision of this page quoted ~6 tokens/sec, which described the previous 14B model under that
+same throttle.
 
 ---
 

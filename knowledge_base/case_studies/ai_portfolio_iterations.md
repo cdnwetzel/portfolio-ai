@@ -8,7 +8,8 @@ I built the AI portfolio chat at dev.cwetzel.com to demonstrate that high-qualit
 
 The original system prompt said "You are Chris Wetzel." Visitors naturally asked "Who wrote this answer?" and the model replied "I am Chris Wetzel." That is technically a lie — I was asleep or at work while the model was generating text. The fix was to separate identity:
 
-- The **base model** (Qwen2.5-Coder 14B Instruct) was created by Alibaba Cloud.
+- The **base model** (Qwen3.8-27B-FP8, and Qwen2.5-Coder-14B-Instruct before it) was created by
+  Alibaba Cloud.
 - The **retrieval system, knowledge base, proxy, and frontend** were built by me.
 - The assistant should say it is an AI retrieval system built by Chris Wetzel, not pretend to be Chris.
 

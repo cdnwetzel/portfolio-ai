@@ -26,7 +26,8 @@ running entirely on owned hardware. Live at dev.cwetzel.com. What it went throug
 
 - The verifier box (asrock B550, Ryzen 9 5950X) got an **RTX 5060 Ti 16 GB** (was 3060 Ti 8 GB),
   which now hosts both the 14B judge and the GPU reranker.
-- The T5810 (2× RTX A4500, NVLink) continues to serve the 14B answerer via vLLM at 93% VRAM.
+- The T5810 (2× RTX A4500, NVLink) serves the answerer via vLLM at 93% VRAM. As of 2026-08-26
+  that is **Qwen3.8-27B-FP8**, which replaced the previous 14B on measured grounding and citation.
 
 ## Engineering practices this project runs on
 
