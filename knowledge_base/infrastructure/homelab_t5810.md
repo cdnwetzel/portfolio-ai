@@ -13,11 +13,14 @@
   has plenty of both (see CPU & Memory and Storage below).
 - **NVLink bridge:** NV4 topology (4-link bridge) — 56 GB/s per direction, 112 GB/s aggregate. Required for tensor-parallel vLLM TP=2; without NVLink, CUDA sees two isolated GPUs
 - **Usable VRAM:** 20,470 MiB per card — the full ~20 GB is available because ECC is **disabled** (a deliberate trade-off that reclaims the ~1.25 GB/card ECC overhead — ~2.5 GB total across the pair — for vLLM's KV cache)
-- **Power:** Dell 825W internal PSU (primary) + external Corsair ATX 3.0 1000W PSU via SATA sync/trigger board for GPU supplemental power
+- **Power:** **two PSUs run at the same time.** The Dell 825 W internal PSU powers the
+  workstation, and an external Corsair ATX 3.0 1000 W PSU supplies supplemental GPU rails via a
+  SATA sync/trigger board that switches it on with the Dell. The Dell unit remains in place and
+  in use; the Corsair is additional capacity, not a swap.
 
 ### CPU & Memory
 - **CPU:** Intel Xeon E5-2699v4 — 22 cores / 44 threads, Broadwell-EP
-- **Memory:** 256 GB DDR4 ECC (total system RAM) — ample headroom to run the CPU embedder, reranker, and Qdrant alongside vLLM with no GPU-VRAM contention
+- **Memory:** 256 GB DDR4 ECC (total system RAM) — ample headroom to run the CPU embedder, and Qdrant alongside vLLM with no GPU-VRAM contention
 - **Build performance:** kernel 6.18 at `-j44` in ~5 min; full `@world` (250 packages) in ~90 min; peak RAM during Node.js/V8 compile ~48GB (a workload spike, not the machine's total)
 - **PCIe:** Gen 3 slots for dual-GPU installation
 
@@ -69,10 +72,13 @@ the same model, not the same size, and not the same job:
 holds about 11.7 GB. Two separate models, two separate ports, two separate jobs.
 
 - **OS:** Gentoo Linux / OpenRC
-- **Role:** hosts `verifier-service` (port 8007) + Ollama serving **Qwen2.5-14B-Instruct** as an
-  *independent* faithfulness judge — a different model family than the one that writes answers,
-  to avoid self-grading bias — and `rerank-service` (port 8006) running `bge-reranker-base` on
-  the same GPU.
+- **Role:** runs two independent services on its RTX 5060 Ti:
+  - `rerank-service` (port 8006) running **`bge-reranker-base`** — a small cross-encoder,
+    about 1.3 GB of VRAM. It ranks retrieved chunks. It is not a large language model.
+  - `verifier-service` (port 8007) running **Qwen2.5-14B-Instruct** via Ollama as an
+    *independent* faithfulness judge — about 11.7 GB of VRAM, and a different model family
+    from the one that writes answers, to avoid self-grading bias. The 14B parameter count
+    belongs to this judge.
   The judge runs on the **RTX 5060 Ti** (GPU). After every answer, the
   cloud proxy fire-and-forgets the answer + its retrieved chunks here; the judge scores whether
   each claim is supported. Fail-open: if this box is down, the chat is unaffected.
@@ -146,12 +152,12 @@ The T5810 is made accessible to the internet via a persistent SSH tunnel from th
 User Browser → HTTPS → cwetzel.com (Ubuntu VPS)
   Cloud: Apache (SSL/WSS) + FastAPI api-proxy (port 8000)
     ↓ SSH Tunnel (reverse forward)
-  T5810: vLLM (8004), Qdrant (6333), Embeddings (8005), Reranker (8006)
+  T5810: labrouter (8004) -> vLLM backends, Qdrant (6333), Embeddings (8005)
     ↓ tunnel also forwards :8007 → asrock verifier (home LAN)
 ```
 
 **Tunnel service:** `portfolio-ai-tunnel.service` (systemd on cloud server)
-- Forwards cloud ports 8004, 6333, 8005, 8006 → T5810 LAN; 8007 → asrock
+- Forwards cloud ports 8004, 6333, 8005 → T5810; 8016 → asrock:8006 (reranker); 8007 → asrock (judge)
 - Auto-restarts on disconnect
 
 **Cloud server** (`cwetzel.com`, Ubuntu):

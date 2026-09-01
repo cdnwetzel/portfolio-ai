@@ -1,14 +1,18 @@
 import { useState } from 'react'
 import useSystemInfo from '../hooks/useSystemInfo'
 
+// Only genuinely STATIC facts belong here. Anything the fleet can change —
+// the model, the context window, KB size, the verifier GPU — is served by
+// /api/system-info so a hardware or model swap does not require a frontend
+// rebuild. This panel displayed "Qwen2.5-Coder 14B Instruct / 16 384 tokens"
+// for a week after the T5810 moved to Qwen3.8-27B-FP8 at 32K, because those
+// were hardcoded here.
 const STACK = [
-  { label: 'Model',      value: 'Qwen2.5-Coder 14B Instruct' },
   { label: 'GPU',        value: '2× RTX A4500 20GB NVLink (T5810)' },
   { label: 'Inference',  value: 'vLLM (tensor parallel)' },
-  { label: 'Context',    value: '16 384 tokens' },
   { label: 'Vector DB',  value: 'Qdrant (dense cosine)' },
   { label: 'Embeddings', value: 'bge-base-en-v1.5 (768-d)' },
-  { label: 'Reranker',   value: 'bge-reranker-base (CPU)' },
+  { label: 'Reranker',   value: 'bge-reranker-base (GPU, asrock)' },
   { label: 'Servers',    value: 'T5810 + asrock B550 (Gentoo)' },
   { label: 'Frontend',   value: 'React + Vite + Tailwind' },
 ]
@@ -19,6 +23,14 @@ export default function SystemInfo() {
   const info = useSystemInfo()
 
   const live = [
+    {
+      label: 'Model',
+      value: info ? info.model : '—',
+    },
+    {
+      label: 'Context',
+      value: info ? `${info.context_tokens.toLocaleString('en-US')} tokens` : '—',
+    },
     {
       label: 'Knowledge base',
       value: info ? `${info.docs} docs · ${info.chunks} chunks` : '—',

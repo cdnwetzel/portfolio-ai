@@ -49,7 +49,7 @@ Every chat message goes through a Retrieval-Augmented Generation pipeline:
 1. **Alias-expand query:** The user's message is widened with a curated synonym/alias map (e.g. "LLM" ↔ "large language model", project codenames) so retrieval recall doesn't depend on exact wording.
 2. **Embed query:** The expanded query is embedded using `BAAI/bge-base-en-v1.5` (768 dims, CPU).
 3. **Vector search:** Qdrant runs a dense cosine-similarity search against the `documents` collection, returning the top-15 candidate chunks. (A hybrid dense+BM25 path with Reciprocal Rank Fusion was built and A/B-tested, but it *regressed* on this small, well-curated KB versus pure dense — so it's disabled in production, `HYBRID_SEARCH=0`. Dense cosine won.)
-4. **Rerank:** A `bge-reranker-base` cross-encoder (CPU, T5810) re-scores all 15 candidates against the original query and keeps the top 5 (capped at one chunk per source document for diversity). Runs on the T5810's idle CPU/RAM, no GPU contention with vLLM.
+4. **Rerank:** A `bge-reranker-base` cross-encoder (GPU, asrock B550) re-scores all 15 candidates against the original query and keeps the top 5 (capped at one chunk per source document for diversity). Runs on the T5810's idle CPU/RAM, no GPU contention with vLLM.
 5. **Inject context:** The reranked top-5 chunks are fit to a token budget and injected into the LLM system prompt.
 6. **Stream response:** vLLM streams the response token-by-token over WebSocket to the browser.
 7. **Extract follow-ups:** The model appends `FOLLOWUPS:[...]` at the end; the frontend parses and strips it, showing suggestion chips.
@@ -120,7 +120,7 @@ The threat model is intentionally small — scoping decisions remove most classi
 - **No user data, no PII.** The knowledge base holds only public portfolio content — resume, case studies, LinkedIn posts, infrastructure write-ups. There are no visitor accounts, no customer records, no personal data collected.
 - **No authentication needed.** The chat serves read-only public information about my career. Nothing a visitor does writes to a database, so there are no logins, passwords, or user records to protect.
 - **Queries are not logged or stored.** The proxy logs only metadata — retrieval counts, timing, grounding status — never the content of a visitor's question or the model's response. Per-session chat history lives in the browser's localStorage only; nothing is persisted server-side.
-- **Backend isolation.** vLLM (8004), Qdrant (6333), the embedding service (8005), and the reranker (8006) all bind to localhost on the T5810 and have no internet-facing ports. The public VPS reaches them only over an SSH tunnel with key-based auth.
+- **Backend isolation.** labrouter (8004, fronting the vLLM backends), Qdrant (6333) and the embedding service (8005) bind to localhost on the T5810 and have no internet-facing ports. The public VPS reaches them only over an SSH tunnel with key-based auth.
 - **Transport security.** All browser traffic is HTTPS/WSS with Let's Encrypt certificates, terminated at Apache on the VPS; the VPS↔home link is SSH-encrypted.
 - **Bounded inputs.** Inference requests are capped at a maximum prompt length to prevent resource-exhaustion abuse.
 
@@ -198,15 +198,15 @@ Home-server services bind to the LAN/localhost only. The public VPS reaches them
 | vLLM | 8004 | T5810 | LLM inference | None — chat stops |
 | Qdrant | 6333 | T5810 | Dense vector (cosine) search | None — chat stops |
 | Embedding service | 8005 | T5810 | `bge-base-en-v1.5` query/document embeddings | None — chat stops |
-| bge-reranker-base | 8006 | T5810 | Cross-encoder reranking of the top-15 candidates | Cosine order, one chunk per source doc |
+| bge-reranker-base | 8006 | asrock B550 (GPU) | Cross-encoder reranking of the top-15 candidates | Cosine order, one chunk per source doc |
 | Faithfulness verifier | 8007 | asrock B550 | Out-of-band claim-level faithfulness scoring | Chat unaffected — verdicts pause (fail-open) |
-| SSH tunnel | 8004/6333/8005/8006/8007 forwarded | VPS → T5810 (→ asrock) | Secure VPS↔home link | None — services unreachable from public internet |
+| SSH tunnel | 8004/6333/8005 to T5810; 8016→asrock:8006, 8007→asrock | VPS → T5810 (→ asrock) | Secure VPS↔home link | None — services unreachable from public internet |
 
 ---
 
 ## Reranker Fallback Behavior
 
-The proxy always retrieves 15 candidate chunks from Qdrant (dense cosine). It then asks the CPU reranker (port 8006) to re-score all 15 and return the best ones. If the reranker is unreachable, returns a non-200 status, or times out, the proxy fails open: it uses the original cosine order, applies the per-source-doc cap (max one chunk per document), and returns the top 5. Chat continues with slightly lower relevance precision.
+The proxy always retrieves 15 candidate chunks from Qdrant (dense cosine). It then asks the GPU reranker on the asrock (port 8006) to re-score all 15 and return the best ones. If the reranker is unreachable, returns a non-200 status, or times out, the proxy fails open: it uses the original cosine order, applies the per-source-doc cap (max one chunk per document), and returns the top 5. Chat continues with slightly lower relevance precision.
 
 ---
 
@@ -220,7 +220,8 @@ Browser ──HTTPS/WSS──> cwetzel.com VPS (FastAPI proxy)
                           │  (all home services reached at 127.0.0.1 via the SSH tunnel)
                           ▼
                   ── SSH reverse tunnel ──> T5810 (ai.cwetzel.com)
-                          ├─ vLLM 8004, Qdrant 6333, embed 8005, rerank 8006  (on the T5810)
+                          ├─ labrouter 8004 (-> vLLM), Qdrant 6333, embed 8005  (on the T5810)
+                          ├─ rerank 8006, judge 8007                        (on the asrock B550)
                           └─ tunnel also forwards :8007 ──LAN──> asrock B550 (verifier)
 ```
 

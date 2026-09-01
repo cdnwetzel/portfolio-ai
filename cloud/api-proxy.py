@@ -233,8 +233,18 @@ async def system_info():
     exactly is running" without SSHing in."""
     return {
         "docs": int(os.environ.get("KB_DOC_COUNT", "35")),
-        "chunks": int(os.environ.get("KB_CHUNK_COUNT", "94")),
+        "chunks": int(os.environ.get("KB_CHUNK_COUNT", "99")),
         "verifier_gpu": os.environ.get("VERIFIER_GPU", "RTX 5060 Ti"),
+        # Model and context window are served from HERE, not hardcoded in the
+        # frontend. The panel showed "Qwen2.5-Coder 14B Instruct / 16 384 tokens"
+        # for a week after the T5810 moved to Qwen3.8-27B-FP8 at 32K, because those
+        # strings lived in SystemInfo.jsx and nothing rebuilds the frontend when the
+        # fleet changes. Same class of mistake as the client choosing the model id,
+        # which took the site down on 2026-08-29: a backend fact belongs to the
+        # backend. Defaults track MODEL_ID / MAX_CONTEXT_TOKENS so this stays honest
+        # even if the env is never set.
+        "model": os.environ.get("MODEL_DISPLAY_NAME", "Qwen3.8-27B-FP8"),
+        "context_tokens": int(os.environ.get("MODEL_CONTEXT_TOKENS", "32768")),
         "deployed_at": _DEPLOYED_AT,
         "deployed_sha": os.environ.get("DEPLOY_GIT_SHA", "unknown"),
         "prompt_version": PROMPT_VERSION,
