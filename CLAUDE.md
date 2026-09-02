@@ -28,8 +28,8 @@ model beneath it have since changed. All tiers live:
 1. Credibility gates (6/6 passed), 2. 14B judge on RTX 5060 Ti (9/9 fixtures), 3. GPU reranker
 (15.8x faster), 4. First-person voice & query routing, 5. UX polish (stop button, textarea, 
 auto-scroll, sources readability), 6. KB expansion (35 docs / 94 chunks; indexer post-loading
-bug fixed), 7. Ops maturity (verdicts.db backups, weekly digest with silence alerts, incident
-runbook, deploy-stamped version endpoint). Self-test gate passing. Health monitoring active.
+bug fixed), 7. Ops maturity (incident runbook, deploy-stamped version endpoint; **verdicts.db backups
+and the weekly digest were written but are NOT scheduled — see DEFECT_LEDGER #4**). Self-test gate passing. Health monitoring active.
 Continuous improvement: weekly flagged-queue review + defect ledger (DEFECT_LEDGER.md).
 
 ## Core Architecture

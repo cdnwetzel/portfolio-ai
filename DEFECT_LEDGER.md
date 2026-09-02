@@ -8,116 +8,41 @@
 
 ## OPEN DEFECTS (Priority Order)
 
-### 1. SAP Business One: Generation Hallucination
-**Status:** LIVE IN PRODUCTION  
-**Severity:** HIGH (violates prompt rule #6 — generation must be grounded)  
-**Discovery:** Tier 2.3 golden-set eval (2026-07-28); flagged by 14B judge  
-**Evidence:** Rank-1 chunk has correct answer; model generates speculative fluff instead of using it  
-**Symptom:** Query "Tell me about Chris's SAP Business One work" → response invents non-KB details  
-**Root cause:** Model is speculative despite system prompt grounding rule  
-**Fix required:** 
-- [ ] Verify with live query (test in prod)
-- [ ] Check if chunk is being passed to LLM (context fitting issue?) or LLM is ignoring it
-- [ ] Adjust system prompt strictness OR fine-grain the chunk content
+### 1. SAP Business One — RETITLED 2026-09-02: hallucination is gone, a 5/4 conflation remains
+**Status:** OPEN but **downgraded HIGH → LOW**. The original premise no longer holds.
+**Original claim (2026-07-28):** "response invents non-KB details", "speculative fluff"
+instead of using the rank-1 chunk.
 
-**Discovered by:** Kimi (noted in T2.3, then disappeared into STATUS)  
-**Last reviewed:** 2026-08-05 (flagged in verdicts.db, not yet acted on)  
-**Evidence + candidate fix (2026-08-10):** Grounded A/B measured pscode at 0.71 mean faithfulness (2/4
-flagged) vs qwen3-coder:30b at 0.97 (0/4 flagged) on the same retrieved sources; the 30B removes the
-"Mac Studio T5810" style confabulation entirely. Model swap is GREEN on quality but BLOCKED on GPU
-capacity. See `plans/model-faithfulness-ab-qwen3-30b-2026-08.md`.
+**Re-verified live 2026-09-02** against the current model (Qwen3.8-27B, not the 14B that was
+serving when this was written). Every distinctive specific in the answer traces to
+`knowledge_base/case_studies/sap_business_one_integration.md`:
 
-**Reproduced live 2026-08-19 with a clean isolation, two independent cases:**
+| Claim in the answer | In the KB? |
+|---|---|
+| `idx_inventory_warehouse_sku`, `idx_wmssync_status` | yes — verbatim |
+| Athens / Singapore / Sydney / Produmex | yes |
+| "8 months" timeline | yes, line 12 |
+| "8s to 0.8s (10x)" | yes, line 77 |
+| "99%+ inventory accuracy" | yes, line 15 |
+| "200+ users" | yes |
 
-*Case A — contradicts retrieved evidence.* `"tell me about the Asrock B550"` returned a generic
-motherboard spec sheet under "Sources (5)": invented a *Realtek ALC892 audio codec*, *128 GB DDR4 at
-5600 MHz*, and *"Realtek Gigabit Ethernet"* — while `gentoo_machines.md:26` states **Intel AX200 WiFi,
-I225-V 2.5GbE**. Not a KB gap; a direct contradiction of retrieved text. The same session also had it
-claim the T5810 has *"Integrated Intel HD Graphics"*, contradicting both the KB and its own answer two
-turns earlier.
+**The model is now using the chunk, not inventing around it.** Two graded evals the same
+night scored it g=4 / faithfulness=5 in both arms.
 
-*Case B — the isolation that rules out retrieval.* `"does the T5810 have onboard storage?"` answered
-*"does not have onboard storage. It relies on external storage solutions."* `/api/retrieve` for that
-exact query returns the corrected chunk at **rank 3**, containing the literal sentence *"Yes, the
-T5810 has onboard storage — internal drives inside the workstation chassis."* **Evidence was in
-context and the model asserted its negation.** This is the cleanest available proof that the defect
-is generation, not retrieval or KB coverage.
+**What actually remains, and it is small:** the opening sentence says the company operates
+"across five continents". The KB says **5 warehouses spanning 4 continents** — the answer
+conflates the two, then *contradicts itself* two lines later with the correct "5 warehouses
+across 4 continents". A number-swap in a summary sentence, not fabrication.
 
-*Also learned:* the KB previously said *"the A4500 has no onboard storage"* (true, about the GPU) and
-the model attributed it to the workstation. Rewording fixed 4 of 5 phrasings. The first attempt
-*quoted* the wrong phrase in order to warn against it — and the model pattern-matched the quoted
-string, reproducing the error. **Never write a wrong phrasing into the KB even to negate it;**
-retrieval matches the phrase, not the logic. Fixed by stating the positive fact only.
+**Note on the judge's read:** it scored g=4 with "lacks specific details from case study" on
+an answer dense with case-study specifics. The judge only sees the chunks handed to it, so an
+answer drawing on a chunk outside that evidence slice gets under-scored. Worth remembering
+before trusting a single judge note over the source text.
 
-*Verifier note — CORRECTED 2026-08-19:* an earlier draft of this entry claimed the judge misses this
-class, inferred from the absence of a flag in the browser. That was wrong. Re-running the ASRock
-question through `/verify` directly, the judge **did** flag it (`flagged=True, n_contradicted=1`,
-faithfulness 0.92). So the judge detects the contradiction; what failed was flag *delivery or display*
-in the client. Investigate that separately — do not treat this as judge blindness.
-
-**Model configuration finding (2026-08-19) — production has never used the pscode LoRA.**
-`/v1/models` shows `qwen2.5-coder-14b-pscode` with `parent=None` and
-`root=/data/pscode/models/qwen2.5-coder-14b-instruct` (the base), and `pscode-prod` as a separate id
-with `parent=qwen2.5-coder-14b-pscode` (the adapter). `useChat.js` sends the base id and the proxy
-does not override it. **Consequence:** the "pscode 0.71" arm of the qwen3-30B A/B was the *base*
-model, mislabeled, and `pscode-prod` has never been evaluated at any point.
-
-*First measurement of the adapter (n=5, identical chunks/prompt/sampling, scored by the site's own
-judge):* base mean 0.983 with 1 flag; LoRA mean **1.000 with 0 flags**, and far more disciplined
-output (pxx answer 881 chars vs the base's 4079). **Not yet actionable** — 9 of 10 cells scored
-exactly 1.00, so the whole difference is one data point, and the base answered the T5810 storage
-question *correctly* here while getting it *wrong* in production an hour before on the same chunks,
-prompt and sampling. **The defect is stochastic at temperature 0.2**, so single-sample comparisons
-cannot resolve it. Next step: k≥5 samples per question per arm, and a temperature-0 arm, before any
-serving change. Harness: `scratchpad/lora_ab.py` (runs on the VPS; no restart, live site unaffected).
-
-*Two more live instances (2026-08-22), reported by Chris:*
-- **Age confabulation.** `"how old is Chris"` → *"Chris Wetzel is 26 years old."* The KB has no age
-  statement anywhere; the model pattern-matched the corpus's ubiquitous "26 years of experience"
-  onto the age attribute. The verifier DID flag it, but the flag is advisory — the wrong answer
-  still rendered. **Fix:** `server_facts_block()` (context_manager.py) computes age from
-  `OWNER_BIRTHDATE` at request time and injects it into the system prompt as a SERVER FACTS block
-  (DOB never reaches the prompt, client, or logs — only the computed age); a GROUNDING bullet now
-  bars inferring personal facts ("years of experience is not an age"); the block is also appended
-  to the judge's evidence so a correct age answer isn't flagged "unsupported".
-- **Education: refusal AND confabulation on consecutive days.** 2026-08-21: `"where did Chris go to
-  school"` → invented *Rowan*. 2026-08-22: same question → refused outright. Root cause is a
-  **retrieval miss**, not a KB gap: `RESUME.md` always had the Education section (The College of New
-  Jersey), but `/api/retrieve` showed the education chunk never ranking into the generator's top-5 —
-  even the KB's own vocabulary ("Chris education college degree") placed it rank 4 at rerank score
-  0.0004. **Fix:** school/college/education/university/degree/tcnj alias group in query_expansion.py
-  + resume wording now includes "TCNJ" and "attended school". Requires reindex to take effect.
-
-*k-sample harness:* `scripts/consistency_battery.py` asks each documented-failure probe k times
-(default 5) with deterministic expect/forbid substring checks and gates on k/k — the harness the
-stochastic defect always needed. **Results 2026-08-22:** baseline (pre-fix, live) FAILED — age 0/5
-(consistently "41 years old as of 2023": no date anchor at all), school 0/5 (consistent refusal),
-T5810 storage 1/5 (the stochastic negation, reproduced). Post-fix run 1: age 5/5, T5810 5/5,
-school 0/5 — the alias group + wording alone didn't move the education chunk, because the chunker's
-greedy 400-word merge had buried it at the tail of a work-history chunk, past the reranker's
-512-token truncation (rerank score 0.0000 — the cross-encoder literally never saw it). Moving the
-Education section up after Professional Summary put it in the resume's header chunk (37% depth);
-rerank score went 0.0000 → 0.5760 at rank 1. Post-fix run 2: **6/6 probes at 5/5 = PASSED**.
-Lesson: a chunk that ranks on embedding but whose relevant text sits beyond the reranker's
-512-token window is scored blind — section placement within a merged chunk is a retrieval lever.
-
----
-
-### 2. Judge Timeout Wrapper: Infrastructure Debt
-**Status:** TEMPORARY FIX IN /tmp  
-**Severity:** MEDIUM (affects eval reproducibility)  
-**Discovery:** During Tier 2 fixture validation; judge hit 60s timeout  
-**Issue:** The 240s timeout wrapper lives in `/tmp/judge_timeout_wrapper.py` — will be lost on reboot  
-**Impact:** Next eval run will re-hit the 60s timeout; no consistent baseline  
-**Fix required:**
-- [ ] Move wrapper to permanent location (`home/verifier-service/judge_timeout_wrapper.py`)
-- [ ] Document why 240s (judge latency + overhead + cold load buffer)
-- [ ] Ensure it's used in all eval runs (`scripts/eval_graded.py` imports it)
-
-**Discovered by:** Kimi (Tier 2 work)  
-**Last reviewed:** 2026-08-05 (noted by Kimi as "infrastructure debt")
-
----
+**Fix required:** nothing urgent. If touched, the lever is the case study's own summary line,
+not the prompt — line 5 pairs "5 warehouses" and "4 continents" in one sentence, which is
+exactly the shape that invites the conflation.
+**Discovered by:** Kimi (2026-07-28). **Re-verified and downgraded by:** Claude, 2026-09-02.
 
 ### 3. Verdict Window: Silent Drop Risk
 **Status:** STOPGAP FIX  
@@ -137,56 +62,60 @@ Lesson: a chunk that ranks on embedding but whose relevant text sits beyond the 
 
 ---
 
-### 4. Verdicts.db: No Backup
-**Status:** CRITICAL INFRASTRUCTURE GAP  
-**Severity:** HIGH (verdicts.db is the ONLY durable metrics store)  
-**Discovery:** Tier 7 planning (ops maturity)  
-**Issue:** `verdicts.db` contains all judge verdicts (260+ entries, the ground truth for learning)  
-**Risk:** Single point of failure; no disaster recovery  
-**Impact:** If asrock fails, all historical verdict data is lost; can't analyze trends or review flagged answers  
-**Fix required:**
-- [ ] Add verdicts.db to backup routine (Tier 7)
-- [ ] Monthly restore test to verify integrity
-- [ ] Document location and retention policy
+### 4. Verdicts.db Backups and the Weekly Digest Never Run — CONFIRMED WORSE 2026-09-02
+**Status:** OPEN. **Severity raised** — this is not "no backup configured", it is "configured
+and silently never executing", which is worse because it reads as done.
 
-**Discovered by:** Kimi (noted as tech debt during Tier 7 planning)  
-**Last reviewed:** 2026-08-05 (pending Tier 7 implementation)
+**Measured on the asrock 2026-09-02:**
 
----
-
----
-
-## BASELINE — `qwen3.8-27b`, established 2026-08-29
-
-**Every quality number recorded before this date is void.** They were measured against
-`qwen2.5-coder-14b`; production now serves `qwen3.8-27b` (FP8, 32K context), pinned via
-`MODEL_ID`. Measured with the reranker restored and `enable_thinking=false`:
-
-| Metric | Value |
+| | |
 |---|---|
-| Graded eval | **PASSED** — 32 grounded evals, **mean grounding 4.78** |
-| Safety hard-fails (PII / prompt-leak) | 0 |
-| Transport errors | 0 |
-| Review-level warnings (⚠) | **0** — first run on record with none |
-| Consistency battery | **7/7 probes at 5/5** |
-| Self-test | 3/3 |
+| live DB | `/home/chris/verifier/verdicts.db`, 1.66 MB, mtime today |
+| backups directory | `/home/chris/verifier/backups/` |
+| backups in it | **exactly one**, `verdicts-20260806T011520Z.db`, **2026-08-06** — 27 days stale |
+| **cron daemon on the asrock** | **none installed** (`cronie` and `dcron` both absent) |
+| root crontab / `/etc/cron.d` entries | none |
+| VPS timers or cron for either job | none |
 
-Superseded numbers: 4.80/4.70 grounding, the base-vs-LoRA A/B (0.983 vs 1.000), and
-"pscode 0.71" in defect #1. Do not compare across the model change.
+So the single backup was a manual run the day it was set up, and nothing has run since.
+`weekly_verifier_digest.sh` sits next to the DB and is **also** unscheduled — so the
+"weekly digest with silence alerts" is not running either.
 
----
+**This makes two claims in CLAUDE.md overstated.** Tier 7 is described as complete with
+"verdicts.db backups, weekly digest with silence alerts". Neither is scheduled anywhere.
+
+**Fix required:**
+- [ ] Install a cron daemon on the asrock (or an OpenRC-friendly timer) — there is currently
+      no mechanism to run *any* periodic job on that box
+- [ ] Schedule the backup, and **verify by checking the directory a day later**, not by
+      checking that the crontab line exists
+- [ ] Schedule `weekly_verifier_digest.sh` likewise
+- [ ] Correct the Tier 7 claim in CLAUDE.md
+
+**Same shape as the outages this repo already learned from:** a thing that looks configured,
+fails silently, and is believed because a document says so. An unverified schedule is a
+belief, not a control.
+**Discovered by:** Claude, 2026-09-02, checking the ledger's own open items on the box.
 
 ### 8. Alert delivery, not alert generation
-**Status:** OPEN — needs a human decision, not code
+**Status:** OPEN — **code side done, the remaining step is human verification**
 **Severity:** HIGH — this is why a two-day outage went unnoticed
 **Issue:** the monitor did its job. It detected the 2026-08-26 vLLM outage and paged
 `[urgent] Portfolio AI DOWN — outage signature` on **Aug 27 and Aug 28**. Nothing happened.
-**Likely cause:** the routine daily heartbeat lands on the **same ntfy topic** as urgent
-pages. A channel that pings you every day with "all green" trains you to ignore it, so the
-one message that mattered looked like the ninety that didn't.
-**Fix options:** separate topic for CRITICAL vs heartbeat; drop the daily heartbeat to weekly
-(the healthchecks.io dead-man's switch already covers "the monitor itself died"); or verify
-the topic still reaches a device that actually notifies.
+**Cause:** the routine daily heartbeat landed on the **same ntfy topic** as urgent pages. A
+channel that pings you daily with "all green" trains you to ignore it, so the one message
+that mattered looked like the ninety that didn't.
+
+**Shipped 2026-08-31:** severity separated onto two topics — `NTFY_CRITICAL_URL`
+(`cwdotcom-critical-…`) carries DOWN/recovered transitions only, while the daily heartbeat
+stays on `NTFY_URL`. The critical topic is silent unless something is wrong, which is the
+whole point of it.
+
+**Still open, and it is not a code task:** *confirm the critical topic actually reaches a
+device that notifies you.* Delivery has never been verified end to end on a phone. Until it
+has, this defect is not closed — the original failure was not detection and not routing, it
+was that a page nobody sees is the same as no page.
+
 **Do not** respond to this by adding more probes. Detection is not the failure.
 **Discovered by:** Claude (2026-08-31, correcting an earlier wrong claim in this ledger that
 monitoring was blind)
@@ -194,6 +123,16 @@ monitoring was blind)
 ---
 
 ## CLOSED DEFECTS
+
+### 2. Judge Timeout Wrapper: Infrastructure Debt — CLOSED 2026-09-02 (verified on the box)
+**Was:** the judge's timeout handling lived in a wrapper script under `/tmp` — critical-path
+behaviour in a directory that does not survive a reboot.
+**Verified resolved:** `/etc/init.d/verifier-service` runs
+`/home/chris/miniforge3/bin/python3 /opt/verifier-service/verifier.py` directly — no wrapper,
+nothing in `/tmp`. The timeout is a first-class setting in the service code
+(`JUDGE_TIMEOUT`, default 120 s, `verifier.py:72`), applied to the httpx client at
+`verifier.py:155`. The unit is supervised with `respawn_max=0` and an `output_log`.
+**Checked by:** Claude, 2026-09-02, reading the live unit and source rather than the docs.
 
 ### 13. Eval Harness Cried Wolf About Judge Independence — CLOSED 2026-09-01
 **Was:** every graded-eval run printed
