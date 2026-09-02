@@ -100,12 +100,27 @@ nothing during the bursts. The exposure is data corruption, not downtime.
 
 Both options under consideration are 1500 VA; the difference is real-power output.
 
-> **RESOLVED 2026-09-01: a 1500 VA UPS is fitted and the T5810 is on it.** The old
-> 330 VA/550 VA unit was kept in service for other devices, which now draw **116 W** on it
-> (35 % — comfortable). Splitting the loads rather than stacking them is the right call:
-> the inference box no longer shares its headroom with anything else.
+> **RESOLVED 2026-09-01: a 1500 VA UPS is fitted, carrying BOTH the T5810 and the asrock.**
+> The old 330 W / 550 VA unit was kept for unrelated devices, which draw **116 W** on it
+> (35 %).
+>
+> **Both inference boxes on one UPS is right for shutdown logic and tighter on wattage.**
+> Right, because one battery means one clock — `upsd` on the T5810 is authoritative for both
+> machines rather than a guess about someone else's runtime. Tighter, because they peak
+> *together*: the asrock's judge grades every answer the T5810 writes. Measured on one E2E
+> probe with both boxes sampled at 1 Hz — T5810 GPUs **330.0 W**, asrock GPU **63.5 W**.
+> With the T5810 metered at 642 W and the asrock estimated near 180 W AC, normal load is
+> **~820 W, about 82 % of 1000 W** — not the 64 % the table below implies by counting only
+> the T5810.
+>
+> **Worst case goes over.** The asrock's GPU cap is 180 W (the judge only uses 63 W) and that
+> box also hosts `llama3.3:70b` for lab work; a 70B on a 16 GB card spills to CPU/RAM and
+> drives the 5950X toward its 142 W PPT at once. Both GPUs pegged plus a loaded 5950X is
+> ~**1050 W**. Hence the operating rule: **do not run heavy lab inference on the asrock while
+> the site is serving**, and **meter the asrock with the second KP125M** — that 180 W is the
+> only number here still estimated, and estimation was just proven 23 % low on the T5810.
 
-| Option | Load at **peak** — estimated ~520 W | Load at **peak** — **measured 642 W** | At average (~152 W) | Verdict |
+| Option (T5810 alone; see the note above for the combined figure) | Load at **peak** — estimated ~520 W | Load at **peak** — **measured 642 W** | At average (~152 W) | Verdict |
 |---|---|---|---|---|
 | 1500 VA / **900 W** | 58 % | **71 %** | 17 % | Would have worked, but with much less room than this note first implied. |
 | 1500 VA / **1000 W** | 52 % | **64 %** | 15 % | **Correct choice.** |

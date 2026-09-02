@@ -92,40 +92,47 @@ Access control is `upsd.users` on the T5810 (a slave user with `upsmon slave`) p
 `LISTEN 10.0.1.x 3493`. Keep `upsd` bound to the LAN, never to a public interface — it is not
 an internet-facing service, and neither is anything else on this box except through the tunnel.
 
-## First, answer this — it changes the whole design
+## RESOLVED: both boxes are on the same 1500 VA UPS
 
-**Which nodes are actually on which UPS?** This has not been established, and it decides
-whether the plan above is even correct:
+This was the open question, and the answer is the good one — **the T5810 and the asrock are
+both on the new 1500 VA / 1000 W unit.** (The old 330 W / 550 VA unit was kept for unrelated
+devices at 116 W and is not part of this.)
 
-- The T5810 is on the new 1500 VA unit.
-- The **old 330 W / 550 VA unit was kept** and now carries other devices at **116 W** (35 %).
-- **If the asrock is on the OLD unit, it will very likely lose power BEFORE the T5810 does.**
-  A 550 VA unit at 35 % load has meaningfully less runtime than a 1500 VA unit at ~15 %. In
-  that case, shutting the asrock down on the *T5810's* battery-low signal is too late to be
-  useful — the signal arrives after the asrock is already dark.
+That collapses the hard part of the design. **One battery, one clock.** Both machines lose
+power at the same instant and their remaining runtime is the same number, so a single
+`upsd` on the T5810 is an authoritative signal for both — not a proxy for someone else's
+battery. The master/slave layout above is simply correct here:
 
-A utility outage is common-mode, so the T5810's UPS is a valid *trigger* for the fleet. It is
-**not** a valid *clock* for a node sitting on a different battery with a different runtime.
+- **T5810** — `upsd` (USB) + `upsmon` **master**. Halts last.
+- **asrock** — `upsmon` **slave** over the LAN. Halts itself first; it is the cheaper box to
+  lose, because both of its services are fail-open in the proxy.
 
-Measured so far: the asrock's GPU idles at ~10 W, so the whole box is plausibly 70–100 W of
-that 116 W. Worth metering it with the second Kasa plug rather than assuming — the same
-lesson as the 642 W correction: the component sum was 23 % low.
+Shut the asrock down **early and without hesitation**. While it is down the site still
+answers: the reranker degrades to cosine top-5 and the verifier is skipped entirely. Every
+second of battery it stops consuming is a second the T5810 gets to unload a 29 GB model and
+close a Qdrant collection — which is the thing that actually corrupts.
 
-### If the asrock is on the old UPS
+### But sharing a UPS creates a NEW constraint: they share the wattage
 
-Two workable options, in preference order:
+Measured through one real E2E probe, both boxes sampled at 1 Hz at the same time:
 
-1. **Move the asrock onto the new UPS** if the wattage allows. At 642 W peak for the T5810 and
-   ~100 W for the asrock, a 1000 W unit is at ~74 % — tight but real, and it collapses the
-   problem to a single battery with a single clock. Meter both first.
-2. **Give the old UPS its own data link** (a second USB cable, its own `upsd`), and let the
-   asrock be a slave of *its own* UPS. More moving parts, but each node then acts on the
-   battery that actually feeds it — which is the only version that is correct rather than
-   merely convenient.
+| | GPU at peak |
+|---|---|
+| T5810 (2 x A4500) | 330.0 W |
+| asrock (RTX 5060 Ti, judge) | 63.5 W |
 
-Shutting the asrock down early on the T5810's signal is a third option, and it is the wrong
-one: it trades a real service (the reranker fails open, but the faithfulness judge simply
-stops) for a guess about someone else's battery.
+The two peak **together** — the judge grades every answer the T5810 writes. With the T5810
+metered at 642 W and the asrock estimated near 180 W, normal load is **~820 W, about 82 % of
+1000 W**. Workable, but not the 64 % that counting only the T5810 suggested.
+
+**The worst case goes over rating.** The asrock's GPU is capped at **180 W**, not the 63 W the
+judge draws, and that box also carries `llama3.3:70b`, `qwen2.5-coder:32b` and `gpt-oss:20b`
+for lab work. A 70B on a 16 GB card spills to CPU/RAM and drives the 5950X toward its 142 W
+PPT simultaneously. Both GPUs pegged plus a loaded 5950X is roughly **1050 W — over.**
+
+So: **do not run heavy lab inference on the asrock while the site is serving.** And **meter
+the asrock with the second KP125M plug** — its ~180 W is the last number here still estimated
+rather than measured, and estimation was just proven 23 % low on the other box.
 
 ## What the asrock needs to stop cleanly
 

@@ -20,10 +20,10 @@ unit stays in service for other devices, which draw **116 W** on it (35 %). The 
 A **Kasa KP125M smart plug** now meters the T5810 at the wall. That matters, because the
 figure this section used to carry was a component sum, and it was wrong:
 
-| | GPU total | Whole box (AC) | vs the new UPS |
-|---|---|---|---|
-| True idle, model resident | 28 W | ~152 W (estimated) | 15 % (at 1000 W) |
-| Generation burst (~8 s) | 330 W (2 x 165 W cap) | **642 W — measured at the plug** | **64 %** (at 1000 W) |
+| | GPU total | Whole box (AC) |
+|---|---|---|
+| True idle, model resident | 28 W | ~152 W (estimated) |
+| Generation burst (~8 s) | 330 W (2 x 165 W cap) | **642 W — measured at the plug** |
 
 The old estimate said ~520 W. The plug says **642 W** — the estimate was **23 % low**. The
 gap is dual-PSU overhead: this box runs a Dell 825 W internal PSU *and* an external Corsair
@@ -31,14 +31,43 @@ gap is dual-PSU overhead: this box runs a Dell 825 W internal PSU *and* an exter
 642 W and ~190 W is unaccounted for by GPU and CPU package, against the ~60-100 W a
 single-PSU model assumes.
 
-**Never size a UPS off a component sum — meter the plug.** At the real 642 W a 1000 W unit
-sits at 64 %; the 900 W option that was also under consideration would be 71 %, and would
-quietly foreclose ever raising the GPU cap back to its 200 W default (+70 W).
+**Never size a UPS off a component sum — meter the plug.**
 
-> **TO CONFIRM:** the exact model and real-power rating of the fitted unit is not recorded
-> here — it was reported as replaced, not specified, and this box has no UPS data link to ask
-> (see below). Both candidates clear 642 W, so nothing is at risk either way; record the
-> actual rating here once known, and prefer reading it from `upsc` rather than from memory.
+### Both boxes share the 1000 W, and the budget is tighter than it looks
+
+**The asrock is on the same UPS as the T5810.** That is the right call for shutdown logic
+(see below) but it means the two machines share one budget — and they peak **together**, not
+independently: the T5810 generates while the asrock's judge grades, on every single answer.
+
+Measured through one real E2E probe, sampling both boxes at 1 Hz simultaneously:
+
+| | GPU draw at peak |
+|---|---|
+| T5810 (2 x A4500) | 330.0 W |
+| asrock (RTX 5060 Ti, judge) | 63.5 W |
+| **combined, GPU side** | **393.5 W** |
+
+The asrock has no RAPL and no configured `lm_sensors`, so its CPU power cannot be read in
+software. Scaling its GPU figure the way the T5810's plug reading scales puts the whole
+asrock box at roughly **180 W AC** under this workload, for a combined **~820 W — about 82 %
+of 1000 W**, not the 64 % this doc claimed when it counted only the T5810.
+
+> **Meter the asrock with the second KP125M** (the KP125MP is a two-pack) before trusting
+> that 180 W. It is an estimate of exactly the kind that was just proven 23 % low on the
+> other box. This is the one number still guessed rather than measured.
+
+**The worst case exceeds the UPS, and it is reachable.** The asrock's GPU is capped at
+**180 W**, not the 63 W the judge uses, and that box also hosts `llama3.3:70b`,
+`qwen2.5-coder:32b` and `gpt-oss:20b` for lab work. A 70B model on a 16 GB card spills to
+CPU/RAM, which drives the 5950X toward its 142 W PPT at the same time. Both GPUs pegged plus
+a loaded 5950X is roughly **1050 W — over rating.**
+
+On line power that is only an alarm. The failure is the same compound event as before: an
+outage landing while both boxes are loaded, when the UPS is over rating and drops the load
+instead of transferring. So the rule that replaced the old one:
+
+**Do not run heavy lab inference on the asrock while the site is serving.** Site traffic plus
+the judge is ~82 % and fine. Site traffic plus a 70B on the asrock is not.
 
 ### Still open: there is no automatic shutdown
 
