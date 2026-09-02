@@ -15,59 +15,66 @@ eval runs, benchmark sweeps and soak tests are all back on the table. The old 33
 unit stays in service for other devices, which draw **116 W** on it (35 %). The loads are
 **split, not stacked**: the inference box no longer shares headroom with anything else.
 
-### The measurement, and the estimate it corrected
+### The measurement
 
-A **Kasa KP125M smart plug** now meters the T5810 at the wall. That matters, because the
-figure this section used to carry was a component sum, and it was wrong:
+A **Kasa KP125M smart plug** meters the UPS load at the wall. **The 642 W reading covers BOTH
+boxes — the T5810 and the asrock together** — taken while the system was under real load
+(generation on the T5810, the judge grading on the asrock).
 
-| | GPU total | Whole box (AC) |
+| | Measured at the plug | vs 1000 W UPS |
 |---|---|---|
-| True idle, model resident | 28 W | ~152 W (estimated) |
-| Generation burst (~8 s) | 330 W (2 x 165 W cap) | **642 W — measured at the plug** |
+| **Both boxes, under load** | **642 W** | **64 %** |
 
-The old estimate said ~520 W. The plug says **642 W** — the estimate was **23 % low**. The
-gap is dual-PSU overhead: this box runs a Dell 825 W internal PSU *and* an external Corsair
-1000 W for the GPU rails simultaneously, both far below their efficient load band. Back-solve
-642 W and ~190 W is unaccounted for by GPU and CPU package, against the ~60-100 W a
-single-PSU model assumes.
+GPU-side breakdown from one E2E probe, both boxes sampled at 1 Hz simultaneously:
 
-**Never size a UPS off a component sum — meter the plug.**
-
-### Both boxes share the 1000 W, and the budget is tighter than it looks
-
-**The asrock is on the same UPS as the T5810.** That is the right call for shutdown logic
-(see below) but it means the two machines share one budget — and they peak **together**, not
-independently: the T5810 generates while the asrock's judge grades, on every single answer.
-
-Measured through one real E2E probe, sampling both boxes at 1 Hz simultaneously:
-
-| | GPU draw at peak |
+| | GPU at peak |
 |---|---|
-| T5810 (2 x A4500) | 330.0 W |
+| T5810 (2 x A4500, at the 165 W cap) | 330.0 W |
 | asrock (RTX 5060 Ti, judge) | 63.5 W |
-| **combined, GPU side** | **393.5 W** |
 
-The asrock has no RAPL and no configured `lm_sensors`, so its CPU power cannot be read in
-software. Scaling its GPU figure the way the T5810's plug reading scales puts the whole
-asrock box at roughly **180 W AC** under this workload, for a combined **~820 W — about 82 %
-of 1000 W**, not the 64 % this doc claimed when it counted only the T5810.
+**64 % at real peak load is comfortable**, and it is the number to plan against. Note that the
+two boxes peak *together* rather than independently — the judge grades every answer the T5810
+writes — so 642 W already is the concurrent case, not a sum of separate maxima.
 
-> **Meter the asrock with the second KP125M** (the KP125MP is a two-pack) before trusting
-> that 180 W. It is an estimate of exactly the kind that was just proven 23 % low on the
-> other box. This is the one number still guessed rather than measured.
+> **Correction, 2026-09-02.** An earlier revision of this file read 642 W as the T5810 alone
+> and then *added* an estimated ~180 W for the asrock, reporting "~820 W / 82 %". That was a
+> double-count: the plug already included the asrock. The same revision claimed the original
+> ~520 W component-sum estimate had been proven "23 % low" — that comparison was invalid for
+> the same reason (an estimate for one box against a measurement of two), so it is withdrawn
+> rather than restated. The component estimate for the T5810 alone remains **unvalidated**;
+> nothing here measures that box by itself.
+>
+> The durable lesson survives the arithmetic error, and is really about labelling: **know what
+> your meter is actually measuring before you reason from it.** A wattage figure without its
+> scope attached invites exactly this mistake.
 
-**The worst case exceeds the UPS, and it is reachable.** The asrock's GPU is capped at
-**180 W**, not the 63 W the judge uses, and that box also hosts `llama3.3:70b`,
-`qwen2.5-coder:32b` and `gpt-oss:20b` for lab work. A 70B model on a 16 GB card spills to
-CPU/RAM, which drives the 5950X toward its 142 W PPT at the same time. Both GPUs pegged plus
-a loaded 5950X is roughly **1050 W — over rating.**
+### Headroom, and the one rule it implies
 
-On line power that is only an alarm. The failure is the same compound event as before: an
-outage landing while both boxes are loaded, when the UPS is over rating and drops the load
-instead of transferring. So the rule that replaced the old one:
+Working from the measured 642 W and tonight's GPU samples:
 
-**Do not run heavy lab inference on the asrock while the site is serving.** Site traffic plus
-the judge is ~82 % and fine. Site traffic plus a 70B on the asrock is not.
+| Scenario | Estimated AC | vs 1000 W |
+|---|---|---|
+| Normal: site serving, judge grading (**measured**) | **642 W** | **64 %** |
+| Both GPUs pegged — asrock GPU to its 180 W cap, 5950X toward 142 W PPT | ~870 W | ~87 % |
+| ...and the T5810 cap raised 165 W → 200 W | ~950 W | ~95 % |
+
+Only the first row is measured; the others scale tonight's GPU readings and are estimates —
+treat them as bounds, not readings.
+
+So the worst case stays **under** rating, but not by much. The asrock's GPU is capped at
+**180 W** while the judge only uses 63 W, and that box also hosts `llama3.3:70b`,
+`qwen2.5-coder:32b` and `gpt-oss:20b` for lab work; a 70B on a 16 GB card spills to CPU/RAM
+and loads the 5950X at the same time.
+
+**Rule: avoid heavy lab inference on the asrock while the site is serving.** Not because it
+would exceed the UPS — at ~87 % it would not — but because that is where the remaining
+headroom lives, and a battery sized at 87 % when new is effectively past 100 % after a few
+years of ageing. It also rules out combining that with a return to the 200 W GPU cap.
+
+**Still worth metering the asrock separately** with the second KP125M (the KP125MP is a
+two-pack). Not for the total, which is measured, but to know the split — right now there is no
+way to attribute the 642 W between the two machines, which is exactly the ambiguity that
+produced the correction above.
 
 ### Still open: there is no automatic shutdown
 

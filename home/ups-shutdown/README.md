@@ -112,27 +112,26 @@ answers: the reranker degrades to cosine top-5 and the verifier is skipped entir
 second of battery it stops consuming is a second the T5810 gets to unload a 29 GB model and
 close a Qdrant collection — which is the thing that actually corrupts.
 
-### But sharing a UPS creates a NEW constraint: they share the wattage
+### Sharing a UPS also means sharing the wattage
 
-Measured through one real E2E probe, both boxes sampled at 1 Hz at the same time:
+**Measured at the plug: 642 W for both boxes together under load — 64 % of 1000 W.**
+Comfortable. The two peak together (the judge grades every answer the T5810 writes), so that
+is already the concurrent case. GPU side, both boxes sampled at 1 Hz during one E2E probe:
+T5810 **330.0 W**, asrock **63.5 W**.
 
-| | GPU at peak |
-|---|---|
-| T5810 (2 x A4500) | 330.0 W |
-| asrock (RTX 5060 Ti, judge) | 63.5 W |
+Scaling those GPU figures — estimates, not readings — both GPUs pegged (asrock to its 180 W
+cap, 5950X toward 142 W PPT) is about **870 W / 87 %**, and adding a return to the T5810's
+200 W cap reaches roughly **950 W / 95 %**. Under rating, but that is the whole remaining
+margin.
 
-The two peak **together** — the judge grades every answer the T5810 writes. With the T5810
-metered at 642 W and the asrock estimated near 180 W, normal load is **~820 W, about 82 % of
-1000 W**. Workable, but not the 64 % that counting only the T5810 suggested.
+**So: avoid heavy lab inference on the asrock while the site is serving.** That box hosts
+`llama3.3:70b`, `qwen2.5-coder:32b` and `gpt-oss:20b`; a 70B on a 16 GB card spills to CPU/RAM
+and loads the 5950X at the same time. A UPS at 87 % when new is effectively past 100 % after a
+few years of battery ageing.
 
-**The worst case goes over rating.** The asrock's GPU is capped at **180 W**, not the 63 W the
-judge draws, and that box also carries `llama3.3:70b`, `qwen2.5-coder:32b` and `gpt-oss:20b`
-for lab work. A 70B on a 16 GB card spills to CPU/RAM and drives the 5950X toward its 142 W
-PPT simultaneously. Both GPUs pegged plus a loaded 5950X is roughly **1050 W — over.**
-
-So: **do not run heavy lab inference on the asrock while the site is serving.** And **meter
-the asrock with the second KP125M plug** — its ~180 W is the last number here still estimated
-rather than measured, and estimation was just proven 23 % low on the other box.
+**Meter the two boxes separately with the second KP125M** — not for the total, which is
+measured, but for the split. Nothing currently attributes the 642 W between them, and an
+earlier revision of these notes double-counted the asrock precisely because of that gap.
 
 ## What the asrock needs to stop cleanly
 

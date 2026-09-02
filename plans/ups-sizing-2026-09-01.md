@@ -42,33 +42,46 @@ bursts. It is a public portfolio chat with light traffic, not a training rig.
 The CPU stays modest under this workload — vLLM is GPU-bound, so the 145 W TDP is not the
 figure to plan around. 59 W was measured *while both GPUs were pegged*.
 
-**Measured at the wall as of 2026-09-01 evening — a Kasa KP125M smart plug now meters the
-T5810 directly.** This supersedes the estimates below it, and it corrects them upward:
+**Measured at the wall — a Kasa KP125M smart plug meters the UPS load.**
 
-| | Estimated (this note, earlier) | **Measured at the plug** |
+| | Scope | Under inference |
 |---|---|---|
-| Under inference | ~520 W | **642 W** |
+| Component sum, this note | T5810 alone | ~520 W (**estimate, never validated**) |
+| **Plug reading** | **T5810 + asrock together** | **642 W** |
 
-The estimate was **23 % low**, and the reason is instructive: the line item below assumed
-60–100 W for RAM, drives, fans and board. Back-solving from 642 W AC leaves ~190 W for
-everything that is not GPU or CPU package. That is not because the DDR4 and the fans are
-enormous — it is because **this box runs two PSUs simultaneously** (the Dell 825 W internal
-plus the external Corsair 1000 W feeding the GPU rails), and each carries its own conversion
-overhead while running well below its efficient load band. A single-PSU model of this
-machine will always under-predict it.
+**These two figures are not comparable, and an earlier revision of this note wrongly compared
+them** — declaring the estimate "23 % low" and, separately, adding an asrock estimate on top
+of the 642 W to reach "~820 W". Both were wrong: the plug covers *both* machines, so the
+642 W already includes the asrock, and there is no measurement of the T5810 by itself to
+check the ~520 W estimate against.
 
-**Lesson: never size a UPS off a component sum.** Meter the plug. The parts list said 520 W;
-the wall says 642 W, and that 122 W gap is exactly the sort of margin that decides whether a
-900 W unit is comfortable or marginal.
+**What is actually known:** 642 W for both boxes under real load, i.e. **64 % of the 1000 W
+unit**. That is the number to plan against, and it is comfortable.
 
-**Not directly measured** (superseded by the plug reading above; kept to show the error):
-256 GB of DDR4 ECC, internal drives, chassis fans, NVLink, and the motherboard. This note
-assumed roughly 60–100 W for a box of this class. The real figure is closer to ~190 W once
-dual-PSU overhead is included.
+**What is still unknown:** the split between the two machines. Metering them separately with
+the second KP125M (the KP125MP is a two-pack) would settle both the split and whether the
+~520 W estimate for the T5810 was any good.
+
+**The lesson, corrected:** not "component sums run low" — that was never demonstrated — but
+**know what your meter covers before you reason from it.** A wattage figure without its scope
+attached is how a correction turned into a double-count.
+
+**Not directly measured on the T5810:** 256 GB of DDR4 ECC, internal drives, chassis fans,
+NVLink, and the motherboard, assumed at roughly 60–100 W. Note this box runs **two PSUs
+simultaneously** (the Dell 825 W internal plus the external Corsair 1000 W feeding the GPU
+rails), each carrying conversion overhead well below its efficient load band — a plausible
+reason a single-PSU model could under-predict it, but with no isolated measurement that
+remains a hypothesis, not a finding.
 
 ---
 
 ## 2. The actual risk, stated honestly
+
+> **HISTORICAL — this section describes the risk under the OLD 330 W UPS, which is what
+> prompted the purchase.** It no longer describes the running system: both boxes are now on
+> the 1500 VA / 1000 W unit at 64 % under load (§3). Kept because the reasoning is what
+> justified the spend, and because the *shape* of the risk — a compound event, corruption
+> rather than downtime — is unchanged and still governs the shutdown work in §4.
 
 On line power the machine runs fine — the UPS is a pass-through and the overload alarm is
 just an alarm. **The failure is a compound event:** an outage that happens *during* a
@@ -100,30 +113,35 @@ nothing during the bursts. The exposure is data corruption, not downtime.
 
 Both options under consideration are 1500 VA; the difference is real-power output.
 
-> **RESOLVED 2026-09-01: a 1500 VA UPS is fitted, carrying BOTH the T5810 and the asrock.**
-> The old 330 W / 550 VA unit was kept for unrelated devices, which draw **116 W** on it
-> (35 %).
+> **RESOLVED: a 1500 VA / 1000 W UPS is fitted, carrying BOTH the T5810 and the asrock.**
+> The old 330 W / 550 VA unit was kept for unrelated devices, which draw **116 W** on it (35 %).
 >
-> **Both inference boxes on one UPS is right for shutdown logic and tighter on wattage.**
-> Right, because one battery means one clock — `upsd` on the T5810 is authoritative for both
-> machines rather than a guess about someone else's runtime. Tighter, because they peak
-> *together*: the asrock's judge grades every answer the T5810 writes. Measured on one E2E
-> probe with both boxes sampled at 1 Hz — T5810 GPUs **330.0 W**, asrock GPU **63.5 W**.
-> With the T5810 metered at 642 W and the asrock estimated near 180 W AC, normal load is
-> **~820 W, about 82 % of 1000 W** — not the 64 % the table below implies by counting only
-> the T5810.
+> **Measured at the plug: 642 W for both boxes together, under real load — 64 % of 1000 W.**
+> That is the concurrent peak, not a sum of separate maxima: the asrock's judge grades every
+> answer the T5810 writes, so the two always load together. GPU side, sampled at 1 Hz on both
+> boxes during one E2E probe: T5810 **330.0 W** (at the 165 W/card cap), asrock **63.5 W**.
 >
-> **Worst case goes over.** The asrock's GPU cap is 180 W (the judge only uses 63 W) and that
-> box also hosts `llama3.3:70b` for lab work; a 70B on a 16 GB card spills to CPU/RAM and
-> drives the 5950X toward its 142 W PPT at once. Both GPUs pegged plus a loaded 5950X is
-> ~**1050 W**. Hence the operating rule: **do not run heavy lab inference on the asrock while
-> the site is serving**, and **meter the asrock with the second KP125M** — that 180 W is the
-> only number here still estimated, and estimation was just proven 23 % low on the T5810.
+> Headroom, scaling those GPU readings (estimates, not readings): both GPUs pegged — asrock to
+> its 180 W cap, the 5950X toward 142 W PPT — is roughly **870 W (~87 %)**, and adding a
+> return to the 200 W T5810 cap takes it to about **950 W (~95 %)**. Under rating, but that is
+> where the remaining margin lives, so **avoid heavy lab inference on the asrock while the
+> site is serving** (that box also hosts `llama3.3:70b`).
+>
+> **Correction, 2026-09-02:** a previous revision read the 642 W as the T5810 *alone* and
+> added an estimated ~180 W for the asrock on top, reporting ~820 W / 82 %. The plug already
+> included both boxes — a double-count, now withdrawn. The same revision claimed the ~520 W
+> component-sum estimate below had been proven "23 % low"; that compared an estimate for one
+> box against a measurement of two and is withdrawn as well. **The T5810's own draw has never
+> been measured in isolation** — metering it separately with the second KP125M is the way to
+> settle both questions, and the reason the table below is labelled "T5810 alone, estimated".
+>
+> The lesson that does survive: **know what your meter covers before reasoning from it.** A
+> wattage number without its scope attached is how this happened.
 
-| Option (T5810 alone; see the note above for the combined figure) | Load at **peak** — estimated ~520 W | Load at **peak** — **measured 642 W** | At average (~152 W) | Verdict |
+| Option | Load at peak — **estimated** ~520 W, T5810 alone, UNVALIDATED | Load at peak — **measured 642 W, BOTH boxes** | Verdict |
 |---|---|---|---|---|
-| 1500 VA / **900 W** | 58 % | **71 %** | 17 % | Would have worked, but with much less room than this note first implied. |
-| 1500 VA / **1000 W** | 52 % | **64 %** | 15 % | **Correct choice.** |
+| 1500 VA / **900 W** | 58 % | **71 %** | Would have worked at normal load, but ~97 % at the both-GPUs-pegged case — too close. |
+| 1500 VA / **1000 W** | 52 % | **64 %** | **Correct choice** — and the worst case stays under rating at ~87 %. |
 
 Both still clear the peak, which is what decides whether you get protection at all — but note
 how much of the apparent headroom the estimate invented. At the real 642 W, a 900 W unit sits
