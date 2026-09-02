@@ -8,6 +8,58 @@
 
 ## OPEN DEFECTS (Priority Order)
 
+### 14. A Changelog Chunk Reads as Current Inventory — KB FIXED 2026-09-02, NEEDS REINDEX
+**Status:** KB corrected in git; **NOT live until `./scripts/reindex_kb.sh` runs**
+**Severity:** HIGH for a portfolio site — it advertises hardware that does not exist
+**Found by:** Chris, live query "What has Chris built?", 2026-09-02
+
+**Symptom.** The answer listed the system's models as *"Qwen2.5-14B-Instruct (on RTX 5060
+16 GB), Qwen2.5-7B (on RTX 3060 Ti), and Qwen3.8-27B-FP8"* — presenting a **retired GPU and a
+retired model as current hardware**, alongside a stale "35-question golden-set eval (mean
+grounding 4.48/5)".
+
+**The model did not hallucinate any of it.** Every element traced to
+`knowledge_base/infrastructure/current_work_2026.md`, which is written as a *changelog*:
+
+> "the out-of-band faithfulness judge moved **from Qwen2.5-7B (RTX 3060 Ti) to**
+> Qwen2.5-14B-Instruct on a new RTX 5060 Ti 16 GB"
+
+Retrieval worked perfectly. The corpus was the problem.
+
+**Root cause — worth generalizing.** *A "moved from A to B" sentence, retrieved as a chunk
+without its framing, reads as "the system has A and B."* Chunking strips the narrative
+context that made the tense unambiguous, so the "from" side of every migration becomes a
+present-tense fact. Any KB doc written as a history log carries this hazard on **every**
+transition sentence it contains.
+
+This is a corpus-shape defect, and it is the *inverse* of the surface-form heuristic family
+(#5, #6, DEFECT #13): there the code was too clever about a question's form; here the KB is
+insufficiently explicit about a statement's tense.
+
+**Also stale in the same doc, and corrected:**
+
+| Claim | Was | Now |
+|---|---|---|
+| WebSocket rate limit | "1 concurrent connection per IP" | **2** (`api-proxy.py:198`) — 1 is the bug from #7 that surfaced as "Connection lost" |
+| Golden set | 35 questions, mean grounding 4.48/5 | **42 questions, 4.59/5** measured 2026-09-01 |
+| Time-to-first-token | ~5.6 s | **1-2 s** on the current Qwen3.8-27B config |
+
+**Resolution applied to the KB:**
+1. A **"What is running RIGHT NOW"** section at the top of the doc, stating the complete GPU
+   inventory positively — two A4500s and one 5060 Ti — before any history appears.
+2. The changelog section explicitly labelled as history, with retired items named as retired
+   *in the same sentence* so a chunk cannot lose the framing.
+3. The stale numbers corrected, each pointing at what superseded it and why.
+
+Note the phrasing follows the lesson from the earlier "there is no 14B reranker" mistake:
+**lead with the positive fact, and let the negation only clarify it** — never ship a bare
+negation into the KB.
+
+**Not yet verified, and this is the part that matters:** per this repo's own rule, *"add it to
+the KB" is not a fix — verify it retrieves.* Requires `./scripts/reindex_kb.sh`
+(**authorization needed**), then re-asking several phrasings — "what has Chris built", "what
+models run this system", "what GPUs does this use" — and confirming no 3060 Ti or 7B appears.
+
 ### 1. SAP Business One — RETITLED 2026-09-02: hallucination is gone, a 5/4 conflation remains
 **Status:** OPEN but **downgraded HIGH → LOW**. The original premise no longer holds.
 **Original claim (2026-07-28):** "response invents non-KB details", "speculative fluff"
