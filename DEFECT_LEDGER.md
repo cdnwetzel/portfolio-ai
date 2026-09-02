@@ -8,35 +8,32 @@
 
 ## OPEN DEFECTS (Priority Order)
 
-### 16. SAP Case Study Says "5 Warehouses" But Lists 6 — NEEDS CHRIS, NOT A GUESS
-**Status:** OPEN — **blocked on a fact only Chris has.** Deliberately not "fixed".
-**Severity:** LOW-MEDIUM — it is a client engagement's headline figure.
+### 16. SAP Case Study Says "5 Warehouses" But Lists 6 — CLOSED 2026-09-02
+**Was:** `sap_business_one_integration.md` stated **"5 warehouses spanning 4 continents,
+6 regions"** (lines 8 and 24) while enumerating **six** sites: NYC, Miami, London, Athens,
+Singapore, Sydney.
 
-`sap_business_one_integration.md` states **"5 warehouses spanning 4 continents, 6 regions"**
-(twice, lines 5 and 21) and then enumerates:
+**Resolved by Chris: 6 is correct — the enumerated list wins.** Independent corroboration
+was sitting in the same sentence: "6 regions", i.e. one region per site.
 
-| Continent | Sites |
-|---|---|
-| North America | NYC, Miami |
-| Europe | London, Athens |
-| Asia | Singapore |
-| Oceania | Sydney |
+Both occurrences corrected. The document is now self-consistent: header says 6 warehouses /
+4 continents / 6 regions, and the site list sums to 6 across 4 continents.
 
-That is **6 sites**, not 5. The 4 continents check out.
+**Why it was escalated rather than fixed silently.** Either the count was wrong or one
+listed city was not a warehouse, and only Chris knew which. The two arithmetic errors fixed
+the same day (AVD and SAP payback) were *derivable* from figures already in the document;
+this one was not, and choosing a number to make the text self-consistent would have been
+inventing a fact about a real client engagement.
 
-**Why this was left alone.** Either the count is wrong or one listed city was not a
-warehouse, and only Chris knows which. Picking a number to make the document
-self-consistent would be inventing a fact about a real client engagement — precisely the
-failure this whole corpus exists to avoid. The two arithmetic errors fixed the same day
-(AVD payback, SAP payback) were *derivable* from figures already present; this one is not.
-
-**It probably explains an observed defect.** An answer opened with "a distribution company
+**It very likely caused a production defect.** An answer opened with "a distribution company
 operating across **five continents**" and then correctly said "5 warehouses across 4
-continents" two lines later. A source that pairs a 5 and a 4 in one sentence, with a list
-that supports neither cleanly, is exactly the shape that invites that conflation.
+continents" two lines later. A source pairing a 5 and a 4 in one sentence, with a list
+supporting neither cleanly, is exactly the shape that invites that conflation — so fixing
+the source should remove the conflation rather than paper over it.
 
-**Fix:** Chris confirms whether it is 5 or 6 warehouses; then the header, line 21 and the
-site list are made to agree, and a golden-set entry pins it.
+Pinned by a golden-set entry that forbids "5 warehouses" and "five continents".
+**Discovered by:** Claude, 2026-09-02, sweeping the case studies for derived figures.
+**Resolved by:** Chris.
 
 ### 15. Generator Mangles the Client's Product Name to "SAP One" — OPEN, LOW
 **Status:** OPEN. Two KB fixes attempted; **neither worked.** Recorded as a known limit

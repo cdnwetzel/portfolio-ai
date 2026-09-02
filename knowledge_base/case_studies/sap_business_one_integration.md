@@ -5,7 +5,7 @@
 **Product name:** the system is **SAP Business One**. Its only standard abbreviation is
 **SAP B1**. Use the full name on first mention and SAP B1 thereafter.
 
-**Organization:** Distribution company, 5 warehouses spanning 4 continents, 6 regions  
+**Organization:** Distribution company, 6 warehouses spanning 4 continents, 6 regions  
 **Warehouses by Continent:**
 - **North America** (2): NYC, Miami  
 - **Europe** (2): London, Athens/Greece  
@@ -21,7 +21,7 @@
 
 ## The Problem
 
-The firm was growing from 50 to 200+ users across 5 warehouses. They had:
+The firm was growing from 50 to 200+ users across 6 warehouses. They had:
 - SAP Business One running on a single MSSQL server
 - Manual inventory tracking (spreadsheets, phone calls between warehouses)
 - No real-time visibility (warehouse 1 didn't know what warehouse 2 had in stock)
@@ -267,17 +267,22 @@ CREATE TABLE AuditLog (
 
 ### Business Impact
 
-- **Manual inventory:** 2 hours per day, 5 people = $250k per year
+*Labour is costed at a fully-loaded **$100/hour**, over ~250 working days. Both sides below
+use that same rate — stating it explicitly so the arithmetic is checkable rather than
+implied.*
+
+- **Manual inventory:** 2 hours per day x 5 people = 2,500 person-hours/year = **$250k per year**
 - **Errors from stale data:** ~2-3 incidents per month, $5k each = $60k per year
 - **Total cost of manual system:** $310k per year
 
 **With SAP + WMS integration:**
-- Automated inventory: 30 min per day (1 person) = $30k per year
+- Automated inventory: 30 min per day (1 person) = 125 person-hours/year = **$12.5k per year**
 - Data accuracy: 99%+ (no stale data incidents) = $0 errors
-- Total cost: $98k per year ($68k infrastructure + $30k manual)
+- Total cost: **$80.5k per year** ($68k infrastructure + $12.5k labour)
 
-**Savings:** $310k - $98k = **$212k per year**  
-**ROI:** Implementation cost $200k, saved $212k in year 1 — i.e. it paid for itself within the first year (~11 months), and is net positive every year after.
+**Savings:** $310k - $80.5k = **$229.5k per year**  
+**ROI:** Implementation cost $200k against $229.5k saved per year — it pays for itself in
+**~10.5 months**, and is net positive every year after.
 
 ---
 
@@ -315,4 +320,4 @@ If you're building systems that scale:
 - **Log everything** (audit trail solves 80% of disputes)
 - **Measure before and after** (query time, uptime, user count supported)
 
-The integration went from manual, error-prone inventory tracking to real-time, automated, auditable. Cost to build: $200k. Cost to maintain: $68k/year. Savings: $212k/year. Payback: **~11 months** — the build cost is recovered inside the first year, after which the $212k/year is net.
+The integration went from manual, error-prone inventory tracking to real-time, automated, auditable. Cost to build: $200k. Cost to maintain: $68k/year. Savings: **$229.5k/year**. Payback: **~10.5 months** — the build cost is recovered inside the first year, after which the $229.5k/year is net.

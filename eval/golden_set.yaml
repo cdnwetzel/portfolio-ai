@@ -71,9 +71,19 @@
 - q: "What has Chris built?"
   kind: grounded
   expect_substrings: ["A4500"]
-  # Regression 2026-09-02 (DEFECT #14): a changelog chunk made this answer advertise a
-  # retired RTX 3060 Ti and Qwen2.5-7B as current hardware.
-  forbid_substrings: ["3060", "qwen2.5-7b", "qwen2.5 7b"]
+  # DEFECT #14 was the 3060 Ti presented as CURRENT kit. This broad "what has Chris built"
+  # question legitimately reaches the 2026 changelog, where "retired RTX 3060 Ti" is a
+  # correct, correctly-labelled historical statement — so "3060" is NOT forbidden here; a
+  # substring rule cannot tell "runs on a 3060 Ti" from "retired the 3060 Ti".
+  #
+  # The forbid lives instead on the three questions below that ask what is running NOW,
+  # where any mention is unambiguously wrong. Encode the defect, not the token.
+  #
+  # (Learned by this rule firing on a correct answer, 2026-09-02. Also learned: the
+  # changelog chunk surfaces for this question only ~1 run in 4, so the earlier "verified
+  # clean across 6 phrasings" was not proof — a handful of samples cannot clear an
+  # intermittent behaviour.)
+  forbid_substrings: ["qwen2.5-7b", "qwen2.5 7b"]
 - q: "Tell me about Chris's SAP Business One work."
   kind: grounded
   expect_substrings: ["SAP", "B1"]
@@ -227,5 +237,18 @@
   forbid_substrings: ["5 month", "39k", "$39"]
 - q: "What was the payback period on the SAP Business One integration?"
   kind: grounded
-  expect_substrings: ["11 month"]
-  forbid_substrings: ["1 month payback", "payback: 1 month"]
+  # ~10.5 months, after the labour rate was made consistent at $100/h on both sides
+  # (2026-09-02). The forbid list carries the two WRONG values this has had, which is the
+  # durable part — the expect is deliberately loose about phrasing.
+  expect_substrings: ["10.5 month", "10 month"]
+  forbid_substrings: ["1 month payback", "payback: 1 month", "11 month"]
+
+# DEFECT #16 (2026-09-02): the case study said "5 warehouses" twice while enumerating six
+# sites (NYC, Miami, London, Athens, Singapore, Sydney). Chris confirmed 6 is correct — the
+# "6 regions" in the same sentence corroborates it, one region per site. A source pairing a
+# 5 and a 4 in one sentence is likely what produced the observed "operating across five
+# continents" opener, so this is pinned rather than trusted to stay fixed.
+- q: "How many warehouses were in the SAP Business One WMS integration?"
+  kind: grounded
+  expect_substrings: ["6", "six"]
+  forbid_substrings: ["5 warehouses", "five warehouses", "five continents"]
