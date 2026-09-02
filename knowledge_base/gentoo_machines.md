@@ -1,5 +1,14 @@
 # gentoo-machines — Multi-Machine Gentoo Configuration Repo
 
+> **Scope: this page is about a SEPARATE project from the portfolio AI chat.**
+> `gentoo-machines` is a fleet-wide Linux configuration repo — kernel configs, Portage
+> profiles and build tooling across many machines. It is **not** documentation of how the
+> AI chat is served. Two machines appear in both stories (the T5810 and the ASRock B550),
+> which is the only overlap: this page describes how they are *built and configured as
+> Gentoo hosts*, while `ai_portfolio_system.md` and `homelab_t5810.md` describe the chat's
+> architecture. Anything here about cross-compilation, build hosts, laptops or low-power
+> targets belongs to this fleet project and says nothing about how the chat works.
+
 ## What It Is
 
 `gentoo-machines` is my personal infrastructure-as-code repository for managing a fleet of Gentoo Linux machines. Every machine has a dedicated directory with hardware-specific kernel configuration, build profile, and documented reasoning for every non-obvious choice.

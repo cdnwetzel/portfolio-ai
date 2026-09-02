@@ -55,10 +55,11 @@ change are **no longer in use**.
 ## Engineering practices this project runs on
 
 - **Gated deploys:** fixture gates (9/9) and a graded golden-set eval before any judge change;
-  a live self-test battery gates every code deploy. The golden set has grown over time — it is
-  **42 questions** as of 2026-09-01, and the most recent measured mean grounding is **4.59/5**
-  (32 grounded items, 0 safety hard-fails). Earlier notes citing a 35-question set at 4.48/5
-  describe a superseded baseline measured against a different model.
+  a live self-test battery gates every code deploy. The golden set grows over time — every
+  production defect earns an entry. **Its size and latest scores are not recorded here on
+  purpose**; they live in `eval/golden_set.yaml` and the eval output, because every number
+  written into this page went stale the next time a test was added (it has said ~30, 35 and
+  42 at different points).
 - **Fail-open verification:** if the judge box dies, chat is unaffected.
 - **WebSocket rate limiting:** the public `/ws/chat` endpoint allows **2 concurrent
   connections per IP** (HTTP 429 beyond that). Not 1 — the browser opens the next turn's

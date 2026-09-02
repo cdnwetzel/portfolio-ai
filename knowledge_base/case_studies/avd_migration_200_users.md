@@ -234,4 +234,4 @@ If you're building infrastructure that scales:
 - **Stagger big changes** (don't migrate everyone at once)
 - **Measure latency in p90, not averages** (that's what users experience)
 
-The migration cost $200k upfront, but saved the company $155/user/month × 210 users = $39k/month in perpetuity. Payback: ~5 months. Then pure savings.
+The migration cost $200k upfront, but saved the company $155/user/month × 210 users = **$32.5k/month** in perpetuity. Payback: **~6 months**. Then pure savings.

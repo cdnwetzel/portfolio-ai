@@ -7,12 +7,23 @@
 **Connectivity:** Verizon FIOS symmetric fiber (~386↓ / 439↑ Mbps measured)
 
 ### GPU Configuration
-- **2× NVIDIA RTX A4500** — 20 GB GDDR6 VRAM per card (40 GB aggregate across the pair;
-  no single card has more than 20 GB). VRAM is the GPUs' working memory for model weights and
-  KV cache. It is not system RAM and not disk capacity — those are separate, and the machine
-  has plenty of both (see CPU & Memory and Storage below).
-- **NVLink bridge:** NV4 topology (4-link bridge) — 56 GB/s per direction, 112 GB/s aggregate. Required for tensor-parallel vLLM TP=2; without NVLink, CUDA sees two isolated GPUs
+- **2× NVIDIA RTX A4500.**
+
+  | | |
+  |---|---|
+  | VRAM per card | **20 GB** GDDR6 |
+  | **Total VRAM across both cards** | **40 GB** |
+
+  Those are the only two VRAM numbers for this machine: 20 GB on each card, 40 GB in
+  total. VRAM is the GPUs' working memory for model weights and KV cache. It is not system
+  RAM and not disk capacity — those are separate, and the machine has plenty of both (see
+  CPU & Memory and Storage below).
 - **Usable VRAM:** 20,470 MiB per card — the full ~20 GB is available because ECC is **disabled** (a deliberate trade-off that reclaims the ~1.25 GB/card ECC overhead — ~2.5 GB total across the pair — for vLLM's KV cache)
+- **NVLink bridge:** NV4 topology (4-link bridge), required for tensor-parallel vLLM TP=2;
+  without NVLink, CUDA sees two isolated GPUs. Its speed is **56 GB/s per direction
+  (112 GB/s aggregate)** — note the **per second**: that is a *transfer rate between the
+  two cards*, and it is not a quantity of memory. The VRAM figures are the 20 GB / 40 GB
+  above.
 - **Power:** **two PSUs run at the same time.** The Dell 825 W internal PSU powers the
   workstation, and an external Corsair ATX 3.0 1000 W PSU supplies supplemental GPU rails via a
   SATA sync/trigger board that switches it on with the Dell. The Dell unit remains in place and

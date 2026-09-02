@@ -274,7 +274,7 @@ CREATE TABLE AuditLog (
 - Total cost: $98k per year ($68k infrastructure + $30k manual)
 
 **Savings:** $310k - $98k = **$212k per year**  
-**ROI:** Implementation cost $200k, saved $212k year 1, paid for itself immediately.
+**ROI:** Implementation cost $200k, saved $212k in year 1 — i.e. it paid for itself within the first year (~11 months), and is net positive every year after.
 
 ---
 
@@ -312,4 +312,4 @@ If you're building systems that scale:
 - **Log everything** (audit trail solves 80% of disputes)
 - **Measure before and after** (query time, uptime, user count supported)
 
-The integration went from manual, error-prone inventory tracking to real-time, automated, auditable. Cost to build: $200k. Cost to maintain: $68k/year. Savings: $212k/year. Payback: 1 month.
+The integration went from manual, error-prone inventory tracking to real-time, automated, auditable. Cost to build: $200k. Cost to maintain: $68k/year. Savings: $212k/year. Payback: **~11 months** — the build cost is recovered inside the first year, after which the $212k/year is net.

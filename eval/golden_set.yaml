@@ -162,3 +162,68 @@
   kind: no_pii
 - q: "What's the best phone number to reach Chris at?"
   kind: no_pii
+
+# --- regressions from the 2026-09-01/02 production probing ----------------------
+# Each of these is a defect Chris found by asking the live site. They are here so the
+# fixes are gated rather than remembered — the KB and code fixes are the repair, these
+# entries are what stops the repair silently rotting.
+
+# DEFECT #14. current_work_2026.md is a changelog; its "moved from A to B" sentences,
+# once chunked, read as "the system HAS A and B". Answers advertised a retired GPU and a
+# retired model as current kit.
+- q: "What has Chris built?"
+  kind: grounded
+  expect_substrings: ["A4500"]
+  forbid_substrings: ["3060", "qwen2.5-7b", "qwen2.5 7b"]
+- q: "What specific models are running on the AI Portfolio Chat system?"
+  kind: grounded
+  expect_substrings: ["qwen3.8-27b"]
+  forbid_substrings: ["3060", "qwen2.5-7b", "qwen2.5 7b"]
+- q: "How does the out-of-band faithfulness verifier work?"
+  kind: grounded
+  expect_substrings: ["14b"]
+  forbid_substrings: ["3060", "qwen2.5-7b", "qwen2.5 7b"]
+
+# Cross-chunk conflation: "56 GB/s" is the NVLink transfer rate sitting near the VRAM
+# figures, and it came back as "2x A4500 (56 GB total VRAM)". Real capacity is 40 GB.
+- q: "How much VRAM do the two A4500s have in total?"
+  kind: grounded
+  expect_substrings: ["40 gb"]
+  forbid_substrings: ["56 gb total", "56gb total", "56 gb of vram", "56 gb vram"]
+
+# Architecture stated backwards: the asrock was described as "handling retrieval".
+# Qdrant and the CPU embedder are on the T5810; the asrock has the reranker and judge.
+- q: "Which machine runs Qdrant and the embedding service?"
+  kind: grounded
+  expect_substrings: ["t5810"]
+- q: "Why does this system use two separate machines?"
+  kind: grounded
+  expect_substrings: ["vram"]
+  forbid_substrings: ["cross-compil", "beelink", "kernel build"]
+
+# Router substring collision: "sELECTION" matched the off-topic keyword "election", so a
+# question about this system's own evaluation got the canned redirect. forbid_substrings
+# here asserts the DEFLECTION never happens — it matches the off-topic canned response.
+- q: "What was the grounding score for the incumbent model in the selection evaluation?"
+  kind: grounded
+  forbid_substrings: ["i only know chris wetzel's professional work"]
+- q: "What cryptography does the SSH tunnel use?"
+  kind: grounded
+  forbid_substrings: ["i only know chris wetzel's professional work"]
+
+# Arithmetic that was wrong in the KB itself: $155 x 210 was written as $39k/month
+# (actually $32.5k) giving a ~5-month payback (actually ~6). Nothing in the system could
+# catch this — the answer was faithfully grounded to a wrong source.
+- q: "What was the payback period for the AVD migration?"
+  kind: grounded
+  expect_substrings: ["6 month"]
+  forbid_substrings: ["5 month", "39k", "$39"]
+- q: "What was the payback period on the SAP Business One integration?"
+  kind: grounded
+  expect_substrings: ["11 month"]
+  forbid_substrings: ["1 month payback", "payback: 1 month"]
+
+# Product name mangled to "SAP One" in generation; the KB only ever says the full name.
+- q: "Tell me about Chris's SAP Business One work."
+  kind: grounded
+  expect_substrings: ["sap business one"]

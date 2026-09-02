@@ -40,6 +40,29 @@ code in that repository.
 | Faithfulness verifier | Qwen2.5-14B-Instruct (Ollama, RTX 5060 Ti) | asrock B550 home server |
 | Tunnel | SSH reverse forward (VPS → T5810 → asrock) | VPS ↔ home LAN |
 
+### Why this system uses two home machines (and which does what)
+
+Two GPU boxes, split by **what competes for VRAM**, not by "inference vs retrieval":
+
+- **T5810** — the answerer, plus everything that does *not* need a GPU. It runs vLLM
+  (Qwen3.8-27B-FP8) across its two A4500s, and alongside it **Qdrant** and the
+  **bge-base embedder**. Those two are safe to co-locate because the embedder runs on
+  **CPU** and Qdrant is memory/disk-bound — neither touches the A4500s, and the box has
+  256 GB of RAM and 22 cores to spare. So retrieval costs the answerer nothing.
+- **asrock B550** — the two jobs that *would* have competed for A4500 VRAM: the
+  **bge-reranker-base** cross-encoder and the **Qwen2.5-14B-Instruct** faithfulness judge.
+  Together they hold about 13 GB, which is 13 GB the answerer would have lost. Putting the
+  judge on separate hardware also keeps it genuinely independent of the model it grades.
+
+**The common way to get this backwards is to say the asrock "handles retrieval".** It does
+not: Qdrant and the embedder — the retrieval core — are on the T5810. The asrock runs the
+reranker and the judge. The split is about VRAM contention, and both of the asrock's
+services are **fail-open**, so if that box is down the site still answers.
+
+This is separate from the `gentoo-machines` fleet project, which documents kernel and
+build configuration for many machines. Cross-compilation, build hosts and low-power
+targets belong to that project and have nothing to do with how this chat is served.
+
 ---
 
 ## RAG Pipeline
@@ -229,7 +252,7 @@ Browser ──HTTPS/WSS──> cwetzel.com VPS (FastAPI proxy)
 
 **What the verifier does.** After every answer is delivered, the proxy fire-and-forgets `(question, answer, retrieved chunks)` to the verifier on asrock. A separate judge model (Qwen2.5-14B-Instruct on the RTX 5060 Ti — deliberately a different model family and size from the Qwen3.8-27B-FP8 that writes the answers, to avoid self-grading bias) decides, per claim, whether it is **supported**, **unsupported**, or **contradicted** by the retrieved chunks, and records a faithfulness score. This is out-of-band: it never blocks, delays, or rewrites the answer, and if asrock is down the chat is completely unaffected (the verdict simply isn't recorded). It turns "the answer is grounded" from a hope into a continuously measured signal, and flags drift for review.
 
-**Offline evaluation.** Separately from the live verifier, a graded eval harness (`scripts/eval_graded.py`) runs a human-authored golden set through the live pipeline and scores grounding/faithfulness, with ship thresholds — the regression gate used before changes go live. The set has grown as coverage improved; it is **42 questions** as of 2026-09-01, and the most recent measured result is **mean grounding 4.59/5** over 32 grounded items with 0 safety hard-fails. Older figures (a ~30- or 35-question set, 4.48/5) describe superseded baselines measured against a previous model and should not be quoted as current. A lightweight self-test also runs as a deploy gate and an hourly canary.
+**Offline evaluation.** Separately from the live verifier, a graded eval harness (`scripts/eval_graded.py`) runs a human-authored golden set through the live pipeline and scores grounding/faithfulness, with ship thresholds — the regression gate used before changes go live. The set grows as coverage improves — every production defect gets an entry so the fix is gated rather than remembered. **The current count and scores live in `eval/golden_set.yaml` and the eval output, deliberately not here:** this page has carried three different sizes over time (~30, 35, 42), each stale the moment a test was added. Ask about the *approach*, not the tally. A lightweight self-test also runs as a deploy gate and an hourly canary.
 
 ---
 
