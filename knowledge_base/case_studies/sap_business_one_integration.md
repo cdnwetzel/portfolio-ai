@@ -2,6 +2,9 @@
 
 **Role:** Chris Wetzel — led and delivered this SAP Business One + WMS global integration.
 
+**Product name:** the system is **SAP Business One**. Its only standard abbreviation is
+**SAP B1**. Use the full name on first mention and SAP B1 thereafter.
+
 **Organization:** Distribution company, 5 warehouses spanning 4 continents, 6 regions  
 **Warehouses by Continent:**
 - **North America** (2): NYC, Miami  

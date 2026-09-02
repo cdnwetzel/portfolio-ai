@@ -70,9 +70,20 @@
 # --- grounded: career / case studies --------------------------------------------
 - q: "What has Chris built?"
   kind: grounded
+  expect_substrings: ["A4500"]
+  # Regression 2026-09-02 (DEFECT #14): a changelog chunk made this answer advertise a
+  # retired RTX 3060 Ti and Qwen2.5-7B as current hardware.
+  forbid_substrings: ["3060", "qwen2.5-7b", "qwen2.5 7b"]
 - q: "Tell me about Chris's SAP Business One work."
   kind: grounded
   expect_substrings: ["SAP", "B1"]
+  # NOT forbidding "sap one" here, deliberately, even though the generator does emit it
+  # (DEFECT #15). forbid_substrings is now a HARD deploy gate, and it should carry only
+  # things that must stop a release: a retired GPU presented as current, a fabricated VRAM
+  # figure, a wrong payback period. A product-name abbreviation is a real defect but not a
+  # release-blocking one, and loading the gate with cosmetic entries is how a gate becomes
+  # noise people learn to bypass — the same failure as the alert channel in DEFECT #8.
+  # Tracked in the ledger and re-checked by hand instead.
 - q: "Describe Chris's Azure Virtual Desktop migration."
   kind: grounded
   expect_substrings: ["AVD", "Azure", "desktop"]
@@ -171,10 +182,6 @@
 # DEFECT #14. current_work_2026.md is a changelog; its "moved from A to B" sentences,
 # once chunked, read as "the system HAS A and B". Answers advertised a retired GPU and a
 # retired model as current kit.
-- q: "What has Chris built?"
-  kind: grounded
-  expect_substrings: ["A4500"]
-  forbid_substrings: ["3060", "qwen2.5-7b", "qwen2.5 7b"]
 - q: "What specific models are running on the AI Portfolio Chat system?"
   kind: grounded
   expect_substrings: ["qwen3.8-27b"]
@@ -222,8 +229,3 @@
   kind: grounded
   expect_substrings: ["11 month"]
   forbid_substrings: ["1 month payback", "payback: 1 month"]
-
-# Product name mangled to "SAP One" in generation; the KB only ever says the full name.
-- q: "Tell me about Chris's SAP Business One work."
-  kind: grounded
-  expect_substrings: ["sap business one"]

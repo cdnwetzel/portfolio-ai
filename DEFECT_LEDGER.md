@@ -8,6 +8,75 @@
 
 ## OPEN DEFECTS (Priority Order)
 
+### 16. SAP Case Study Says "5 Warehouses" But Lists 6 — NEEDS CHRIS, NOT A GUESS
+**Status:** OPEN — **blocked on a fact only Chris has.** Deliberately not "fixed".
+**Severity:** LOW-MEDIUM — it is a client engagement's headline figure.
+
+`sap_business_one_integration.md` states **"5 warehouses spanning 4 continents, 6 regions"**
+(twice, lines 5 and 21) and then enumerates:
+
+| Continent | Sites |
+|---|---|
+| North America | NYC, Miami |
+| Europe | London, Athens |
+| Asia | Singapore |
+| Oceania | Sydney |
+
+That is **6 sites**, not 5. The 4 continents check out.
+
+**Why this was left alone.** Either the count is wrong or one listed city was not a
+warehouse, and only Chris knows which. Picking a number to make the document
+self-consistent would be inventing a fact about a real client engagement — precisely the
+failure this whole corpus exists to avoid. The two arithmetic errors fixed the same day
+(AVD payback, SAP payback) were *derivable* from figures already present; this one is not.
+
+**It probably explains an observed defect.** An answer opened with "a distribution company
+operating across **five continents**" and then correctly said "5 warehouses across 4
+continents" two lines later. A source that pairs a 5 and a 4 in one sentence, with a list
+that supports neither cleanly, is exactly the shape that invites that conflation.
+
+**Fix:** Chris confirms whether it is 5 or 6 warehouses; then the header, line 21 and the
+site list are made to agree, and a golden-set entry pins it.
+
+### 15. Generator Mangles the Client's Product Name to "SAP One" — OPEN, LOW
+**Status:** OPEN. Two KB fixes attempted; **neither worked.** Recorded as a known limit
+rather than left looking solved.
+**Severity:** LOW — a naming slip, not a wrong fact about the engagement. It is a client's
+product name on a portfolio, so it is not nothing.
+
+**Symptom:** answers say **"SAP One"**, e.g. *"Chris integrated **SAP One** (also referred
+to as SAP B1)"*. That string appears nowhere in the knowledge base; the case study says
+"SAP Business One" six times and bare "SAP" five times. The correct chunk **is** retrieved.
+The model is compressing the name on its own.
+
+**Attempt 1 — add the correct forms, with an explanation. BACKFIRED.** The line added was:
+
+> the system is **SAP Business One**, commonly abbreviated **SAP B1**. (Recorded because
+> answers were shortening it to "SAP One", which is not a product name...)
+
+The next answer said: *"The text notes that 'SAP One' and 'SAP B1' are two different
+products."* **Writing the wrong form into the KB in order to deny it created the entity.**
+This is exactly the "there is no such thing as a 14B reranker" mistake, repeated — and
+repeated in the same session in which that lesson was being cited. The rule is not "avoid
+bare negations", it is stronger: **never write the wrong string into the corpus at all.**
+A retrieval system has no concept of a quoted counter-example; every string in a chunk is
+a fact about the world.
+
+**Attempt 2 — positive only.** The line is now *"the system is SAP Business One. Its only
+standard abbreviation is SAP B1."* with no mention of the wrong form anywhere in the KB.
+This **improved** things — "SAP B1" now appears correctly — but the model still emits
+"SAP One" alongside it across three phrasings.
+
+**Deliberately NOT in the deploy gate.** `forbid_substrings` became a hard gate on
+2026-09-02, and it should carry only release blockers: a retired GPU presented as current,
+a fabricated VRAM figure, a wrong payback period. Adding a cosmetic entry is how a gate
+turns into noise people learn to bypass — the same failure as the alert channel in #8.
+
+**If revisited:** the remaining lever is the system prompt, which would change
+`PROMPT_VERSION` and need a re-baseline. That is a lot of machinery for one product name;
+worth folding into the P1.5 prompt reword rather than doing alone.
+**Discovered by:** the golden-set entry added 2026-09-02, which caught it on the first run.
+
 ### 14. A Changelog Chunk Reads as Current Inventory — KB FIXED 2026-09-02, NEEDS REINDEX
 **Status:** KB corrected in git; **NOT live until `./scripts/reindex_kb.sh` runs**
 **Severity:** HIGH for a portfolio site — it advertises hardware that does not exist

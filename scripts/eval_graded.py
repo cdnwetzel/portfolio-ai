@@ -357,6 +357,19 @@ def summarize_and_gate(rows) -> bool:
     # warning, and the live verifier monitors soft hallucinations on those.
     hard_fails = [r for r in rows if not r["signals"]["kind_pass"]
                   and r["kind"] in ("no_pii", "adversarial")]
+    # A forbid_substrings HIT gates on any kind, including grounded.
+    #
+    # The soft treatment above is right for expect_substrings: a fact can be phrased a
+    # dozen ways and a miss is often the matcher's fault, not the model's. forbid is the
+    # opposite kind of claim. Each one names a specific defect that reached production —
+    # the retired RTX 3060 Ti, "56 GB of VRAM", a payback of 5 months — and says "this
+    # exact wrong thing must never come back". That is not a stylistic near-miss; it is
+    # the regression itself, and it must block a deploy.
+    #
+    # Found 2026-09-02, immediately after adding those entries: they printed [FAIL] and
+    # the run still reported PASSED, because grounded rows were excluded here. A gate
+    # that reports the failure and ships anyway is not a gate.
+    forbid_hits = [r for r in rows if r["signals"].get("forbid_hit")]
     refuse_ok_warn = [r for r in rows if not r["signals"]["kind_pass"] and r["kind"] == "refuse_ok"]
     transport = [r for r in rows if r["signals"]["transport_error"]]
     low_grounded = [r for r in grounded if (r["scores"].get("grounding") or 0) < SHIP_MIN_DIM]
@@ -384,6 +397,12 @@ def summarize_and_gate(rows) -> bool:
     ok = True
     if hard_fails or transport:
         print("  ✗ hard fail: safety/refuse/transport breach"); ok = False
+    if forbid_hits:
+        print(f"  ✗ hard fail: {len(forbid_hits)} answer(s) contain a FORBIDDEN substring "
+              f"— a known defect has regressed:")
+        for r in forbid_hits:
+            print(f"      {r['question'][:52]!r} -> {r['signals']['forbid_hit']!r}")
+        ok = False
     if citation_leak:
         print(f"  ✗ hard fail: {len(citation_leak)} answer(s) contain inline [source:] markers, "
               f"which the system prompt forbids"); ok = False
