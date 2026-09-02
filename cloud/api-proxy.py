@@ -223,17 +223,46 @@ async def health():
 _DEPLOYED_AT = datetime.utcnow().isoformat() + "Z"
 
 
+async def _live_chunk_count() -> int:
+    """Point count straight from the Qdrant collection, so the About panel cannot drift
+    away from the index. Falls back to the configured value if Qdrant is unreachable."""
+    if _http is None:                            # before startup completes
+        return int(os.environ.get("KB_CHUNK_COUNT", "99"))
+    try:
+        r = await _http.get(f"{QDRANT_URL}/collections/documents", timeout=3.0)
+        if r.status_code == 200:
+            n = r.json().get("result", {}).get("points_count")
+            if isinstance(n, int) and n > 0:
+                return n
+    except Exception as e:                       # metadata only, never content
+        logger.warning(f"system-info: live chunk count unavailable ({type(e).__name__}); using configured value")
+    return int(os.environ.get("KB_CHUNK_COUNT", "99"))
+
+
 @app.get("/api/system-info")
 async def system_info():
-    """Live values for the landing-page SystemInfo panel. Counts/GPU come from
-    systemd env (KB_DOC_COUNT, KB_CHUNK_COUNT, VERIFIER_GPU) so a KB rebuild or
-    the Tier 2 asrock GPU swap updates the panel without a code change; the
-    defaults are today's real values so the endpoint stays honest even unset.
+    """Live values for the landing-page SystemInfo panel. The chunk count is read from
+    Qdrant itself (see _live_chunk_count); doc count and GPU come from systemd env
+    (KB_DOC_COUNT, VERIFIER_GPU) so the asrock GPU swap updates the panel without a
+    code change; the defaults are today's real values so the endpoint stays honest
+    even unset.
     deployed_sha is stamped by deploy.sh (DEPLOY_GIT_SHA) — answers "what
     exactly is running" without SSHing in."""
+    # Chunk count is read LIVE from Qdrant, not from KB_CHUNK_COUNT.
+    #
+    # The env var was set by hand and `scripts/reindex_kb.sh` never touched it, so every
+    # reindex silently drifted the panel. Demonstrated 2026-09-02: a reindex took the
+    # collection 99 -> 100 points while the panel kept saying 99. A number nobody updates
+    # is a number that is wrong, and this panel exists to tell visitors what is actually
+    # running. Reading the collection cannot drift.
+    #
+    # Falls back to the env var (then the literal) if Qdrant is unreachable, so the panel
+    # degrades to "possibly stale" rather than erroring — same fail-open posture as the
+    # rest of the read paths.
+    chunks = await _live_chunk_count()
     return {
         "docs": int(os.environ.get("KB_DOC_COUNT", "35")),
-        "chunks": int(os.environ.get("KB_CHUNK_COUNT", "99")),
+        "chunks": chunks,
         "verifier_gpu": os.environ.get("VERIFIER_GPU", "RTX 5060 Ti"),
         # Model and context window are served from HERE, not hardcoded in the
         # frontend. The panel showed "Qwen2.5-Coder 14B Instruct / 16 384 tokens"
