@@ -42,19 +42,29 @@ bursts. It is a public portfolio chat with light traffic, not a training rig.
 The CPU stays modest under this workload — vLLM is GPU-bound, so the 145 W TDP is not the
 figure to plan around. 59 W was measured *while both GPUs were pegged*.
 
-**Not directly measured** (no wall meter): 256 GB of DDR4 ECC, internal drives, chassis
-fans, NVLink, and the motherboard. For a box of this class that is roughly 60–100 W.
+**Measured at the wall as of 2026-09-01 evening — a Kasa KP125M smart plug now meters the
+T5810 directly.** This supersedes the estimates below it, and it corrects them upward:
 
-**Totals:**
+| | Estimated (this note, earlier) | **Measured at the plug** |
+|---|---|---|
+| Under inference | ~520 W | **642 W** |
 
-| | DC (components) | AC (at the wall, ~90 % PSU efficiency) | vs 330 W UPS |
-|---|---|---|---|
-| True idle, model resident | ~136 W | **~152 W** | 46 % — comfortable |
-| Under inference (burst) | ~470 W | **~520 W** | **158 % — overload** |
+The estimate was **23 % low**, and the reason is instructive: the line item below assumed
+60–100 W for RAM, drives, fans and board. Back-solving from 642 W AC leaves ~190 W for
+everything that is not GPU or CPU package. That is not because the DDR4 and the fans are
+enormous — it is because **this box runs two PSUs simultaneously** (the Dell 825 W internal
+plus the external Corsair 1000 W feeding the GPU rails), and each carries its own conversion
+overhead while running well below its efficient load band. A single-PSU model of this
+machine will always under-predict it.
 
-**The current UPS is rated 330 W.** It carries the box comfortably at idle and is overloaded
-during every generation burst. My earlier claim that even idle exceeded it was wrong — that
-came from the spin-down misreading above.
+**Lesson: never size a UPS off a component sum.** Meter the plug. The parts list said 520 W;
+the wall says 642 W, and that 122 W gap is exactly the sort of margin that decides whether a
+900 W unit is comfortable or marginal.
+
+**Not directly measured** (superseded by the plug reading above; kept to show the error):
+256 GB of DDR4 ECC, internal drives, chassis fans, NVLink, and the motherboard. This note
+assumed roughly 60–100 W for a box of this class. The real figure is closer to ~190 W once
+dual-PSU overhead is included.
 
 ---
 
@@ -90,12 +100,21 @@ nothing during the bursts. The exposure is data corruption, not downtime.
 
 Both options under consideration are 1500 VA; the difference is real-power output.
 
-| Option | Load at **peak** (~520 W) | Load at **average** (~152 W) | Verdict |
-|---|---|---|---|
-| 1500 VA / **900 W** | **58 %** | 17 % | Works. Acceptable headroom. |
-| 1500 VA / **1000 W** | **52 %** | 15 % | **Preferred.** |
+> **RESOLVED 2026-09-01: a 1500 VA UPS is fitted and the T5810 is on it.** The old
+> 330 VA/550 VA unit was kept in service for other devices, which now draw **116 W** on it
+> (35 % — comfortable). Splitting the loads rather than stacking them is the right call:
+> the inference box no longer shares its headroom with anything else.
 
-Both clear the peak, which is the thing that decides whether you get protection at all.
+| Option | Load at **peak** — estimated ~520 W | Load at **peak** — **measured 642 W** | At average (~152 W) | Verdict |
+|---|---|---|---|---|
+| 1500 VA / **900 W** | 58 % | **71 %** | 17 % | Would have worked, but with much less room than this note first implied. |
+| 1500 VA / **1000 W** | 52 % | **64 %** | 15 % | **Correct choice.** |
+
+Both still clear the peak, which is what decides whether you get protection at all — but note
+how much of the apparent headroom the estimate invented. At the real 642 W, a 900 W unit sits
+at 71 % new, which is around 85 % effective after a few years of battery ageing, and leaves
+no room at all for raising the GPU cap back to 200 W (+70 W → 79 %). The 1000 W unit absorbs
+that; the 900 W one would have quietly foreclosed it.
 
 **Take the 1000 W.** The price delta is small and it buys headroom for things already on the
 table:
@@ -147,7 +166,63 @@ So the purchase is only half the work:
 
 ---
 
-## 5. Resuming the paused experiment
+## 5. P2.3 context-window A/B — RESOLVED 2026-09-01: do not adopt
+
+Run the night the UPS was fitted, both arms back to back under identical code, the same
+42-item golden set and the same independent judge (Qwen2.5-14B-Instruct on the asrock,
+grading answers written by Qwen3.8-27B — different family and size).
+
+| | arm A (shipped) | arm B (wider) |
+|---|---|---|
+| `RAG_TOP_K` | 5 | **8** |
+| `RAG_RETRIEVE_LIMIT` | 15 | **20** |
+| `MAX_CONTEXT_TOKENS` | 14384 | **28000** |
+| chunks actually reaching the generator | 5.00 | **7.75** |
+| **mean grounding** (32 grounded rows) | **4.594** | **4.656** |
+| mean answer length | 1295 chars | 1145 chars |
+| mean total latency | 12.56 s | **13.26 s (+6 %)** |
+
+**The +0.06 is noise, and the paired test says so plainly.** Scoring the same 32 questions
+in both arms and testing the differences: mean difference **+0.062**, sd 0.504,
+**t(31) = 0.70** against the 2.04 needed for p < 0.05, **95 % CI [-0.119, +0.244]** — it
+straddles zero. **24 of 32 rows scored identically**; of the 8 that moved, 5 went up and 3
+went down, which is what judge jitter looks like.
+
+**Verdict: do not adopt.** 55 % more chunks bought a difference indistinguishable from zero
+and cost **+6 % latency** — latency this site prints under every answer. Config reverted;
+the proxy is back on code defaults (verified: `/api/retrieve` returns 5 chunks again, live
+self-test 3/3).
+
+Note the direction of the one signal that did move: with *more* context the answers got
+**shorter** (1295 → 1145 chars). More retrieved text did not become more said.
+
+**This is now the third A/B in a row where "more" lost on this KB** — hybrid dense+BM25
+(4.41 vs 4.82), `chunk_size=250` (19/20 vs 20/20), and now wider retrieval. On a 35-doc,
+99-chunk corpus the top-5 reranked chunks already contain the answer; adding candidates 6-8
+adds tokens, not evidence. **Do not reopen without a hypothesis about what the current
+pipeline is missing** — "try a bigger number" has now been measured three times.
+
+### Two measurement notes worth keeping
+
+**One transport error in arm B was not a regression.** "How old is Chris?" recorded
+`ttfb=None, total_s=10.002` — exactly the harness's `open_timeout=10`, i.e. the WebSocket
+never opened, which happens before any retrieval or generation and cannot be caused by
+context width. Re-run 6x under the same arm-B config: 6/6 clean, 8 sources each. It tripped
+the harness's hard-fail gate, but scored g=1 in **both** arms, so it does not move the
+comparison. Transient.
+
+**"How old is Chris?" scores g=1 in every run for a structural reason, not a defect.**
+Personal facts come from the SERVER FACTS block, which is injected into the prompt but is
+*not* a retrieved chunk — so the judge, which only ever sees retrieved chunks, cannot verify
+the answer and correctly reports "No age information provided in sources." The harness
+already treats it as review-level rather than a gate. Worth remembering before someone
+"fixes" the answer.
+
+---
+
+## 6. Original resume procedure (kept for reference)
+
+### The knobs (env-overridable, no redeploy)
 
 P2.3 (context window / retrieval breadth) stopped here:
 

@@ -105,6 +105,16 @@ A deterministic **prompt-extraction guardrail** (`cloud/guardrails.py`) refuses
 (`scripts/eval_graded.py` + `eval/golden_set.yaml`) gates changes. A **hybrid dense+BM25** path
 exists (`HYBRID_SEARCH`) but is **OFF** — an A/B showed it regressed on this small KB (4.41 vs 4.82).
 
+**"More retrieval" has now lost three A/Bs in a row on this KB.** Hybrid dense+BM25 (4.41 vs
+4.82), `chunk_size=250` (19/20 vs 20/20), and — measured 2026-09-01 — wider retrieval:
+`RAG_TOP_K` 5→8 with `MAX_CONTEXT_TOKENS` 14384→28000 moved mean grounding 4.594 → 4.656,
+which a paired test over the same 32 questions calls noise (**t(31)=0.70**, 95 % CI
+**[-0.12, +0.24]**, 24/32 rows scored identically) while costing **+6 % latency**. Reverted.
+With 35 docs / 99 chunks the reranked top-5 already carries the answer; candidates 6-8 add
+tokens, not evidence. Details in `plans/ups-sizing-2026-09-01.md` §5. **Do not reopen without
+a hypothesis about what the pipeline is actually missing** — "try a bigger number" is
+measured and settled.
+
 ### Known characteristic: the reranker truncates (real, but not worth fixing — A/B'd)
 
 `bge-reranker-base` caps each (query, chunk) pair at **512 tokens** — an XLM-RoBERTa

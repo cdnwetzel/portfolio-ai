@@ -2,54 +2,69 @@
 
 **Status:** All 5 tiers live (Tier 5 deployed 2026-08-03)  
 **Endpoint:** https://dev.cwetzel.com  
-**Stack:** React (Tier 5 UX) → Apache (proxy) → FastAPI (backend) → pscode vLLM (T5810) + 14B judge (asrock) + GPU reranker (asrock)  
+**Stack:** React → Apache (proxy) → FastAPI (backend) → labrouter :8004 → vLLM / Qwen3.8-27B-FP8 (T5810) + 14B judge (asrock) + GPU reranker (asrock)  
 **Operators:** Claude (monitoring/code), Kimi (hardware/deployment)
 
 ---
 
 
-## Power / UPS constraint (measured 2026-09-01)
+## Power / UPS (resolved 2026-09-01)
 
-**The T5810 exceeds its UPS during generation bursts.** Measured, not estimated:
+**A 1500 VA UPS now carries the T5810.** Sustained GPU load is fine again — graded
+eval runs, benchmark sweeps and soak tests are all back on the table. The old 330 W / 550 VA
+unit stays in service for other devices, which draw **116 W** on it (35 %). The loads are
+**split, not stacked**: the inference box no longer shares headroom with anything else.
 
-| | GPU total | Whole box (AC) | vs 330 W UPS |
+### The measurement, and the estimate it corrected
+
+A **Kasa KP125M smart plug** now meters the T5810 at the wall. That matters, because the
+figure this section used to carry was a component sum, and it was wrong:
+
+| | GPU total | Whole box (AC) | vs the new UPS |
 |---|---|---|---|
-| True idle, model resident | 28 W | **~152 W** | 46 % — fine |
-| Generation burst (~8 s) | 330 W | **~520 W** | **158 % — overload** |
+| True idle, model resident | 28 W | ~152 W (estimated) | 15 % (at 1000 W) |
+| Generation burst (~8 s) | 330 W (2 x 165 W cap) | **642 W — measured at the plug** | **64 %** (at 1000 W) |
 
-This workload is **bursty**: ~193-367 generations/day at ~8 s each is a **~2-3 % duty
-cycle**, so the box is idle 97 % of the time. On line power the overload is just an alarm.
-The real exposure is the compound event — an outage that lands *during* a burst, when the
-UPS is over its rating and drops the load instead of transferring. That risks corrupting a
-29 GB model load, the Qdrant collection and `verdicts.db`.
+The old estimate said ~520 W. The plug says **642 W** — the estimate was **23 % low**. The
+gap is dual-PSU overhead: this box runs a Dell 825 W internal PSU *and* an external Corsair
+1000 W for the GPU rails simultaneously, both far below their efficient load band. Back-solve
+642 W and ~190 W is unaccounted for by GPU and CPU package, against the ~60-100 W a
+single-PSU model assumes.
 
-**Until a larger UPS is fitted, avoid deliberately sustained GPU load** (graded eval runs,
-benchmark sweeps, soak tests) — those push the duty cycle from ~2 % to ~100 % and turn an
-unlikely coincidence into a near-certainty. Normal visitor traffic is fine.
+**Never size a UPS off a component sum — meter the plug.** At the real 642 W a 1000 W unit
+sits at 64 %; the 900 W option that was also under consideration would be 71 %, and would
+quietly foreclose ever raising the GPU cap back to its 200 W default (+70 W).
 
-### TEMPORARY measures while the UPS is undersized (2026-09-01, revert after fitting)
+> **TO CONFIRM:** the exact model and real-power rating of the fitted unit is not recorded
+> here — it was reported as replaced, not specified, and this box has no UPS data link to ask
+> (see below). Both candidates clear 642 W, so nothing is at risk either way; record the
+> actual rating here once known, and prefer reading it from `upsc` rather than from memory.
 
-| Change | From | To | Effect |
-|---|---|---|---|
-| `SMOKE_INTERVAL_SEC` | 1800 (30 min) | **86400** | E2E parked to ~1/day (pre-2026-08-31 cadence); removes ~25 min/day of self-inflicted burst load |
-| GPU power cap | — | **left at 165 W** | see below — the cap is not the lever |
+### Still open: there is no automatic shutdown
 
-**The power cap is NOT the lever, and was deliberately restored to 165 W.** Both settings
-overload the UPS during a burst — 165 W → ~520 W (158 %), 130 W → ~440 W (133 %) — and a UPS on
-battery trips at either. Lowering it changes the depth of an overload that trips regardless.
+The UPS **USB data cable is not connected** and neither NUT nor apcupsd is installed
+(`lsusb` shows no UPS device; `which upsc apcaccess` returns nothing). The box therefore has
+battery runtime but **no graceful shutdown** — which only converts an abrupt cut into a
+*later* abrupt cut, once an unattended battery runs flat.
 
-Worse, it is marginally *counterproductive*: a generation takes ~8.4 s at 165 W versus ~8.9 s at
-130 W, so the higher cap finishes sooner and leaves a **shorter window** in which an outage
-would hurt. Same energy, less time exposed. Fitting under 330 W would need ~79 W/card, which is
-not a usable configuration.
+Integration is written and staged in `home/ups-shutdown/`, blocked on one physical action:
+plug the cable in. The shutdown **order** is load-bearing and is why a plain `halt` is not
+good enough — stop `vllm-qwen38` as a *service* first (its TP workers are separate processes
+that orphan holding ~19 GB VRAM each), then `qdrant` (holds the whole retrieval index open),
+then halt. Then **pull the plug on purpose, once**: an untested shutdown path is a belief,
+not a control.
 
-**Duty cycle is the lever.** Exposure is "fraction of the day spent in a burst", and the only
-thing that moved it materially was self-inflicted load: the E2E probe at 30-min intervals added
-~25 min/day against organic traffic of ~26-49 min/day, roughly *doubling* it. Parking that is
-worth far more than any cap change.
+### What stays true now that the constraint is gone
 
-**Until the 1500VA/1000W lands:** no evals, benchmark sweeps, soak tests or reindex-plus-eval
-cycles. Organic traffic is fine. **Revert `SMOKE_INTERVAL_SEC` to 1800 after fitting.**
+**The power cap is not a power decision.** 165 W is a *tuning* choice — measured 33.4 tok/s at
+71 C versus 34.2 tok/s at 79 C for 200 W. Keep it there for the thermal margin, not for the UPS.
+
+**Synthetic monitoring is not free on a 2-3 % duty-cycle box.** `SMOKE_INTERVAL_SEC` is back to
+**1800** (30 min, detection latency <=30 min), but the arithmetic that forced it to be parked is
+worth remembering: 4 real generations per E2E run at 30-min cadence is ~25 min/day of GPU burst,
+against organic traffic of only ~26-49 min/day. Monitoring was roughly *doubling* total load.
+Before adding capacity, remove waste — the same review also found the proxy finishing
+generations for visitors who had already closed the socket (1,456 errors/day), now aborted.
 
 Power/utilisation metrics are sampled every minute to `/var/log/power-metrics.csv`
 (metadata only — watts, temps, utilisation; never request content, per red-lines #2).

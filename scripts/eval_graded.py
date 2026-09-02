@@ -60,6 +60,48 @@ SHIP_MIN_EVALS = 15
 GOLDEN_DEFAULT = str(Path(__file__).resolve().parent.parent / "eval" / "golden_set.yaml")
 
 
+def _family(model: str) -> str:
+    """Normalize a model id to a coarse family+size token for independence checks.
+
+    'qwen2.5:14b-instruct-q4_k_m' -> 'qwen2.5-14b';  'Qwen3.8-27B-FP8' -> 'qwen3.8-27b'
+    Deliberately coarse: we only need "is this plausibly the same model", not a taxonomy.
+    """
+    m = re.sub(r"[:_/]", "-", (model or "").lower())
+    fam = re.search(r"(qwen[\d.]*|llama[\d.]*|mistral|gemma[\d.]*|gpt-oss|phi[\d.]*)", m)
+    size = re.search(r"(\d+(?:\.\d+)?b)\b", m)
+    return f"{fam.group(1) if fam else '?'}-{size.group(1) if size else '?'}"
+
+
+def fetch_answerer_model(ws_url: str) -> str:
+    """Ask the proxy which model actually wrote the answers, instead of guessing from a
+    hardcoded string. The proxy pins the model server-side (MODEL_ID) and reports it at
+    /api/system-info, so this stays correct when the model is swapped behind labrouter."""
+    try:
+        http = re.sub(r"^ws", "http", ws_url).split("/ws/")[0]
+        with urllib.request.urlopen(http + "/api/system-info", timeout=10) as r:
+            return (json.loads(r.read().decode()) or {}).get("model", "") or ""
+    except Exception:
+        return ""
+
+
+def judge_echo_risk(judge_model: str, answerer_model: str) -> str:
+    """Return a warning string if the judge is plausibly the SAME model that wrote the
+    answers (echo bias), else "".
+
+    This used to hardcode "14b", which was correct only while the answerer WAS a 14B. After
+    the model moved to Qwen3.8-27B that check fired on every run against a judge that is in
+    fact independent — a stale surface-form heuristic, and a warning nobody can act on is a
+    warning everybody learns to ignore. Compare against the ACTUAL served model instead.
+    """
+    if not answerer_model:
+        return ("could not read the answerer model from /api/system-info, so judge "
+                "independence is UNVERIFIED — confirm the judge is not the generator")
+    if _family(judge_model) == _family(answerer_model):
+        return (f"judge {judge_model} looks like the answerer {answerer_model} "
+                f"— echo bias. Use a DIFFERENT model.")
+    return ""
+
+
 def load_golden(path: str):
     with open(path) as f:
         items = yaml.safe_load(f)
@@ -396,8 +438,13 @@ def main():
     if args.limit:
         items = items[:args.limit]
 
-    if args.judge_url and ("14b" in args.judge_model.lower() or "coder-14" in args.judge_model.lower()):
-        print("⚠ WARNING: judge model looks like the 14B answerer — echo bias. Use a DIFFERENT model.")
+    if args.judge_url:
+        answerer = fetch_answerer_model(args.url)
+        warn = judge_echo_risk(args.judge_model, answerer)
+        if warn:
+            print(f"⚠ WARNING: {warn}")
+        elif answerer:
+            print(f"  judge {args.judge_model} vs answerer {answerer} — independent, no echo-bias risk")
 
     mode = f"judge={args.judge_model}" if args.judge_url else "programmatic-only"
     print(f"Graded eval against {args.url}  ({len(items)} items, {mode})\n")

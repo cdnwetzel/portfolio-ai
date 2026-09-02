@@ -195,6 +195,40 @@ monitoring was blind)
 
 ## CLOSED DEFECTS
 
+### 13. Eval Harness Cried Wolf About Judge Independence — CLOSED 2026-09-01
+**Was:** every graded-eval run printed
+`⚠ WARNING: judge model looks like the 14B answerer — echo bias. Use a DIFFERENT model.`
+The check was `"14b" in judge_model`, which was correct only while the answerer actually
+**was** Qwen2.5-Coder-14B. Since the generator moved to **Qwen3.8-27B-FP8**, the 14B-Instruct
+judge is genuinely independent — so the warning fired on every run and was always wrong.
+
+**Why it is worth a ledger entry rather than a shrug:** this is the *fifth* instance of the
+house pattern — **a heuristic keyed on a surface form that silently goes stale.** The others
+were the router default, the "favorite language" rule, the education retrieval miss, and
+`max_tokens` set by question word count. It also has a second cost specific to warnings: a
+warning that cannot be acted on trains the operator to ignore warnings, so the next one — a
+*real* echo-bias run — reads exactly like the noise.
+
+It never corrupted a score. The judge was independent throughout; only the harness was wrong
+about it.
+
+**Resolution:** `judge_echo_risk()` now compares the judge against the **actual served
+model**, read live from the proxy's `/api/system-info` (which reports the server-pinned
+`MODEL_ID`), instead of a hardcoded string. Models are swapped behind labrouter without the
+VPS changing, so reading the served model is the only version of this check that stays true
+across a model change. It **fails closed**: if `/api/system-info` cannot be read, it warns
+that independence is UNVERIFIED rather than staying silent.
+
+Five cases tested, deliberately including the historical one — a 14B judge against a 14B
+answerer must *still* warn, so the fix tightens the check rather than deleting it — and the
+unknown-answerer case. On a clean run it now prints the positive confirmation
+`judge ... vs answerer ... — independent, no echo-bias risk`, which is worth more than
+silence: it shows the check ran.
+**Discovered by:** Claude, 2026-09-01, while re-baselining the graded eval after the UPS
+replacement unblocked sustained GPU load.
+
+
+
 ### 11. Answers Appeared Cut Off — Prompt Scaffold Leak — CLOSED 2026-09-01
 **Was:** answers ended with a dangling `**Mandatory`, reading as truncation.
 **It was not truncation** — the reply was 838 tokens against a 2048 cap. The model
@@ -207,9 +241,18 @@ FOLLOWUPS and no-FOLLOWUPS paths. Deliberately conservative — a trailing line 
 only if it lacks terminal punctuation AND is either pure markdown decoration or carries
 scaffold wording. A real closing sentence always ends in punctuation and is never touched.
 Six cases tested including "must keep" negatives.
-**Not fixed at the prompt level on purpose:** rewording SYSTEM_PREFIX changes
-PROMPT_VERSION and would need a graded-eval re-baseline, which costs sustained GPU the
-box cannot spend while on an undersized UPS. Worth revisiting after.
+**Not fixed at the prompt level on purpose (at the time):** rewording `SYSTEM_PREFIX`
+changes `PROMPT_VERSION` and needs a graded-eval re-baseline, which costs sustained GPU
+the box could not spend while on an undersized UPS.
+
+**UNBLOCKED 2026-09-01** — the UPS is replaced and sustained eval load is affordable
+again. The client-side strip stays regardless (defence in depth: the model can echo
+scaffold wording no prompt edit fully prevents), but the root cause is worth removing:
+the literal string `MANDATORY OUTPUT — append this after every answer:` reads like a
+header the model is *supposed* to emit, which is precisely why it sometimes emits it.
+Phrasing the same requirement as an instruction rather than a shouty template heading
+deletes the string the model was copying. Requires a deploy + re-baseline, so it is a
+proposal, not a silent change.
 
 ### 12. Proxy Finished Generations Nobody Was Waiting For — CLOSED 2026-09-01
 **Was:** 1,456 log lines in 24 h of `Cannot call "send" once a close message has been
