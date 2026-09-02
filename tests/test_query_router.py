@@ -100,3 +100,76 @@ class TestCannedResponses:
             head, _, tail = resp.partition("FOLLOWUPS:")
             assert head.strip(), "canned response must have visible text before FOLLOWUPS"
             assert "FOLLOWUPS:" not in tail, "only one FOLLOWUPS block allowed"
+
+
+class TestOffTopicKeywordsDoNotOverMatch:
+    """Regression tests for 2026-09-02: the off-topic list was matched as a BARE
+    SUBSTRING, so ordinary portfolio words that merely CONTAIN a keyword were deflected.
+
+    The question that surfaced it — asked by Chris against production — was:
+
+        "What was the grounding score for the incumbent model in the selection
+         evaluation?"
+
+    "sELECTION" contains "election", so a question about this system's own model
+    selection eval got the off-topic redirect. This is the same shape as the router
+    default bug and the favorite-language rule: a heuristic keyed on surface form that is
+    wrong on the highest-value questions. It hid for so long because the on-topic list is
+    checked FIRST, so the collision only bites questions that do not happen to restate a
+    portfolio keyword.
+    """
+
+    def test_selection_is_not_election(self):
+        q = "What was the grounding score for the incumbent model in the selection evaluation?"
+        assert classify_query(q) == "on_topic"
+
+    def test_cryptography_is_not_cryptocurrency(self):
+        assert classify_query("What cryptography does the SSH tunnel use?") == "on_topic"
+        assert classify_query("Is the SAN encrypted with strong crypto?") == "on_topic"
+
+    def test_news_pipeline_is_not_the_news(self):
+        assert classify_query("How does Chris handle news aggregation pipelines?") == "on_topic"
+
+    def test_translating_documents_is_not_translate_this(self):
+        assert classify_query("Does the system translate documents?") == "on_topic"
+
+    def test_presidential_is_not_president(self):
+        assert classify_query("Tell me about the presidential suite deployment") == "on_topic"
+
+    def test_renewal_is_not_news(self):
+        assert classify_query("What is the renewal process for the SSL certificate?") == "on_topic"
+
+
+class TestGenuinelyOffTopicStillDeflects:
+    """The fix above must not disarm the router. These must STILL be deflected —
+    otherwise the substring fix has simply removed the feature.
+    """
+
+    def test_weather(self):
+        assert classify_query("What is the weather today?") == "off_topic"
+
+    def test_election(self):
+        assert classify_query("Who won the election?") == "off_topic"
+
+    def test_president(self):
+        assert classify_query("What is the president doing?") == "off_topic"
+
+    def test_cryptocurrency(self):
+        assert classify_query("Should I invest in cryptocurrency?") == "off_topic"
+
+    def test_the_news(self):
+        assert classify_query("What's in the news today?") == "off_topic"
+
+    def test_translate_this(self):
+        assert classify_query("Translate this into French") == "off_topic"
+
+    def test_recipe_and_joke_and_poem(self):
+        assert classify_query("Give me a recipe for bread") == "off_topic"
+        assert classify_query("Tell me a joke.") == "off_topic"
+        assert classify_query("Write me a poem about the sea") == "off_topic"
+
+    def test_stock_and_bitcoin(self):
+        assert classify_query("What is the bitcoin stock price?") == "off_topic"
+
+    def test_current_events_in_politics(self):
+        assert classify_query("What are the current events in politics?") == "off_topic"

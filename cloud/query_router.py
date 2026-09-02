@@ -6,6 +6,8 @@ Query classification for Tier 4: route to meta (instant), on-topic (full RAG), o
 - off-topic: external knowledge ("current events", "weather", etc.)
 """
 
+import re
+
 
 def classify_query(query: str) -> str:
     """Classify query as 'meta' | 'on_topic' | 'off_topic'.
@@ -95,24 +97,60 @@ def classify_query(query: str) -> str:
 
     # Explicitly external subjects: redirect without spending a GPU call.
     # This list is the ONLY route to off_topic now — see the default below.
+    # Keep these UNAMBIGUOUS. A bare word that has a legitimate infrastructure meaning
+    # ("crypto" -> cryptography, "news" -> a news pipeline, "translate" -> document
+    # translation) will deflect real portfolio questions, and the two errors are not
+    # equally expensive:
+    #
+    #   false off_topic -> a real visitor question gets a canned redirect. Looks broken,
+    #                      and it is the failure DEFECT #6 was about.
+    #   false on_topic  -> one GPU call on a question we would have refused anyway, and
+    #                      RAG_MIN_SCORE / the guardrail still handle grounding.
+    #
+    # This router is a COST OPTIMIZATION, not a grounding gate (see the default below),
+    # so when a keyword is ambiguous, drop it or make it a phrase. Prefer spending a GPU
+    # call over deflecting a real question.
     off_topic_keywords = [
         "weather",
-        "news",
+        "the news",            # not bare "news": "news aggregation pipeline" is on-topic
+        "news headlines",
         "current events",
         "politics",
         "president",
         "election",
         "stock price",
-        "crypto",
+        "cryptocurrency",      # not bare "crypto": "strong crypto"/"cryptography" is on-topic
         "bitcoin",
         "recipe",
         "horoscope",
-        "translate",
+        "translate this",      # not bare "translate": "does it translate documents" is on-topic
+        "translate the",
         "write me a poem",
         "tell me a joke",
     ]
+    # Match on WORD BOUNDARIES, not bare substrings.
+    #
+    # This was `if kw in query_lower`, and it deflected real portfolio questions whose
+    # words merely CONTAIN an off-topic keyword. The one that surfaced it (2026-09-02):
+    #
+    #     "What was the grounding score for the incumbent model in the selection
+    #      evaluation?"   ->  "sELECTION" contains "election"  ->  off_topic
+    #
+    # A question about this system's own model-selection eval got the "I only know
+    # Chris Wetzel's professional work" redirect. Others in the same family:
+    # "cryptography" -> "crypto", "newsletter"/"news aggregation" -> "news",
+    # "presidential" -> "president", "translated" -> "translate".
+    #
+    # It stayed invisible because the on-topic list is checked FIRST, so the collision
+    # only bites questions that do not happen to restate a portfolio keyword — i.e.
+    # precisely the specific technical follow-ups, which are the valuable ones. This is
+    # the same shape as the router-default bug (#6) and the favorite-language rule (#5):
+    # a heuristic keyed on surface form, wrong on the highest-value input.
+    #
+    # Multi-word phrases ("current events", "stock price") still work: \b applies at the
+    # ends of the whole phrase, which is what we want.
     for kw in off_topic_keywords:
-        if kw in query_lower:
+        if re.search(r"\b" + re.escape(kw) + r"\b", query_lower):
             return "off_topic"
 
     # Default: ON-topic. This was previously off_topic, which made the router a

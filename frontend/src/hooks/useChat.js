@@ -86,13 +86,28 @@ function parseFollowups(content) {
       if (Array.isArray(parsed)) suggestions = parsed.filter(s => typeof s === 'string' && s.trim())
     } catch { /* fall through to list parsing */ }
   }
+  // A block that OPENS as a JSON array but did not parse is a TRUNCATED array, not a
+  // list in some other format. The line fallback below is for "the model wrote a
+  // numbered list instead of JSON" — it is not a repair tool, and on a cut-off array it
+  // does real damage: the whole fragment is one line, so it emits a single "suggestion"
+  // whose text is raw JSON, and the leading-char strip below does not remove an opening
+  // '[', so it renders as a clickable chip labelled
+  //     ["Which machines are constrained?","What kernel version?","How deploy
+  // Clicking it sends that raw text as a query (observed 2026-09-02). Missing chips are
+  // a non-event; a chip that injects malformed text into the conversation is not.
+  // This restores the invariant stated at the top of this file: a malformed FOLLOWUPS
+  // never leaks into history.
+  const looksLikeTruncatedJson = suggestions.length === 0 && block.trimStart().startsWith('[')
   // Fallback: numbered / bulleted / line-separated questions
-  if (suggestions.length === 0) {
+  if (suggestions.length === 0 && !looksLikeTruncatedJson) {
     suggestions = block
       .split('\n')
       .map(l => l.replace(/^[\s\-*\d.)\]]+/, '').replace(/^["']|["']$/g, '').trim())
       .filter(l => l.length > 3)
   }
+  // Belt and braces: never surface anything still carrying JSON punctuation, whatever
+  // path produced it.
+  suggestions = suggestions.filter(sg => !/^\[|","/.test(sg))
 
   return { content: clean, suggestions: suggestions.slice(0, 3) }
 }
