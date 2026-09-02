@@ -55,6 +55,47 @@ Note the phrasing follows the lesson from the earlier "there is no 14B reranker"
 **lead with the positive fact, and let the negation only clarify it** — never ship a bare
 negation into the KB.
 
+### How it compounds across a conversation (observed 2026-09-02, second live test)
+
+A follow-up chain showed this is worse than a single wrong sentence. Once the false fact
+entered turn 1, it **propagated and hardened**:
+
+1. *"What specific models are running?"* → listed **"Qwen2.5-7B: Runs on an RTX 3060 Ti and
+   serves as the out-of-band faithfulness verifier."** The retired model is now assigned a
+   *role* it never had.
+2. *"How does the out-of-band faithfulness verifier work?"* → a full, confident architectural
+   explanation built on it: *"The verifier runs on a separate GPU (RTX 3060 Ti) using the
+   Qwen2.5-7B model."*
+3. The **follow-up chips then manufactured questions about the nonexistent component** —
+   *"What is the context window size for the Qwen2.5-7B verifier?"*, *"How does the verifier
+   handle answers that exceed its processing capacity?"*
+
+**The most damaging part is step 3's answer.** The system replied *"The knowledge base does
+not specify the context window size for the Qwen2.5-7B verifier."* That is the grounding
+refusal — normally the safest behaviour in the system — and here it **actively corroborates
+the false premise.** "We don't have that detail about the 7B verifier" reads as confirmation
+that a 7B verifier exists and is merely under-documented. A refusal that accepts the
+question's premise is not a safe answer; it is a confident one.
+
+**Two mechanisms worth separating:**
+- **Premise inheritance.** Nothing re-checks a follow-up's presupposition against retrieval.
+  The chips are generated from the *previous answer*, so a wrong answer generates questions
+  that can only be answered wrongly, and the conversation cannot self-correct.
+- **A real KB contradiction went unflagged.** `ai_portfolio_system.md` (lines 40, 230)
+  correctly said Qwen2.5-14B-Instruct on the RTX 5060 Ti, while `current_work_2026.md` said
+  7B on a 3060 Ti. The system prompt explicitly instructs: *"When sources conflict: 'My
+  knowledge base has conflicting information on this.'"* It did not. It picked one — the
+  wrong one — and presented it without hedging. **The conflict rule did not fire on a real
+  conflict**, which means it is not currently load-bearing and should not be counted as a
+  control.
+
+**Also found in the chain:** a *third* golden-set figure — "~30-question" — in
+`ai_portfolio_system.md:232`, alongside the "35-question" in `current_work_2026.md` and the
+actual 42. Three different numbers for the same artifact across two documents. Both corrected
+to 42 / mean grounding 4.59, each with a line saying older figures are superseded baselines.
+Also corrected there: the judge's independence rationale still justified itself against
+"the 14B-Coder that wrote the answer", which stopped being the answerer in August.
+
 **Not yet verified, and this is the part that matters:** per this repo's own rule, *"add it to
 the KB" is not a fix — verify it retrieves.* Requires `./scripts/reindex_kb.sh`
 (**authorization needed**), then re-asking several phrasings — "what has Chris built", "what
