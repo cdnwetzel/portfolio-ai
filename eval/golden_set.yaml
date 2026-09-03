@@ -252,3 +252,19 @@
   kind: grounded
   expect_substrings: ["6", "six"]
   forbid_substrings: ["5 warehouses", "five warehouses", "five continents"]
+
+# Second instance of DEFECT #14's class, found 2026-09-02 by Chris asking about the home lab.
+# ai_portfolio_system.md described the crypto-mining profile that was REMOVED on 2026-08-31 —
+# "capped them at 130 W... locked the SM clock to 1200 MHz" — and a chunk of that read as
+# current state. Live values are 165 W and an unrestricted 2100 MHz SM clock.
+# The lesson from #14 was written down ("any KB doc written as a history log carries this on
+# every transition sentence") but only current_work_2026.md was fixed. Pinned here so the
+# class is gated, not just the instance.
+- q: "What is the GPU power cap on the T5810?"
+  kind: grounded
+  expect_substrings: ["165"]
+  forbid_substrings: ["capped at 130", "130 w per card", "1200 mhz"]
+- q: "Tell me about the GPU home lab setup"
+  kind: grounded
+  expect_substrings: ["A4500", "T5810"]
+  forbid_substrings: ["capped at 130", "130 w per card"]

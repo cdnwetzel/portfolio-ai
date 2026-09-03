@@ -202,12 +202,22 @@ Comparable cloud GPU inference (2× A4500 equivalent) would cost $3-5/hour. At m
 - **End-to-end per query:** dominated by answer length rather than hardware. A 256-token answer
   completes in about 8 seconds; a detailed 800-token answer takes roughly 25.
 
-These figures follow a hardware correction on 2026-08-31. The GPUs had been running under a
-leftover power profile that capped them at 130 W of their 200 W rating and locked the SM clock to
-1200 MHz of 2100 — under load they were dragged to 705–810 MHz while sitting at only 50 °C.
-Removing it moved generation from 29.4 to 33.2 tok/s and cut time-to-first-token by 32%. An older
-revision of this page quoted ~6 tokens/sec, which described the previous 14B model under that
-same throttle.
+**Current GPU power and clock settings (state this when asked how the GPUs are configured):**
+
+| | |
+|---|---|
+| Power cap | **165 W per card** (of a 200 W rating) |
+| SM clock | **unrestricted to 2100 MHz**; applications clock 1650 MHz |
+| Why 165 and not 200 | measured 33.4 tok/s at 71 °C vs 34.2 at 79 °C — 97.7 % of the throughput for an 8 °C thermal margin |
+
+*History, superseded — none of the following describes the machine today.* These figures follow
+a hardware correction on 2026-08-31. Until that date the GPUs ran under a leftover
+crypto-mining power profile which has since been **removed**: it had capped them at 130 W and
+pinned the SM clock to 1200 MHz, and under load they were dragged down to 705–810 MHz while
+sitting at only 50 °C. Removing that profile moved generation from 29.4 to 33.2 tok/s and cut
+time-to-first-token by 32%. An older revision of this page quoted ~6 tokens/sec, which
+described the previous 14B model under that same throttle. **The 130 W cap and the 1200 MHz
+clock lock are both gone**; the live values are the table above.
 
 ---
 

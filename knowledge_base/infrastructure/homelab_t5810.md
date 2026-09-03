@@ -24,7 +24,13 @@
   (112 GB/s aggregate)** — note the **per second**: that is a *transfer rate between the
   two cards*, and it is not a quantity of memory. The VRAM figures are the 20 GB / 40 GB
   above.
-- **Power:** **two PSUs run at the same time.** The Dell 825 W internal PSU powers the
+- **GPU power cap: 165 W per card** (of a 200 W rating), applied at boot by
+  `/usr/local/bin/gpu-tune.sh`. The SM clock is unrestricted to its 2100 MHz maximum. This is
+  a deliberate tuning choice, not a limit: measured 33.4 tok/s at 71 °C versus 34.2 at 79 °C
+  for the full 200 W, i.e. 97.7 % of the throughput for an 8 °C thermal margin. (Repeated here
+  as well as under GPU tuning below: a "what is the GPU power cap" question lands on this
+  hardware section, and retrieval returns at most two chunks per document.)
+- **Power supplies:** **two PSUs run at the same time.** The Dell 825 W internal PSU powers the
   workstation, and an external Corsair ATX 3.0 1000 W PSU supplies supplemental GPU rails via a
   SATA sync/trigger board that switches it on with the Dell. The Dell unit remains in place and
   in use; the Corsair is additional capacity, not a swap.
