@@ -27,7 +27,7 @@ The 7-tier quality upgrade below is complete and still describes the software; t
 model beneath it have since changed. All tiers live:
 1. Credibility gates (6/6 passed), 2. 14B judge on RTX 5060 Ti (9/9 fixtures), 3. GPU reranker
 (15.8x faster), 4. First-person voice & query routing, 5. UX polish (stop button, textarea, 
-auto-scroll, sources readability), 6. KB expansion (35 docs / 94 chunks; indexer post-loading
+auto-scroll, sources readability), 6. KB expansion (indexer post-loading
 bug fixed), 7. Ops maturity (incident runbook, deploy-stamped version endpoint; **verdicts.db backups
 and the weekly digest were written but are NOT scheduled — see DEFECT_LEDGER #4**). Self-test gate passing. Health monitoring active.
 Continuous improvement: weekly flagged-queue review + defect ledger (DEFECT_LEDGER.md).
@@ -50,7 +50,8 @@ T5810 Home Server / precision-t5810 (Gentoo/OpenRC) — 2x RTX A4500 NVLink, 256
 │     ├─ :8007 — Qwen3.8-27B-FP8, 32K ctx, TP=2  ← what cwdotcom uses (MODEL_ID)
 │     ├─ :8008 — Qwen3.6-35B-A3B-FP8   (slot defined; not running)
 │     └─ :8009 — pscode-14b            (slot defined; not running)
-├─ Qdrant (port 6333) — dense 768-d cosine, 94 chunks / 34 docs
+├─ Qdrant (port 6333) — dense 768-d cosine. Live counts: `/api/system-info`, which reads
+│  them from the collection. Deliberately not written here — see the note below.
 ├─ Embedding service (port 8005) — BAAI/bge-base-en-v1.5, 768-d, CPU
 └─ compress service (port 8788) — token compression (COMPRESS_URL)
     ↓ tunnel also forwards :8016 → asrock:8006 (GPU reranker) and :8007 → asrock (verifier)
@@ -110,7 +111,7 @@ exists (`HYBRID_SEARCH`) but is **OFF** — an A/B showed it regressed on this s
 `RAG_TOP_K` 5→8 with `MAX_CONTEXT_TOKENS` 14384→28000 moved mean grounding 4.594 → 4.656,
 which a paired test over the same 32 questions calls noise (**t(31)=0.70**, 95 % CI
 **[-0.12, +0.24]**, 24/32 rows scored identically) while costing **+6 % latency**. Reverted.
-With 35 docs / 99 chunks the reranked top-5 already carries the answer; candidates 6-8 add
+On a corpus this size the reranked top-5 already carries the answer; candidates 6-8 add
 tokens, not evidence. Details in `plans/ups-sizing-2026-09-01.md` §5. **Do not reopen without
 a hypothesis about what the pipeline is actually missing** — "try a bigger number" is
 measured and settled.
@@ -118,7 +119,8 @@ measured and settled.
 ### Known characteristic: the reranker truncates (real, but not worth fixing — A/B'd)
 
 `bge-reranker-base` caps each (query, chunk) pair at **512 tokens** — an XLM-RoBERTa
-`max_position_embeddings=514` limit, not a tunable. The 62 live chunks have a median of **662**
+`max_position_embeddings=514` limit, not a tunable. Measured 2026-08 on the 62 chunks live at
+the time: median **662**
 tokens, so **71%** are scored on part of their text. It affects **ranking only**:
 `rerank_documents()` returns indices and the caller re-reads the full payload (`api-proxy.py:234`),
 so the LLM always receives whole chunks.
@@ -305,6 +307,13 @@ degraded mode: reranker fails open to cosine top-5, verifier is fully fail-open.
 **Constraints that bind.** `red-lines.md` and `invariants.md` govern the running system and are
 cited from live code. The one that catches people: **never log query or response content** —
 metadata only (`red-lines.md` #2). Where `.cursorrules` and `red-lines.md` disagree, red-lines wins.
+
+**Do not write KB doc/chunk counts into this file.** It has carried four different chunk
+counts (94, 94, 99, 62) and two doc counts (34, 35) simultaneously, all stale, because a
+reindex changes them and nothing updates prose. `/api/system-info` reads the count live from
+the Qdrant collection, so it cannot drift; quote that, or quote a number *with the date it was
+measured*. The same rule killed the golden-set size in the KB, which had drifted through ~30,
+35 and 42.
 
 **The knowledge base must not contain real internal IP addresses.** Public hostnames are fine.
 
