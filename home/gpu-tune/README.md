@@ -77,6 +77,30 @@ nvidia-smi --query-gpu=power.limit --format=csv,noheader   # expect 165.00 W, 16
 /opt/vllm-service/bench-vllm.sh 8007 3                     # expect ~33-34 tok/s
 ```
 
+### Verifying the runlevel actually starts it — without a reboot
+
+The failure this service replaced was not "it ran and failed", it was **"the runlevel never
+started it"** (`local` declares `after *` and starved behind vLLM's multi-minute start). That
+specific property can be tested without rebooting, because re-entering a runlevel starts
+*stopped* services and leaves *started* ones alone — so vLLM is untouched and the site stays
+up:
+
+```bash
+rc-service gpu-tune stop
+nvidia-smi -pl 200          # put it back to the driver default
+openrc default              # re-enter the runlevel
+rc-service gpu-tune status  # expect: started
+nvidia-smi --query-gpu=power.limit --format=csv,noheader   # expect 165 W
+```
+
+Run 2026-09-03: the runlevel started `gpu-tune` unprompted, the cap went 200 → 165, the log
+recorded it, and `vllm-qwen38` stayed `started` throughout. Zero downtime.
+
+**What this does and does not prove.** It proves the service is correctly registered and that
+runlevel processing reaches it — the actual defect. It does not exercise cold-boot timing,
+where the NVIDIA driver may not be ready yet; that is covered by the service's own 60-second
+`nvidia-smi -L` retry, and bounded regardless by the 5-minute drift check below.
+
 ## The cap is now self-healing, which is what makes it safe to stop worrying about
 
 The boot-time service is the primary control, but it had to be treated as unproven until a
