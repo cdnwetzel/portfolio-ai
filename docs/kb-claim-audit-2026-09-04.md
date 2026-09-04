@@ -105,8 +105,50 @@ still live in `CLAUDE.md`).
 That is the actual failure mode worth naming: *writing down the class is not fixing the
 class*. A sweep is not optional follow-up work after a fix — it **is** the fix.
 
-## Not yet done
+---
 
-`docs/claims.md` §2 notes the failures observed this week were intermittent — the 130 W and
-3060 Ti answers each surfaced roughly **1 run in 4**. Repeat-sampling the top questions 5× is
-the second half of this audit and has not been run.
+## Part two — repeat sampling (run 2026-09-04)
+
+Single-pass checking cannot clear this system: the 130 W and 3060 Ti defects each surfaced
+roughly **1 run in 4**. So `scripts/repeat_sample.py` asks 10 high-traffic questions 5× each
+and reports contradictions, not just wrong strings.
+
+**Result: 150 generations across three passes, zero real defects.** Both questions that were
+broken 1-in-4 two days ago are now stable, and the SAP answer gave the corrected 6
+warehouses / 4 continents in **21 of 21** samples.
+
+### The harness was wrong three times before the system was wrong once
+
+First pass flagged three failures. All three were the probes:
+
+| Flag | Reality |
+|---|---|
+| forbid `3060` on "What has Chris built?" | *"retired RTX 3060 Ti"* — a correct historical statement |
+| forbid `29.4` on throughput | *"moved generation from 29.4 to 33.2 tok/s"* — correct, with the current value present |
+| probe `"6 warehouse"` | missed every run that wrote *"six warehouses"* — word vs digit |
+
+One root cause: **matching a token instead of the claim.** That is the same trap as the
+router's `selection` → `election`, and the same lesson the golden set had already recorded the
+previous day as *"encode the defect, not the token"* — repeated here by the person who wrote
+that line. Probes are now regexes that accept word-or-digit forms, and history-vs-current is
+checked by **requiring the current figure** rather than forbidding the historical one.
+
+Second pass then reported the SAP question `UNSTABLE` because one run gave a shorter answer
+that omitted the warehouse count. Across 21 samples it never once gave a *wrong* count. So the
+harness now separates three outcomes:
+
+- **FORBIDDEN** — a known-wrong value appeared. Failure.
+- **UNSTABLE** — runs produced *different values* for the same fact. Failure, and the signature
+  of an intermittent defect.
+- **VARIABLE** — a fact was present in some runs and absent in others, never contradicted.
+  **Informational, not a failure.** Answer length varies; calling that a defect is how a
+  checker becomes noise people learn to ignore, which is DEFECT #8's failure mode.
+
+Third pass: **0 FORBIDDEN, 0 UNSTABLE, 0 VARIABLE, 0 transport errors.**
+
+### What this does and does not establish
+
+It establishes that the ten most likely questions are stable across five runs each, including
+every fact corrected this week. It does **not** establish that the KB is correct — 21 stable
+runs of a wrong number would look identical to 21 stable runs of a right one. That is what
+part one (claim-vs-machine) is for, and why both halves exist.
