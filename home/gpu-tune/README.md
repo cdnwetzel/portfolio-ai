@@ -1,0 +1,77 @@
+# GPU tuning for the T5810 A4500 pair
+
+Two files, both live on the T5810 and captured here because production has drifted ahead of
+this repo before and it cost real time:
+
+| Repo file | Installs to | Role |
+|---|---|---|
+| `gpu-tune.sh` | `/usr/local/bin/gpu-tune.sh` | applies persistence mode, the **165 W** cap, unlocked clocks |
+| `gpu-tune.openrc` | `/etc/init.d/gpu-tune` | OpenRC service: waits for the driver, applies, **verifies**, logs; ordered `before vllm-qwen38` |
+
+## The 165 W cap is a tuning choice, not a limit
+
+Measured on this hardware (`bench-vllm.sh`, 256 tok, temp=0, single stream):
+
+| Cap | tok/s | Temp |
+|---|---|---|
+| 130 W + clock locked to 1200 MHz | 29.43 | the old crypto-mining profile |
+| 150 W | 32.57 | 67/65 °C |
+| **165 W** | **33.43** | **71/70 °C — chosen, the knee** |
+| 180 W | 33.87 | 75/73 °C |
+| 200 W | 34.23 | 79/77 °C — 1 °C from abort, SM clocks already backing off |
+
+165 W keeps 97.7 % of the 200 W throughput for an 8 °C thermal margin instead of 1 °C.
+
+## Why this is an OpenRC service and not an /etc/local.d script
+
+**2026-09-03: it was a local.d script, and it silently never ran.** Found by rebooting to
+verify an unrelated fix — the cards came up at their 200 W default while every document said
+the cap was "set at boot".
+
+The first diagnosis was wrong, and the way it was wrong is the useful part. The obvious guess
+was a race: local.d runs before the NVIDIA driver is ready, `nvidia-smi` fails, nothing
+notices. A wait-and-retry wrapper was written for that. **It changed nothing** — and the
+reason was visible in the evidence: after the next boot there was *no log at all*. Not a
+logged failure, no log. The script had never executed. A wrapper that fails would have
+written a line; silence meant the mechanism, not the timing.
+
+The real cause is two problems, and the second is the one that matters:
+
+1. **`local` declares `after *`** — it waits for *every* service in the runlevel.
+   `vllm-qwen38` takes minutes to start (FP8 weight load + CUDA-graph capture), so `local`
+   never got its turn. Nothing in `/etc/local.d` ran — not `gpu-tune`, not `cpu-governor`.
+2. **Even if it had eventually run, the ordering was backwards.** It would have applied the
+   cap *after* vLLM was already up and had captured its CUDA graphs at 200 W. A cap has to be
+   set before the consumer starts, not eventually.
+
+Hence an explicit ordered service: `nvidia-persistenced` → `gpu-tune` → `vllm-qwen38`,
+declared with `need nvidia-persistenced` and `before vllm-qwen38`. Verified in OpenRC's own
+dependency tree rather than by reading the file:
+
+```
+depinfo_90_service='vllm-qwen38'
+depinfo_90_iafter_1='gpu-tune'
+```
+
+The service also **waits for the driver** (retries `nvidia-smi -L` for 60 s) and **verifies
+the result rather than the exit code** — it re-reads `power.limit` and fails the service if
+it did not get 165 W, writing `/var/log/gpu-tune.log` either way. `rc_logger="YES"` is set in
+`/etc/rc.conf` so the next boot failure leaves a boot log behind.
+
+**This mattered.** At the 200 W default these cards sit at 79 °C, which the tuning notes
+record as 1 °C from thermal abort, and they draw ~70 W more than the figure the UPS budget
+was measured against.
+
+**Lesson worth keeping:** `/etc/local.d` is not a boot mechanism for anything another service
+depends on. It runs after everything, so it cannot order itself before anything.
+
+## Verifying
+
+Do not read the script. Reboot, then:
+
+```bash
+rc-status | grep gpu-tune                                  # expect started
+tail -3 /var/log/gpu-tune.log                              # expect a timestamp from THIS boot
+nvidia-smi --query-gpu=power.limit --format=csv,noheader   # expect 165.00 W, 165.00 W
+/opt/vllm-service/bench-vllm.sh 8007 3                     # expect ~33-34 tok/s
+```

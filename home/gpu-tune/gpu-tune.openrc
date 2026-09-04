@@ -1,0 +1,61 @@
+#!/sbin/openrc-run
+# Apply the A4500 power/clock profile BEFORE vLLM starts.
+#
+# WHY THIS IS A SERVICE AND NOT AN /etc/local.d SCRIPT (2026-09-03).
+#
+# It was a local.d script, and it silently never ran. Found by rebooting to verify an
+# unrelated fix: the cards came up at their 200 W default while every document said the cap
+# was "set at boot". Two separate problems, and the second is the one that matters:
+#
+#   1. `local` declares `after *`, so it waits for EVERY service in the runlevel. vllm-qwen38
+#      takes minutes to start (FP8 weight load + CUDA-graph capture), so `local` never got
+#      its turn and none of /etc/local.d ran -- not gpu-tune, not cpu-governor.
+#
+#   2. Even if it HAD eventually run, it would have applied the cap AFTER vLLM was already
+#      up and had captured its CUDA graphs at 200 W. Ordering was backwards: the cap has to
+#      be set BEFORE the consumer starts, not eventually.
+#
+# Hence an explicit ordered service: nvidia-persistenced -> gpu-tune -> vllm-qwen38.
+#
+# This is not cosmetic. At the 200 W default these cards sit at 79 C, which the tuning notes
+# record as 1 C from thermal abort, and they draw ~70 W more than the figure the UPS budget
+# was measured against.
+
+name="gpu-tune"
+description="A4500 power cap + clock profile (must precede vLLM)"
+
+depend() {
+    need nvidia-persistenced
+    before vllm-qwen38
+}
+
+start() {
+    ebegin "Applying A4500 tuning (165 W cap, unlocked clocks)"
+    local i=0
+    # Wait for the driver to actually answer rather than assuming it is ready -- the same
+    # lesson as vllm-qwen38 waiting for free VRAM instead of for a port to close.
+    while [ $i -lt 30 ]; do
+        nvidia-smi -L >/dev/null 2>&1 && break
+        i=$((i+1)); sleep 2
+    done
+    if ! nvidia-smi -L >/dev/null 2>&1; then
+        eend 1 "nvidia-smi not responding after 60s — GPUs left at driver defaults"
+        return 1
+    fi
+
+    /usr/local/bin/gpu-tune.sh >> /var/log/gpu-tune.log 2>&1
+
+    # Verify the RESULT, not the exit code.
+    local applied
+    applied=$(nvidia-smi --query-gpu=power.limit --format=csv,noheader,nounits | tr -d " " | paste -sd, -)
+    echo "$(date -Iseconds) power.limit now: ${applied}" >> /var/log/gpu-tune.log
+    case "$applied" in
+        165*) eend 0 ;;
+        *)    eend 1 "expected 165 W per card, got ${applied}"; return 1 ;;
+    esac
+}
+
+stop() {
+    # Nothing to undo: the cap is a hardware setting that resets with the driver.
+    return 0
+}
