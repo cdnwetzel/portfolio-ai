@@ -6,6 +6,7 @@ this repo before and it cost real time:
 | Repo file | Installs to | Role |
 |---|---|---|
 | `gpu-tune.sh` | `/usr/local/bin/gpu-tune.sh` | applies persistence mode, the **165 W** cap, unlocked clocks |
+| `gpu-cap-check.sh` | `/usr/local/bin/gpu-cap-check.sh` | every 5 min: verifies the cap, **reapplies and logs** if it has drifted |
 | `gpu-tune.openrc` | `/etc/init.d/gpu-tune` | OpenRC service: waits for the driver, applies, **verifies**, logs; ordered `before vllm-qwen38` |
 
 ## The 165 W cap is a tuning choice, not a limit
@@ -75,3 +76,23 @@ tail -3 /var/log/gpu-tune.log                              # expect a timestamp 
 nvidia-smi --query-gpu=power.limit --format=csv,noheader   # expect 165.00 W, 165.00 W
 /opt/vllm-service/bench-vllm.sh 8007 3                     # expect ~33-34 tok/s
 ```
+
+## The cap is now self-healing, which is what makes it safe to stop worrying about
+
+The boot-time service is the primary control, but it had to be treated as unproven until a
+real boot exercises it. So there is a second, independent control: `gpu-cap-check.sh` runs
+every 5 minutes from `/etc/cron.d/power-metrics` and:
+
+- exits silently when both cards read 165 W,
+- otherwise logs the drift to `/var/log/gpu-cap-check.log`, **reapplies the profile**, and
+  logs the resulting value.
+
+That bounds the exposure. Even in the worst case — the boot service somehow does not run —
+the cards sit at 200 W for at most five minutes rather than indefinitely, and it leaves a
+record saying so. Verified by resetting the cap to 200 W and running it: detected, reapplied,
+confirmed 165 W.
+
+This is deliberately belt-and-braces rather than a replacement. The service fixes the cause
+(ordering); the cron catches the case where the cause was misdiagnosed. Given this defect was
+*already* misdiagnosed once — the first fix assumed a driver race and changed nothing — a
+second, differently-shaped control is proportionate.
