@@ -57,7 +57,14 @@
 - q: "What GPU is in the verifier box?"
   kind: grounded
   expect_substrings: ["5060"]
-  forbid_substrings: ["amd gpu", "a4500"]
+  # "a4500" is claim-shaped with a CONTRASTIVE exemption rather than the historical default:
+  # a correct answer often locates the card by contrast ("the A4500s are in the T5810, not the
+  # verifier box"), and the KB's inventory sentence names both in one breath. "amd gpu" stays a
+  # plain substring — the asrock's Ryzen 9 is a CPU and calling it a GPU is wrong in any framing.
+  forbid_substrings:
+    - "amd gpu"
+    - match: "a4500"
+      unless: ["t5810", "not ", "inventory", "unlike", "other machine", "answerer", "generation"]
 - q: "How does this chat system work end to end?"
   kind: grounded
   expect_substrings: ["RAG", "Qdrant", "rerank"]
@@ -119,7 +126,17 @@
   # changelog chunk surfaces for this question only ~1 run in 4, so the earlier "verified
   # clean across 6 phrasings" was not proof — a handful of samples cannot clear an
   # intermittent behaviour.)
-  forbid_substrings: ["qwen2.5-7b", "qwen2.5 7b"]
+  #
+  # 2026-09-13: the workaround above is now general rather than per-question. Dropping "3060"
+  # here was the right call with substring matching, but the reasoning — "the forbid lives on
+  # the questions that ask what is running NOW, where any mention is unambiguously wrong" —
+  # was not quite true. A faithful answer to those questions ALSO quotes the retirement note,
+  # and that is desirable, not a defect. Claim-shaped rules encode what that comment was
+  # reaching for, so "3060" can be forbidden here too without punishing a correct sentence.
+  forbid_substrings:
+    - match: "3060"
+    - match: "qwen2.5-7b"
+    - match: "qwen2.5 7b"
 - q: "Tell me about Chris's SAP Business One work."
   kind: grounded
   expect_substrings: ["SAP", "B1"]
@@ -234,11 +251,24 @@
 - q: "What specific models are running on the AI Portfolio Chat system?"
   kind: grounded
   expect_substrings: ["qwen3.8-27b"]
-  forbid_substrings: ["3060", "qwen2.5-7b", "qwen2.5 7b"]
+  # CLAIM-SHAPED (2026-09-13). As bare substrings these hard-failed the deploy gate for the
+  # sentence "There is no RTX 3060 or 7B model in the current active system" — the exact fact
+  # they exist to protect — in an answer the judge scored 5/5. `Current Work 2026` carries the
+  # retirement note and is rank-3 for this question every time, so a faithful answer quotes it.
+  # The dict form scopes each match to ONE SENTENCE and exempts it when that sentence frames the
+  # mention as history; a wrong claim in any other sentence of the same answer still fails.
+  forbid_substrings:
+    - match: "3060"
+    - match: "qwen2.5-7b"
+    - match: "qwen2.5 7b"
 - q: "How does the out-of-band faithfulness verifier work?"
   kind: grounded
   expect_substrings: ["14b"]
-  forbid_substrings: ["3060", "qwen2.5-7b", "qwen2.5 7b"]
+  # Same collision: the verifier's own history names both, so a faithful answer quotes it.
+  forbid_substrings:
+    - match: "3060"
+    - match: "qwen2.5-7b"
+    - match: "qwen2.5 7b"
 
 # Cross-chunk conflation: "56 GB/s" is the NVLink transfer rate sitting near the VRAM
 # figures, and it came back as "2x A4500 (56 GB total VRAM)". Real capacity is 40 GB.

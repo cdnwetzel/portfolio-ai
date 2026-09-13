@@ -47,7 +47,21 @@ from pathlib import Path
 sys.path.insert(0, os.path.dirname(__file__))
 from run_diagnostic_battery import ask, BATTERY
 from selftest import FALLBACK_MARKERS, PHONE_RE, PROMPT_LEAK_MARKERS, MIN_GROUNDED_CHARS
-from expectations import any_fact_present
+from expectations import any_fact_present, forbid_hit as forbid_hit_fn
+
+# The generator is given a server-computed facts block (today's date, Chris's age) that is NOT in
+# any KB chunk, and api-proxy.py:948 appends the same block to the VERIFIER's evidence so a
+# correct server-sourced answer is not flagged unsupported for being absent from the corpus. This
+# harness never did, so it graded the age against evidence that structurally could not contain it:
+# "How old is Chris?" scored grounding=1 on 2026-09-13 with refused=False and substantive=True --
+# the judge was right, the question was unanswerable as posed. Confirmed: /api/retrieve for that
+# question returns 11,840 chars with zero occurrences of "born", "1982" or "birth".
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "cloud"))
+from context_manager import server_facts_block
+
+# Mirrors OWNER_BIRTHDATE in cloud/api-proxy.py -- keep them in sync. Same mirroring the
+# consistency battery does; api-proxy's module name has a hyphen and cannot be imported.
+OWNER_BIRTHDATE = os.environ.get("OWNER_BIRTHDATE", "1982-01-09")
 
 import yaml
 
@@ -131,10 +145,14 @@ def programmatic_signals(item: dict, result: dict) -> dict:
     # below relies on to tell "no expectation set" from "expected and missed".
     expect_match = any_fact_present(item.get("expect_substrings"), answer)
 
-    # Negative assertion: a forbidden substring is a hallucination/attribution regression.
+    # Negative assertion: a forbidden claim is a hallucination/attribution regression.
     # Store the offending string (not just a bool) so failures are self-explaining.
-    forbid = item.get("forbid_substrings") or []
-    forbid_hit = next((s for s in forbid if s.lower() in low), None)
+    # Entries may be plain strings (substring, whole answer) or {"match": ..., "unless": [...]}
+    # which is scoped to one SENTENCE and exempt when that sentence frames the mention as
+    # history -- see scripts/expectations.py. A bare "3060" used to hard-fail the sentence
+    # "There is no RTX 3060 or 7B model in the current active system", which is the very fact
+    # the rule protects, on an answer the judge scored 5/5.
+    forbid_hit = forbid_hit_fn(item.get("forbid_substrings"), answer)
 
     sig = {
         "transport_error": transport_error, "refused": refused,
@@ -314,6 +332,12 @@ async def run(url: str, items, judge_url, judge_model, retrieve_url="", evidence
         if judge_url and retrieve_url and item["kind"] == "grounded":
             try:
                 chunks = fetch_chunks(retrieve_url, item["q"])
+                # FIRST, not appended: build_evidence spends a char budget top-down and drops
+                # the tail, and this block is both tiny (~200 chars) and authoritative -- its
+                # own text tells the reader to trust it over retrieved documents. Ordering the
+                # rest by rerank score is unaffected.
+                chunks = [{"title": "Server facts", "source": "server",
+                           "content": server_facts_block(OWNER_BIRTHDATE)}] + chunks
             except Exception as e:
                 retrieve_error = str(e)[:120]
         if judge_url:

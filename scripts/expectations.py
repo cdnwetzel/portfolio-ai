@@ -34,6 +34,8 @@ Stdlib only, so tests/ can cover it offline.
 """
 from __future__ import annotations
 
+import re
+
 
 def normalize(expect) -> list[list[str]]:
     """-> one inner list per FACT, holding that fact's acceptable spellings (lowercased).
@@ -93,3 +95,72 @@ def missing_spellings(expect, corpus: str) -> list[str]:
     """
     low = corpus.lower()
     return [s for f in normalize(expect) for s in f if s not in low]
+
+# --- forbid rules -----------------------------------------------------------
+#
+# A forbid entry is a NEGATIVE assertion: "this answer must not claim X". Until 2026-09-13 both
+# harnesses matched it as a bare substring over the whole answer, which cannot tell a claim from
+# a mention of its own history. The bare `3060` rule hard-failed an answer the judge scored 5/5,
+# for the sentence "There is no RTX 3060 or 7B model in the current active system" -- the exact
+# fact the rule exists to protect. Six rules across four golden questions have that collision,
+# because the retirement notes live in `Current Work 2026`, which sits in the top-5 for all of
+# them.
+#
+# Two entry shapes, so the cheap case stays cheap:
+#
+#   "gb of storage"                    plain string: substring anywhere. Unchanged.
+#   {"match": "3060"}                  claim-shaped: scoped to ONE SENTENCE, and ignored if that
+#                                      same sentence frames the mention as history.
+#   {"match": "a4500", "unless": [..]} claim-shaped with an explicit exemption vocabulary.
+#
+# Sentence scoping is what makes this safe: "There is no RTX 3060 Ti" exempts itself, while
+# "the judge runs on a 3060 Ti" in a different sentence still fails. A whole-answer exemption
+# would let one correct retirement note launder a wrong claim elsewhere in the same answer.
+
+RETIREMENT_FRAMES = (
+    "retired", "replac", "no longer", "there is no", "there are no", "not in use",
+    "isn't in use", "is not in use", "former", "previous", "earlier", "supersed",
+    "removed", "decommission", "legacy", "used to", "prior to", "no rtx", "not part of",
+)
+
+_SENT_SPLIT = re.compile(r"(?<=[.!?])\s+|\n+")
+
+
+def split_sentences(text: str) -> list[str]:
+    return [s for s in _SENT_SPLIT.split(text or "") if s.strip()]
+
+
+def _present(needle: str, hay: str, use_regex: bool) -> bool:
+    return bool(re.search(needle, hay, re.I)) if use_regex else needle.lower() in hay.lower()
+
+
+def forbid_hit(entries, text: str, *, use_regex: bool = False):
+    """-> the offending entry's match string, or None.
+
+    `use_regex` is the default for PLAIN string entries: the golden set writes literals,
+    repeat_sample.py writes regexes. A dict entry may override it with "regex".
+    """
+    if not entries:
+        return None
+    sentences = None
+    for e in entries:
+        if isinstance(e, str):
+            match, unless, rx = e, None, use_regex
+        else:
+            # A dict entry is ALWAYS sentence-scoped. There is deliberately no dict spelling
+            # for whole-answer matching -- the plain-string form is that. YAML cannot tell an
+            # absent key from an explicit null, so both resolve to the default vocabulary
+            # rather than silently meaning different things.
+            match = e["match"]
+            unless = tuple(e["unless"]) if e.get("unless") else RETIREMENT_FRAMES
+            rx = e.get("regex", use_regex)
+        if unless is None:
+            if _present(match, text, rx):
+                return match
+            continue
+        if sentences is None:
+            sentences = split_sentences(text)
+        for sent in sentences:
+            if _present(match, sent, rx) and not any(_present(u, sent, False) for u in unless):
+                return match
+    return None

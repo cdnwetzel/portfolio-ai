@@ -99,3 +99,77 @@ def test_missing_spellings_reports_only_what_the_corpus_lacks():
 
 def test_missing_spellings_empty_when_all_present():
     assert E.missing_spellings(["a4500"], "two A4500 cards") == []
+
+
+# --- forbid rules: claim-shaped, sentence-scoped -----------------------------
+#
+# The defect these pin: a bare `3060` forbid hard-failed an answer the judge scored 5/5,
+# because the answer contained "There is no RTX 3060 or 7B model in the current active
+# system" -- the very fact the rule exists to protect. Six such rules across four golden
+# questions had the same collision, since the retirement notes live in a chunk that sits in
+# the top-5 for all of them.
+
+RETIRED_OK = "There is no RTX 3060 or 7B model in the current active system."
+PAST_OK = "It replaced an earlier Qwen2.5-7B on a 3060 Ti 8 GB."
+REAL_DEFECT = "The faithfulness judge runs on a 3060 Ti in the asrock B550."
+
+
+def test_plain_string_entry_is_unchanged_substring_match():
+    assert E.forbid_hit(["gb of storage"], "it has 40 GB of storage") == "gb of storage"
+    assert E.forbid_hit(["gb of storage"], "it has 40 GB of VRAM") is None
+
+
+def test_plain_string_entry_is_not_sentence_scoped():
+    # Whole-answer substring semantics, deliberately preserved for the 13 rules that want it.
+    assert E.forbid_hit(["amd gpu"], "First sentence. Then an amd gpu claim.") == "amd gpu"
+
+
+def test_claim_shaped_entry_exempts_a_correct_retirement_sentence():
+    assert E.forbid_hit([{"match": "3060"}], RETIRED_OK) is None
+    assert E.forbid_hit([{"match": "3060"}], PAST_OK) is None
+
+
+def test_claim_shaped_entry_still_catches_the_real_defect():
+    assert E.forbid_hit([{"match": "3060"}], REAL_DEFECT) == "3060"
+
+
+def test_a_correct_note_cannot_launder_a_wrong_claim_elsewhere():
+    # Scoping to ONE sentence is the whole point: a whole-answer exemption would let the
+    # retirement note excuse a wrong claim in a different sentence of the same answer.
+    assert E.forbid_hit([{"match": "3060"}], RETIRED_OK + " " + REAL_DEFECT) == "3060"
+
+
+def test_explicit_unless_vocabulary_overrides_the_default():
+    s = "The A4500s are in the T5810, not the verifier box."
+    assert E.forbid_hit([{"match": "a4500"}], s) == "a4500"          # default frames don't cover it
+    assert E.forbid_hit([{"match": "a4500", "unless": ["t5810", "not"]}], s) is None
+
+
+def test_explicit_null_unless_is_the_same_as_omitting_it():
+    # A dict entry ALWAYS means sentence-scoped; there is no dict spelling for whole-answer,
+    # because the plain-string form already is that. YAML cannot distinguish an absent key
+    # from an explicit null, so both must mean the same thing or the format is a trap.
+    assert E.forbid_hit([{"match": "3060", "unless": None}], RETIRED_OK) is None
+    assert E.forbid_hit([{"match": "3060"}], RETIRED_OK) is None
+    assert E.forbid_hit([{"match": "3060", "unless": None}], REAL_DEFECT) == "3060"
+
+
+def test_regex_mode_for_repeat_sample_entries():
+    pat = r"qwen2\.5[- ]7b"
+    assert E.forbid_hit([{"match": pat, "regex": True}], "It runs Qwen2.5-7B today.") == pat
+    assert E.forbid_hit([{"match": pat, "regex": True}], "That Qwen2.5 7B is retired.") is None
+
+
+def test_use_regex_default_applies_to_plain_entries():
+    assert E.forbid_hit([r"\b40\s*gb\b"], "it has 40 GB", use_regex=True) == r"\b40\s*gb\b"
+    assert E.forbid_hit([r"\b40\s*gb\b"], "it has 40 GB", use_regex=False) is None
+
+
+def test_empty_and_missing_entries():
+    assert E.forbid_hit([], "anything") is None
+    assert E.forbid_hit(None, "anything") is None
+
+
+def test_first_matching_entry_wins_and_is_returned():
+    hit = E.forbid_hit(["nope", {"match": "3060"}], REAL_DEFECT)
+    assert hit == "3060"

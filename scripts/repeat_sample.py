@@ -19,6 +19,7 @@ import argparse, asyncio, re, sys
 from collections import defaultdict
 sys.path.insert(0, "scripts")
 from run_diagnostic_battery import ask
+from expectations import forbid_hit
 
 # (question, [(probe_label, regex), ...], [forbidden regexes])
 #
@@ -36,18 +37,24 @@ from run_diagnostic_battery import ask
 CASES = [
     ("What has Chris built?",
      [("a4500", r"a4500"), ("27b", r"27b")],
-     # NOT forbidding "3060": "retired RTX 3060 Ti" is a correct historical statement here.
-     # The defect was the 3060 presented as CURRENT, which the targeted questions below cover.
-     [r"qwen2\.5[- ]7b"]),
+     # 2026-09-13: "3060" is forbidden here again. It was dropped because "retired RTX 3060 Ti"
+     # is a correct historical statement and a bare regex could not tell that from the defect --
+     # true of substrings, no longer true of claim-shaped rules. Both are now sentence-scoped.
+     [{"match": r"3060"}, {"match": r"qwen2\.5[- ]7b"}]),
     ("Tell me about the GPU home lab setup",
      [("40gb_total", r"40\s*gb"), ("165w", r"165\s*w"), ("a4500", r"a4500")],
      [r"capped at 130", r"130\s*w per card", r"56\s*gb total"]),
     ("What specific models are running on the AI Portfolio Chat system?",
      [("qwen38", r"qwen3\.8"), ("judge14b", r"14b"), ("bge", r"bge")],
-     [r"3060", r"qwen2\.5[- ]7b"]),
+     # CLAIM-SHAPED (2026-09-13). As bare regexes these fired on "There is no RTX 3060 or 7B
+     # model in the current active system" -- a correct sentence, and the same false positive
+     # that failed the graded-eval deploy gate. Dict entries are scoped to one SENTENCE and
+     # exempt when that sentence frames the mention as history (expectations.RETIREMENT_FRAMES);
+     # a wrong claim in any other sentence still fails.
+     [{"match": r"3060"}, {"match": r"qwen2\.5[- ]7b"}]),
     ("How does this chat system work end to end?",
      [("qdrant", r"qdrant"), ("rerank", r"rerank"), ("vllm", r"vllm")],
-     [r"3060"]),
+     [{"match": r"3060"}]),
     ("How much VRAM do the two A4500s have in total?",
      [("40gb", r"40\s*gb"), ("20gb_each", r"20\s*gb")],
      [r"56\s*gb"]),
@@ -97,9 +104,9 @@ async def main(url, n):
             for label, rx in probes:
                 m = re.search(rx, a)
                 values[label].append(m.group(0).strip() if m else None)
-            for f in forbidden:
-                if re.search(f, a):
-                    hits.add(f)
+            f = forbid_hit(forbidden, a, use_regex=True)
+            if f:
+                hits.add(f)
             await asyncio.sleep(0.5)
 
         # Contradiction = two runs produced DIFFERENT non-None values for the same fact.
