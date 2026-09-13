@@ -47,6 +47,7 @@ from pathlib import Path
 sys.path.insert(0, os.path.dirname(__file__))
 from run_diagnostic_battery import ask, BATTERY
 from selftest import FALLBACK_MARKERS, PHONE_RE, PROMPT_LEAK_MARKERS, MIN_GROUNDED_CHARS
+from expectations import any_fact_present
 
 import yaml
 
@@ -125,10 +126,10 @@ def programmatic_signals(item: dict, result: dict) -> dict:
     # signal. The golden set's contact question asserts the email IS offered.
     pii_leak = bool(PHONE_RE.search(answer))
     prompt_leak = any(m in low for m in PROMPT_LEAK_MARKERS)
-    expect = item.get("expect_substrings") or []
-    expect_match = None
-    if expect:
-        expect_match = any(s.lower() in low for s in expect)
+    # ANY-of-facts, where a nested list is one fact's alternative spellings
+    # (scripts/expectations.py). None when nothing was expected, which the 1-5 ladder
+    # below relies on to tell "no expectation set" from "expected and missed".
+    expect_match = any_fact_present(item.get("expect_substrings"), answer)
 
     # Negative assertion: a forbidden substring is a hallucination/attribution regression.
     # Store the offending string (not just a bool) so failures are self-explaining.

@@ -404,6 +404,20 @@ worth remembering:
   The router was meanwhile defaulting to `off_topic`, deflecting **13 of 40 golden-set `grounded`
   questions** with a canned redirect — a routing bug that no retrieval metric could see. Default is
   now `on_topic`, with grounding left to `RAG_MIN_SCORE` where it always was. See DEFECT_LEDGER #6–8.
+  (That last clause was itself wrong and is corrected above: `RAG_MIN_SCORE` has been 0.0/DISABLED
+  since 2026-06-18, so grounding was left to the *system prompt*, not to a threshold.)
+- **2026-09-12** — `eval/golden_set.yaml`'s `expect_substrings` grew one level of nesting so a
+  list can express "one fact, several spellings" as well as "several facts". It had to: the field
+  was read as ANY-of-strings against the answer by `eval_graded.py` and ALL-of-strings against the
+  retrieved context by `compare_retrieval.py`, so `["6", "six"]` was two required facts on the
+  context side while the KB only ever writes the digit. Three items were pinned at "partial"
+  permanently and the retrieval metric's ceiling was **33/36 (92%), not 100%**. Both readings now
+  come from one implementation, `scripts/expectations.py` (unit-tested in
+  `tests/test_expectations.py`). The ceiling is 36/36. **This does not void the three declined
+  retrieval A/Bs** — a constant ceiling applies to both arms, so it cost sensitivity, not
+  validity; those 3 rows simply could never show a difference. Also fixed the same day: the
+  context-window item still expected `"16"` from the 14B/16K era, which nothing true contains
+  (the model has served 32,768 since 2026-08-26) and which `"16 GB"` satisfied by accident.
 
 **When you change the system, change the docs in the same commit.** A wrong doc is worse than a
 missing one: it is confidently wrong, and it survives long after the person who knew better moved on.

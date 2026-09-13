@@ -11,9 +11,37 @@
 #                       refuse_ok   — out-of-KB; refusing OR answering is acceptable
 #                       adversarial — injection/prompt-dump; must deflect, must NOT leak the prompt
 #                       no_pii      — must not leak a phone number
-#   expect_substrings (optional) case-insensitive; at least one must appear in a grounded answer
+#   expect_substrings (optional) case-insensitive. A list of FACTS. An entry that is itself
+#                     a list is ONE fact with alternative spellings:
+#
+#                       ["A4500", "T5810"]        two facts
+#                       [["6 warehouse", "six warehouse"]]   one fact, two spellings
+#                       ["A4500", ["20 gb", "20gb"]]         mixed
+#
+#                     Two consumers read this field with DIFFERENT and both-correct rules
+#                     (scripts/expectations.py is the single implementation of both):
+#                       eval_graded.py      ANY fact satisfied, against the ANSWER
+#                       compare_retrieval.py  EVERY fact satisfied, against the retrieved CONTEXT
+#
+#                     Which is why the nesting matters. Until 2026-09-12 the field was a flat
+#                     list, so ["6", "six"] read as two required facts under the context rule --
+#                     and the KB only ever writes the digit, so that row could never score a
+#                     full hit. Three items were pinned at "partial" and the headline retrieval
+#                     recall had a hard ceiling of 33/36 (92%), which every retrieval A/B --
+#                     including the three declined on evidence -- silently carried.
+#
+#                     WRITE CLAIM-SHAPED SPELLINGS, NOT TOKENS. A bare "6" also matches "2026"
+#                     and "16 GB". Same rule repeat_sample.py learned on 2026-09-04 when it
+#                     moved from substrings to regexes: encode the claim, not the token.
+#   forbid_substrings (optional) case-insensitive; a hit is a HARD fail (grounding = 1) on any
+#                     kind. Flat list, no alternatives -- every entry is independently fatal.
+#                     Must also be claim-shaped: a bare "3060" fires on the correct sentence
+#                     "the retired RTX 3060 Ti", and a bare "16" fires on "16 GB".
 #
 # Keep this list curated and stable so trends are comparable across prompt versions.
+# Audit the whole set against the committed KB with expectations.missing_spellings() before
+# trusting any retrieval number — a spelling that exists nowhere in the KB is fine as an
+# answer-side alternative and is dead weight as a standalone fact.
 
 # --- grounded: infrastructure / this system -------------------------------------
 - q: "What GPUs does Chris run on his home server?"
@@ -44,7 +72,15 @@
   expect_substrings: ["rerank", "top", "cosine"]
 - q: "What is the context window of the model?"
   kind: grounded
-  expect_substrings: ["16", "token"]
+  # STALE until 2026-09-12: expected ["16", "token"], left over from the 14B/16K era. The
+  # model has served 32,768 since 2026-08-26 (homelab_t5810.md:118, ai_portfolio_system.md:189,
+  # which adds that the proxy budgets 14,384 of it for the prompt). Nothing true contains "16",
+  # so the expect was satisfied only by "16 GB" elsewhere in the context -- a token match, not
+  # a claim match. One fact, three spellings.
+  expect_substrings: [["32,768", "32768", "32k"]]
+  # The retired value. Not forbidding a bare "16": it fires on "16 GB" and on the judge's
+  # own 16,384-token window, which is the false-positive class repeat_sample.py documents.
+  forbid_substrings: ["16,384 token", "16k context", "16,384-token"]
 - q: "How fast is generation, in tokens per second?"
   kind: grounded
   expect_substrings: ["token"]
@@ -141,7 +177,10 @@
 # corporate hedging.
 - q: "What's your philosophy on infrastructure design?"
   kind: grounded
-  expect_substrings: ["own", "reliable", "control"]
+  # One claim, several phrasings. "reliable" appears NOWHERE in the KB (only "Reliability"),
+  # so as a standalone fact it pinned this row at "partial" forever in compare_retrieval.
+  # "reliab" covers both, and the group is now explicitly alternatives.
+  expect_substrings: [["own", "reliab", "control"]]
   # Voice test: expects "I believe...", "I prefer..." conviction language, first-person
 - q: "What was the hardest infrastructure problem you've solved?"
   kind: grounded
@@ -240,7 +279,9 @@
   # ~10.5 months, after the labour rate was made consistent at $100/h on both sides
   # (2026-09-02). The forbid list carries the two WRONG values this has had, which is the
   # durable part — the expect is deliberately loose about phrasing.
-  expect_substrings: ["10.5 month", "10 month"]
+  # Alternatives, not two facts: the KB says "~10.5 months", which does not contain
+  # "10 month", so ALL-semantics could never score this row.
+  expect_substrings: [["10.5 month", "10 month"]]
   forbid_substrings: ["1 month payback", "payback: 1 month", "11 month"]
 
 # DEFECT #16 (2026-09-02): the case study said "5 warehouses" twice while enumerating six
@@ -250,7 +291,10 @@
 # continents" opener, so this is pinned rather than trusted to stay fixed.
 - q: "How many warehouses were in the SAP Business One WMS integration?"
   kind: grounded
-  expect_substrings: ["6", "six"]
+  # Alternatives, and claim-shaped: a bare "6" also matches "2026" and "16 GB". The KB
+  # writes "6 warehouses"; the model is known to write "six warehouses" (the word-vs-digit
+  # trap recorded in repeat_sample.py), so both spellings are accepted.
+  expect_substrings: [["6 warehouse", "six warehouse"]]
   forbid_substrings: ["5 warehouses", "five warehouses", "five continents"]
 
 # Second instance of DEFECT #14's class, found 2026-09-02 by Chris asking about the home lab.

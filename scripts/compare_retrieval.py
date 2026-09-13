@@ -26,9 +26,13 @@ Usage:
 """
 import argparse
 import json
+import os
 import sys
 import urllib.request
 from pathlib import Path
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from expectations import facts_found
 
 import yaml
 
@@ -113,10 +117,15 @@ def main():
             ranked = rerank(args.rerank_url, it["q"], cands)
             for k in args.top_k:
                 text = " ".join(d["content"] for d in cap_per_doc(ranked, k, args.max_per_doc)).lower()
-                found = [s for s in it["expect_substrings"] if s.lower() in text]
-                if len(found) == len(it["expect_substrings"]):
+                # Every FACT must be present, but any one of its spellings will do
+                # (scripts/expectations.py). Before that distinction existed, an item
+                # like ["6", "six"] could never score a full hit because the KB only
+                # ever writes the digit -- three items were pinned at "partial" and the
+                # ceiling was 33/36, not 36/36.
+                n_found, n_total = facts_found(it["expect_substrings"], text)
+                if n_found == n_total:
                     hits[k] += 1
-                elif found:
+                elif n_found:
                     partial[k] += 1
 
         results[coll] = {"points": pts, "hits": hits, "partial": partial}
