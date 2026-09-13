@@ -19,9 +19,16 @@
 # internal allocator a base of 8007 and walk it into 8008/8009 — the sibling backend slots.
 # The launcher now takes the serving port as VLLM_SERVE_PORT and unsets VLLM_PORT before exec.
 #
-# DELIBERATELY NOT BUNDLED: this does NOT enable prefix caching. It strips any leftover
-# VLLM_EXTRA_ARGS so the following experiment is measured against a clean baseline. Run
-# 09-vllm-experiments.sh afterwards. One change per restart.
+# WHAT THIS DOES TO PREFIX CACHING (changed 2026-09-13 -- the earlier header said the
+# opposite and was left stale for a few hours). The launcher installed here carries
+# `--enable-prefix-caching` in its permanent argv, so running this KEEPS prefix caching on
+# while moving it out of conf.d's VLLM_EXTRA_ARGS. That matters: VLLM_EXTRA_ARGS is the
+# EXPERIMENT slot, it is meant to be reverted, and while it is occupied
+# 09-vllm-experiments.sh refuses to start -- which currently blocks the ngram experiment.
+# Net effect: same engine behaviour, correct mechanism, slot freed.
+#
+# To turn prefix caching OFF instead, remove the `--enable-prefix-caching` line from
+# home/vllm-service/start-qwen38.sh before running this.
 #
 # THE SITE IS DOWN for the restart window (a 29 GB model load, typically 2-7 min).
 #

@@ -293,11 +293,18 @@ CUDAHOSTCXX=/usr/bin/g++-14      # Gentoo ships gcc 15; CUDA hard-fails above 14
                                  # flashinfer JIT-compiles at engine init
 # Verify after any restart:  /opt/vllm-service/bench-vllm.sh 8007 3   -> expect ~27-30 tok/s
 
-# --enable-prefix-caching       # IN THE REPO LAUNCHER, NOT YET DEPLOYED (2026-09-13).
-#   Measured and favourable, but its quality evidence was gathered while DEFECT_LEDGER #17
-#   was still corrupting context, so it is gated on a clean-pipeline re-run before
-#   `10-install-service-files.sh` promotes it. Live `/opt` does not have it yet.
-#   Kept in the LAUNCHER's argv rather than conf.d (not conf.d).
+# --enable-prefix-caching       # LIVE since 2026-09-12 23:32, via the EXPERIMENT SLOT.
+#   Not an intentional deployment: the `prefix` experiment run was never reverted, so
+#   conf.d's VLLM_EXTRA_ARGS has been serving production for ~14h. Tidy with
+#   `10-install-service-files.sh`, which promotes the flag into the launcher's permanent
+#   argv and frees the slot (the slot being occupied BLOCKS the ngram experiment).
+#   The clean-pipeline re-gate it was being held for has since happened, accidentally but
+#   validly: everything measured after the DEFECT_LEDGER #17 fix ran with it on --
+#   repeat_sample 50 generations (0 UNSTABLE, 0 transport errors) and a full graded eval
+#   (PASSED, 4.75, 0 transport errors). NOTE BOTH BASELINES WERE MEASURED WITH IT ON; do
+#   not later read 4.64/4.75 as no-prefix-caching numbers. There is still NO comparison
+#   arm -- no clean-pipeline measurement with it OFF -- so the claim is "passes the gates",
+#   not "better than off".
 #   vLLM 0.27.1 defaults it off for this model: arg_utils.py:2604 computes
 #   `is_prefix_caching_supported and not is_hybrid`, and Qwen3.8 is hybrid, so it is
 #   supported-but-opt-in. Measured: TTFT 1342/1354 -> 503/491 ms on full 192-token
