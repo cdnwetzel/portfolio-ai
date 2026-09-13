@@ -42,6 +42,16 @@ ALIAS_GROUPS: List[List[str]] = [
     ["favorite", "favourite", "preferred", "prefers", "preference", "enjoys most", "go-to"],
     ["nvlink", "tensor parallel", "tensor parallelism"],
     ["websocket", "streaming", "real-time chat", "real time chat"],
+    # Hindsight vocabulary reaches nothing in the KB, which writes its reflection as "Lessons
+    # Learned" (AVD, SAP, ai_portfolio_iterations). Measured 2026-09-13 on the golden question
+    # "What would you do differently if you started over?": top rerank score 0.0031 -- BELOW the
+    # 0.0046 lowest-on-topic floor in verify_gate.py, i.e. indistinguishable from off-topic -- and
+    # rank-1 was an unrelated chunk, so the model correctly refused. Appending this group's terms
+    # lifts it to 0.0104 with the AVD Lessons chunk at rank 1; the same question phrased in the
+    # KB's own words scores 0.5137. The content was always there; the words never met.
+    ["lessons learned", "lesson", "hindsight", "do differently", "done differently",
+     "started over", "start over", "mistakes", "what went wrong", "retrospective",
+     "looking back", "in retrospect"],
 ]
 
 # Cap appended terms so the embedding stays anchored to the real query.
