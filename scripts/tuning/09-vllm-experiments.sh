@@ -390,8 +390,12 @@ R=$(curl -s -m 120 "http://127.0.0.1:$PORT/v1/completions" -H 'Content-Type: app
     | python3 -c 'import json,sys; print((json.load(sys.stdin)["choices"][0]["text"] or "").strip()[:20])' 2>/dev/null)
 [ -n "$R" ] && echo "    PASS -> \"$R\"" || { echo "    FAIL — auto-reverting"; revert; exit 4; }
 
-echo; echo "--- decode throughput ---"
-( cd /opt/vllm-service && ./bench-vllm.sh "$PORT" 3 2>&1 | grep -E "^  run |MEAN" )
+echo; echo "--- decode throughput (CONTENTION-GATED) ---"
+# bench-vllm.sh measures SINGLE-STREAM decode; vLLM's continuous batching means a concurrent
+# request shares the step rather than queueing, so the bench collapses while aggregate rises.
+# Caught live 2026-09-13 (running=1->2->3, bench read 33.4->23.1->20.0). bench_quiet.sh
+# invalidates any window where peak Running:N > 1.
+"$(dirname "$0")/bench_quiet.sh" 3 || echo "    ^^ row's decode number is INVALID — re-run quiet"
 
 echo; echo "--- workload probes (TTFT + repeat-prefix + quoting) ---"
 python3 /home/chris/tuning/exp_probe.py 2>&1 | sed 's/^/  /'
