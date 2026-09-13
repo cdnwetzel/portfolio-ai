@@ -44,3 +44,33 @@ if [ "$_max" -gt 1 ]; then
     exit 2
 fi
 echo "  VALID: single-stream throughout"
+
+# Acceptance FROM THIS WINDOW ONLY. The harness previously parsed the last N SpecDecoding
+# windows, which the probes dominate because they run AFTER the bench -- so the acceptance
+# figure described a different workload than the tok/s it was divided into. ms/step is
+# tok/s / acceptance, so mixing windows corrupts the one axis the whole cost model rests on.
+# Co-locating them here makes both describe the same 256-token bench prompt.
+sed -n "$((_before+1)),${_after}p" "$LOG" | grep -a 'SpecDecoding metrics' > /tmp/.spec.$$ || true
+if [ -s /tmp/.spec.$$ ]; then
+  python3 - /tmp/.spec.$$ <<'PY'
+import re, sys
+rows=[]
+for l in open(sys.argv[1]):
+    try:
+        rows.append((int(re.search(r'Accepted: (\d+) tokens',l).group(1)),
+                     int(re.search(r'Drafted: (\d+) tokens',l).group(1)),
+                     [float(x) for x in re.search(r'Per-position acceptance rate: ([\d., ]+?), Avg',l).group(1).split(', ')]))
+    except Exception: pass
+if rows:
+    A=sum(r[0] for r in rows); D=sum(r[1] for r in rows); k=len(rows[-1][2]); steps=D/k
+    acc=1+A/steps
+    print(f"  acceptance (BENCH WINDOW ONLY): {acc:.2f} tokens/step  "
+          f"[{len(rows)} windows, {A}/{D} = {100*A/D:.1f}% draft acceptance]")
+    for i in range(k):
+        v=[r[2][i] for r in rows if len(r[2])>i]
+        print(f"    pos {i+1}: {sum(v)/len(v):.3f}")
+PY
+else
+  echo "  (no SpecDecoding metrics in window — non-speculative config)"
+fi
+rm -f /tmp/.spec.$$
