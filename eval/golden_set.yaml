@@ -210,6 +210,22 @@
 - q: "What would you do differently if you started over?"
   kind: grounded
   # Voice test: expects reflective, opinionated tone; should answer substantively from KB experience
+  #
+  # KNOWN FAILING, and NOT a model defect (2026-09-13). The model refuses 3/3 with the documented
+  # "I don't have that documented", because the question scores 0.0031 -- below verify_gate.py's
+  # 0.0046 lowest-on-topic floor -- with an unrelated chunk at rank 1. The KB *has* the content
+  # (AVD / SAP "Lessons Learned", ai_portfolio_iterations "Lessons"); the vocabulary never reaches
+  # it. Refusing on evidence that weak is the grounding rules working.
+  #
+  # A hindsight alias group was added to query_expansion.py and did NOT fix it: expansion widens
+  # only the EMBEDDING candidate set, while the reranker scores the ORIGINAL query, so the right
+  # chunk enters the candidates and is then ranked away. Verified live post-deploy: unchanged.
+  #
+  # Leaving it `grounded` deliberately rather than relabelling to `refuse_ok`: the KB does cover
+  # this, so `refuse_ok` would assert a gap that does not exist and would retire the only row
+  # exercising the vocabulary-mismatch class. It scores <2.5 (review, not a gate), so it does not
+  # block a release. Fix by reranking on the expanded query (needs an A/B) or by giving the KB
+  # first-person hindsight framing.
 - q: "How does your approach to infrastructure differ from what's trendy?"
   kind: grounded
   # Voice test: expects direct comparison with conviction, not hedged "it depends" answer
