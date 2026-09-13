@@ -53,7 +53,8 @@ T5810 Home Server / precision-t5810 (Gentoo/OpenRC) — 2x RTX A4500 NVLink, 256
 ├─ Qdrant (port 6333) — dense 768-d cosine. Live counts: `/api/system-info`, which reads
 │  them from the collection. Deliberately not written here — see the note below.
 ├─ Embedding service (port 8005) — BAAI/bge-base-en-v1.5, 768-d, CPU
-└─ compress service (port 8788) — token compression (COMPRESS_URL)
+└─ compress service (port 8788) — token compression. **Was live and corrupting the
+│     generator's evidence until 2026-09-13; see DEFECT_LEDGER #17.** Keep COMPRESS_URL unset.
     ↓ tunnel also forwards :8016 → asrock:8006 (GPU reranker) and :8007 → asrock (verifier)
 asrock B550 (Gentoo/OpenRC) — RTX 5060 Ti 16 GB, 64 GB RAM
 ├─ Reranker service (port 8006, GPU) — bge-reranker-base, 15.8x faster than CPU
@@ -105,6 +106,15 @@ A deterministic **prompt-extraction guardrail** (`cloud/guardrails.py`) refuses
 "reveal/repeat your prompt"-style attacks before they reach the LLM. A **graded eval**
 (`scripts/eval_graded.py` + `eval/golden_set.yaml`) gates changes. A **hybrid dense+BM25** path
 exists (`HYBRID_SEARCH`) but is **OFF** — an A/B showed it regressed on this small KB (4.41 vs 4.82).
+
+> **CONFOUNDED — read DEFECT_LEDGER #17 before citing anything in this section.** From
+> 2026-06-22 to 2026-09-13 the VPS handed the generator *compressed* context, losing ~45% of
+> tokens including device names ("Ti") and counts ("two"). Every grounding figure below was
+> measured through that. The deltas survive (both arms compressed); the absolute numbers and
+> the "settled" verdict do not. Specifically, "candidates 6-8 add tokens, not evidence" is
+> suspect: a bigger prompt feeds a compressor that strips a fixed fraction, so the extra
+> evidence was partly destroyed before generation. `compare_retrieval.py`'s 20/20 is clean —
+> it bypasses the proxy. **Re-measure before treating this as closed.**
 
 **"More retrieval" has now lost three A/Bs in a row on this KB.** Hybrid dense+BM25 (4.41 vs
 4.82), `chunk_size=250` (19/20 vs 20/20), and — measured 2026-09-01 — wider retrieval:

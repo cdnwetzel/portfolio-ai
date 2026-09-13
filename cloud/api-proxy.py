@@ -93,6 +93,22 @@ COMPRESS_TIMEOUT = float(os.environ.get("COMPRESS_TIMEOUT", "3.0"))
 # for cwdotcom's narrow-fact RAG queries. To work around this, the headroom-lib
 # service on T5810 runs with HEADROOM_DISABLE_KOMPRESS=1 (kompress off,
 # structural-only). Result: 47% real savings, full answer detail preserved.
+#
+# *** THAT LAST CLAIM IS FALSE. Measured 2026-09-13, DEFECT_LEDGER #17. ***
+# "Structural-only" still strips short words it scores as low-information, and on a factual
+# corpus those ARE the facts. On the real prompt for one golden-set-shaped question
+# (2,982 -> 1,643 tokens, 44.9% saved): "Ti" 8 -> 2, the word "two" 6 -> 4, "RTX 5060 Ti"
+# 3 -> 1, and bare "RTX 5060" -- a device that does not exist on this fleet -- 0 -> 2.
+#   "on the **RTX 5060 Ti 16 GB** in the asrock B550"  ->  "on **RTX 5060 16 in B550"
+#   "the complete GPU inventory: two A4500s and one 5060 Ti."  ->  "inventory: A4500s one 5060 Ti."
+# It mangles the GROUNDING rules above as well. Live effect: 12/18 answers named a nonexistent
+# RTX 5060, versus 0/16 with the same chunks uncompressed. The model was reproducing corrupted
+# evidence, not hallucinating.
+#
+# Note what made this invisible: PROMPT_VERSION hashes the UNCOMPRESSED prompt, the verifier is
+# sent UNCOMPRESSED evidence_docs, and every eval harness reads /api/retrieve. Nothing in the
+# system ever looked at the text actually handed to the generator. If compression is ever
+# reconsidered, gate it on device-name and numeric integrity, never on saved_pct.
 # Keeping these env knobs in case structural compressors honor them more
 # strictly in future, or a future caller pointed at a kompress-on service
 # wants to tune aggressiveness. Defaults are conservative.

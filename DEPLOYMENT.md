@@ -59,7 +59,7 @@ VPS to the T5810 and forwards, all bound to `127.0.0.1` on the VPS:
 | 8005 | T5810:8005 | embed-service |
 | 8006 | T5810:8006 | rerank-service |
 | 6333 | T5810:6333 | Qdrant |
-| 8788 | T5810:8788 | headroom-lib compressor (optional; `COMPRESS_URL` unset = disabled) |
+| 8788 | T5810:8788 | headroom-lib compressor — **was ENABLED in production, not "unset = disabled" as this line claimed until 2026-09-13.** It lived in `/etc/systemd/system/api-proxy.service.d/headroom.conf`, untracked by the repo, and was corrupting the generator's evidence (DEFECT_LEDGER #17). Do not re-enable without a device-name and numeric integrity gate. |
 | 8007 | asrock:8007 | verifier — note: routed **via the T5810** over the home LAN |
 
 Per-machine config lives in `/etc/default/portfolio-ai-tunnel` on the VPS (**not** in the

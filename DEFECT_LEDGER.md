@@ -8,6 +8,134 @@
 
 ## OPEN DEFECTS (Priority Order)
 
+### 17. P0 — Context compression silently corrupts the evidence the generator sees
+**Found 2026-09-13.** The VPS routes every chat turn through the Headroom compressor and the
+generator is given the **compressed** text. At production scale it removes 44.9% of tokens by
+deleting short "low-information" words — which on a factual corpus are the facts.
+
+Measured on the real `SYSTEM_PREFIX` + the real retrieved chunks for
+"What specific models are running on the AI Portfolio Chat system?" (2,982 → 1,643 tokens):
+
+| token | before | after |
+|---|---|---|
+| `"Ti"` | 8 | **2** |
+| the word `"two"` | 6 | **4** |
+| `"16 GB"` | 2 | **1** |
+| `RTX 5060 Ti` | 3 | **1** |
+| bare `RTX 5060` (a device that does not exist here) | 0 | **2** |
+
+Verbatim damage:
+```
+BEFORE  on the **RTX 5060 Ti 16 GB** in the asrock B550
+AFTER   on **RTX 5060 16 in B550
+BEFORE  That is the complete GPU inventory: two A4500s and one 5060 Ti.
+AFTER   inventory: A4500s one 5060 Ti.
+```
+
+**It also mangles the GROUNDING RULES themselves.** The compressed system prompt reads:
+> `GROUNDING (mandatory answer): fact state ONLY knowledge shown No outside knowledge, no
+> hallucination. don't documented information, don't documented in knowledge base.`
+
+The instruction *"If I don't have documented information, I say: 'I don't have that documented
+in my knowledge base.'"* is reduced to fragments. The `SYSTEM_SUFFIX` FOLLOWUPS scaffold does
+not survive intact either.
+
+**Production impact, measured against live traffic-shaped queries:**
+
+| context | answers naming a nonexistent `RTX 5060` |
+|---|---|
+| uncompressed (direct to vLLM, production sampling) | **0 / 16** |
+| compressed (live site) | **12 / 18 (67%)** |
+
+6/6 on two separate phrasings. One answer also fabricated a fourth GPU —
+"two RTX A4500s, one RTX 5060, and one RTX 5060 Ti" — a downstream consequence of the name
+being split and the count word deleted.
+
+**The model was not hallucinating. It was faithfully reproducing corrupted evidence.**
+
+**What this retroactively explains.**
+- `docs/claims.md`: *"'Grounded' ≠ 'correct' — two arithmetic errors passed every control."*
+  A compressor that deletes the word **"two"** produces arithmetic errors by construction.
+- `cloud/api-proxy.py`'s comment claims *"47% real savings, full answer detail preserved"*.
+  **Falsified.**
+- `PROMPT_VERSION` hashes the **uncompressed** prompt, so every quality figure attributed to a
+  prompt version was measuring a prompt the model never received.
+- The verifier is sent **uncompressed** `evidence_docs` while the generator saw compressed
+  text, so the judge grades answers against evidence the generator never had. A
+  compression-induced error can look "unsupported" for the wrong reason, or pass as a
+  near-paraphrase.
+- Nothing in the eval suite could see this: every harness reads `/api/retrieve` (uncompressed)
+  or the final answer, never the text actually handed to the generator.
+
+**Why it went unnoticed for so long.**
+`plans/open-items-2026-08-29.md:18` recorded *"Compress :8788 | Listening, no /health |
+`COMPRESS_URL` set in unit; undocumented"* on **2026-08-29** — spotted, filed as a
+documentation gap, never assessed as a risk. Meanwhile `DEPLOYMENT.md:62` states
+*"optional; `COMPRESS_URL` unset = disabled"*, and the repo's `cloud/systemd/` copies contain
+no `COMPRESS` at all. It lived only in
+`/etc/systemd/system/api-proxy.service.d/headroom.conf` — out-of-repo config, the loss vector
+CLAUDE.md already names from closed defect #5.
+
+**Fix:** disable it. Compression buys nothing on this path — `MAX_CONTEXT_TOKENS` is 14,384 and
+this query's prompt is ~2,982 tokens, so the budget was never tight; tokens are free on owned
+hardware; it adds **~1,017 ms** mean latency (`:8788/stats`); and it rewrites the prefix that
+prefix caching depends on.
+
+```
+# on the VPS
+mv /etc/systemd/system/api-proxy.service.d/headroom.conf{,.disabled-20260913}
+systemctl daemon-reload && systemctl restart api-proxy.service
+```
+
+**Status: FIXED 2026-09-13, verified.** `headroom.conf` renamed to
+`headroom.conf.disabled-20260913-042628` on the VPS, `daemon-reload` + `restart api-proxy`.
+`COMPRESS_URL` confirmed absent from the live process environment; service active; `/health` 200.
+
+**Verification — the same probe, same three phrasings, before and after:**
+
+| | answers naming a nonexistent `RTX 5060` |
+|---|---|
+| compression ON | **12 / 18 (67%)** — 6/6 on two phrasings |
+| compression OFF | **0 / 18 (0%)** |
+
+The compressor's own call counter stayed frozen at 3735 across all 18 post-fix generations,
+independently confirming the proxy no longer calls it.
+
+**Exposure window: 2026-06-22 to 2026-09-13, ~3 months.** `headroom.conf` mtime is
+2026-06-22 03:53. The journal shows its first minutes as
+`Headroom compress failed (ReadTimeout); falling back to uncompressed` at 03:48–03:50 — it was
+failing *safe* at the 3 s default, and was then given `COMPRESS_TIMEOUT=15` until it succeeded.
+It was tuned into working rather than questioned.
+
+**What that invalidates, and what it does not.**
+
+| measured through the proxy — ran on corrupted context | measured directly — unaffected |
+|---|---|
+| every `eval_graded.py` grounding figure since 2026-06-22: 4.41, 4.82, 4.594, 4.656, 4.78, 4.48, 4.59, 4.69 | `compare_retrieval.py` (reads Qdrant/embed/rerank directly) — **20/20 vs 19/20 stands** |
+| `consistency_battery.py` 7/7 | `exp_probe.py`, `bench-vllm.sh` (direct to vLLM :8007) |
+| `repeat_sample.py`'s 150-generation run | the reranker head/tail truncation probe |
+| the verifier's live faithfulness figures, including hybrid's 0.58 → 0.82 | |
+
+**This reopens the retrieval A/Bs, on evidence.** CLAUDE.md requires "a hypothesis about what
+the pipeline is actually missing" before revisiting them. The hypothesis is now concrete: ~45%
+of the retrieved evidence was deleted between retrieval and generation. The 2026-09-01
+conclusion that "candidates 6-8 add tokens, not evidence" is specifically suspect, because a
+larger prompt feeds a compressor that removes a roughly fixed *fraction* — so the added
+evidence was partly shredded before the generator could use it. The A/B **deltas** are not void
+(both arms were compressed) but "more retrieval does not help" and "more retrieval does not help
+while 45% of it is being destroyed" are different findings, and only the second was tested.
+Re-run against a clean pipeline before treating any of it as settled.
+
+**Follow-ups this implies.**
+1. Track the drop-in in `cloud/systemd/` so it can never again be live-but-untracked.
+2. Correct `DEPLOYMENT.md:62` and `cloud/api-proxy.py`'s "detail preserved" comment.
+3. Add a harness that inspects the text **actually sent to the generator**, not `/api/retrieve`.
+   Every existing gate was blind to this by construction.
+4. If compression is ever reconsidered, it must be gated on device-name and numeric integrity,
+   not on `saved_pct`.
+
+---
+
 ### 16. SAP Case Study Says "5 Warehouses" But Lists 6 — CLOSED 2026-09-02
 **Was:** `sap_business_one_integration.md` stated **"5 warehouses spanning 4 continents,
 6 regions"** (lines 8 and 24) while enumerating **six** sites: NYC, Miami, London, Athens,
