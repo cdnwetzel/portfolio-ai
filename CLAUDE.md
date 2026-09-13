@@ -293,12 +293,13 @@ CUDAHOSTCXX=/usr/bin/g++-14      # Gentoo ships gcc 15; CUDA hard-fails above 14
                                  # flashinfer JIT-compiles at engine init
 # Verify after any restart:  /opt/vllm-service/bench-vllm.sh 8007 3   -> expect ~27-30 tok/s
 
-# --enable-prefix-caching       # LIVE since 2026-09-12 23:32, via the EXPERIMENT SLOT.
-#   Not an intentional deployment: the `prefix` experiment run was never reverted, so
-#   conf.d's VLLM_EXTRA_ARGS has been serving production for ~14h. Tidy with
-#   `10-install-service-files.sh`, which promotes the flag into the launcher's permanent
-#   argv and frees the slot (the slot being occupied BLOCKS the ngram experiment).
-#   The clean-pipeline re-gate it was being held for has since happened, accidentally but
+# --enable-prefix-caching       # LIVE and DEPLOYED in the launcher's argv (2026-09-13).
+#   Verified from live sources, not files: flag in /proc/<pid>/cmdline,
+#   enable_prefix_caching=True resolved, conf.d's VLLM_EXTRA_ARGS slot EMPTY, repo launcher
+#   byte-identical to /opt. It had been live accidentally since 2026-09-12 23:32 via the
+#   experiment slot (a `prefix` run that was never reverted); it now runs through the
+#   documented channel and the slot is free for the ngram experiment.
+#   The clean-pipeline re-gate it was being held for happened, accidentally but
 #   validly: everything measured after the DEFECT_LEDGER #17 fix ran with it on --
 #   repeat_sample 50 generations (0 UNSTABLE, 0 transport errors) and a full graded eval
 #   (PASSED, 4.75, 0 transport errors). NOTE BOTH BASELINES WERE MEASURED WITH IT ON; do
