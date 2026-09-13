@@ -177,7 +177,15 @@ Arm: `prefix + ngram`, against the `prefix only` arm measured the night before.
 |---|---|
 | baseline, no flags | 34.2 tok/s |
 | prefix only | 33.8 tok/s |
-| **prefix + ngram** | **30.7 tok/s — −9.2%** |
+| **prefix + ngram** | **30.7 tok/s — −9.2%** ⚠ WARMUP-CONTAMINATED, SUPERSEDED |
+
+> ⚠ **The 30.7 row was benched immediately after `wait_ready`, inside the warmup window.**
+> Measured 2026-09-13: the first ~3-4 min after a restart read **24.3/23.6/25.2 tok/s** while
+> every '4.4x' flag was verifiably correct, settling to **33.5** once autotune/JIT warmup
+> finished (`enable_flashinfer_autotune`, `enable_cutedsl_warmup`, `enable_jit_warmup` all
+> True). So 30.7 is probably understated and must NOT be compared cleanly against ngram-g's
+> 31.0, which was taken by hand at ~7 min settled. **Canonical baseline is 33.5 settled
+> (29.9 ms/step), not 33.8** — break-even ladders reference 33.5.
 
 **And it lost hardest exactly where it should have won.** Probe C quotes retrieved context back
 verbatim, which is the workload n-gram exists for; probe D is original prose and should be

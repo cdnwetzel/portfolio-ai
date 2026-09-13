@@ -265,7 +265,28 @@ case "$EXP" in
     ngram-g2) EXTRA="'--speculative-config' '{\"method\":\"ngram\",\"num_speculative_tokens\":2,\"prompt_lookup_min\":2,\"prompt_lookup_max\":4}'"
               SIZES="[1,2,3,4,6,8,9,12]"; SPEC_K=2 ;;     # query_len 3 -> multiples of 3, to 4*3=12
 
-    *) echo "usage: $0 {baseline|prefix|ngram|both|mtp|ngram-g|ngram-g2|revert}"; exit 1 ;;
+    # ngram_gpu is a DISTINCT method (NgramGPUTypes) that is EXEMPT from the async-scheduling
+    # disable (config/vllm.py:1107-1118), unlike plain "ngram". Same prompt_lookup validation
+    # path (speculative.py:748), different proposer implementation (ngram_proposer_gpu.py).
+    # prompt_lookup 2/4 is pinned DELIBERATELY: vLLM's own default when unset is 5/5
+    # (speculative.py:752-753), and inheriting that would make this a different experiment
+    # rather than an async-scheduling isolation.
+    # Pre-registered: acceptance within +/-0.2 of 2.22 => clean scheduling isolation; outside
+    # that, the row also measures proposer differences and is confounded.
+    # MTP k=2. Pre-check (speculative.py:703-712): method="mtp" with no `model` key
+    # auto-resolves to the TARGET checkpoint ("use the draft model from the same model") and
+    # inherits its quantization, so mtp.safetensors is discovered without a path key.
+    # k=2 exists because verify cost is hypothesised to scale with k: 48 of 64 layers are GDN
+    # recurrences that process draft tokens SEQUENTIALLY, so fewer drafts = less sequential
+    # work on a step whose weight-read cost is fixed. If ngram-g2 confirms that scaling, this
+    # is the likely MTP optimum, not k=3.
+    mtp2)     EXTRA="'--speculative-config' '{\"method\":\"mtp\",\"num_speculative_tokens\":2}'"
+              SIZES="[1,2,3,4,6,8,9,12]"; SPEC_K=2 ;;   # query_len 3 -> multiples of 3, to 4*3=12
+
+    ngram-gpu) EXTRA="'--speculative-config' '{\"method\":\"ngram_gpu\",\"num_speculative_tokens\":4,\"prompt_lookup_min\":2,\"prompt_lookup_max\":4}'"
+              SIZES="[1,2,4,5,8,10,15,20]"; SPEC_K=4 ;;
+
+    *) echo "usage: $0 {baseline|prefix|ngram|both|mtp|mtp2|ngram-g|ngram-g2|ngram-gpu|revert}"; exit 1 ;;
 esac
 
 banner "EXPERIMENT: $EXP — $(date)"
@@ -278,10 +299,12 @@ printf '    repo dirty    : %s\n' "$(git -C /home/chris/ai/cwdotcom status --por
 printf '    vllm version  : %s\n' "$(grep -aoE 'V1 LLM engine \(v[0-9.]+\)' /var/log/qwen38/writer.log | tail -1)"
 printf '    model         : %s\n' "${VLLM_MODEL:-/data/models/Qwen3.8-27B-FP8} (fp8 e4m3 weight-only, Marlin on sm_86; compute bf16)"
 printf '    mode          : %s   SPEC_K=%s   SIZES=%s\n' "$EXP" "${SPEC_K:--}" "${SIZES:-<conf.d default>}"
-echo "    the three '4.4x' flags (CLAUDE.md: losing any one is SILENT and costs ~4x):"
+echo "    PINNED FLAGS FROM THE PREVIOUS BOOT -- these are pre-restart reads, NOT this row's"
+echo "    applied config. This row's real config prints after the restart under 'engine config"
+echo "    as RESOLVED'. (CLAUDE.md: losing any of the three is SILENT and costs ~4x.)"
 printf '      1. CUDA graphs ON      : %s\n' "$(grep -aoE 'enforce_eager=[A-Za-z]+' /var/log/qwen38/writer.log | tail -1)"
 printf '      2. custom all-reduce   : %s\n' "$(grep -aoE 'disable_custom_all_reduce=[A-Za-z]+' /var/log/qwen38/writer.log | tail -1)"
-printf '      3. capture sizes       : %s\n' "$(grep -a "Initializing a V1 LLM engine" /var/log/qwen38/writer.log | tail -1 | grep -oE "'cudagraph_capture_sizes': \[[^]]*\]")"
+printf '      3. capture sizes       : %s  <-- PREVIOUS boot; THIS ROW APPLIES: %s\n' "$(grep -a "Initializing a V1 LLM engine" /var/log/qwen38/writer.log | tail -1 | grep -oE "'cudagraph_capture_sizes': \[[^]]*\]")" "${SIZES:-<unchanged>}"
 echo "    resolved BACKENDS (distinct subsystems — do not conflate the FlashInfer ones):"
 printf '      attention backend    : %s\n' "$(grep -aoE 'Using [A-Z_]+ attention backend' /var/log/qwen38/writer.log | tail -1)"
 printf '      flash-attn version   : %s\n' "$(grep -aoE 'Using FlashAttention version [0-9]+' /var/log/qwen38/writer.log | tail -1)"
@@ -320,11 +343,20 @@ ps -eo args | grep -F 'bin/vllm serve' | grep -v grep | tr ' ' '\n' \
   || echo "    (none present)"
 if [ "$EXP" != baseline ]; then
     _pid=$(pgrep -f "bin/vllm serve" | head -1)
-    case "$EXP" in
-      prefix) _need="enable-prefix-caching" ;;
-      ngram)  _need="speculative-config" ;;
-      both)   _need="enable-prefix-caching" ;;   # the other is covered by assert_conf_parses
+    # Derive the needle FROM $EXTRA, not a second case on $EXP. The original was a parallel
+    # switch needing an update for every new mode -- it did not get one, so mtp/ngram-g/ngram-g2
+    # left _need unset and `set -u` killed the script AFTER a successful 365s restart, with no
+    # measurement taken and no revert performed. One source of truth now, and fail-closed.
+    case "$EXTRA" in
+      *speculative-config*)    _need="speculative-config" ;;
+      *enable-prefix-caching*) _need="enable-prefix-caching" ;;
+      *)                       _need="" ;;
     esac
+    if [ -z "$_need" ]; then
+        echo "    !! mode '$EXP' sets EXTRA with no recognised flag to assert. Refusing to report"
+        echo "       a measurement that cannot be attributed to a config. Reverting."
+        revert; exit 11
+    fi
     if ! tr '\0' '\n' < "/proc/$_pid/cmdline" | grep -q -- "$_need"; then
         echo "    !! '$_need' is NOT in the live argv — the experiment did NOT apply."
         echo "       Reverting rather than reporting a meaningless measurement."
@@ -343,6 +375,10 @@ assert_captured "$SIZES"
 echo; echo "--- silent downgrades vLLM warns about (do not let these hide a result) ---"
 grep -aE "Async scheduling not supported|max_num_scheduled_tokens is set to|won.t work with speculative" \
   /var/log/qwen38/writer.log | tail -4 | sed 's/.*\] /    /' || echo "    (none)"
+
+echo; echo "--- KV cache dtype as RESOLVED (fp8-KV on FA2/Ampere can silently fall back) ---"
+grep -aoE "kv_cache_dtype=[a-z0-9_]+" /var/log/qwen38/writer.log | tail -1 | sed 's/^/    /'
+echo "    (a fallback makes the row INVALID, not zero-gain — different conclusions)"
 
 echo; echo "--- KV budget under this config (capacity, not a footnote) ---"
 grep -aE "GPU KV cache size|Maximum concurrency|Available KV cache memory" \
@@ -385,6 +421,27 @@ else:
         print(f"      pos {i+1}: {sum(v)/len(v):.3f}")
 PY
 fi
+
+echo; echo "--- OUTPUT HASH (golden ledger; temp 0 + ignore_eos, same prompt every row) ---"
+# Scope of the invariant: SAME ENGINE BUILD + SAME BENCH PROTOCOL, idle single-stream.
+# NOT a claim that vLLM is deterministic in general -- under load, batch composition and
+# reduction order move, and a hash check there would cry wolf.
+_R=$(curl -s -m 180 "http://127.0.0.1:$PORT/v1/completions" -H 'Content-Type: application/json' \
+  -d '{"model":"qwen3.8-27b","prompt":"Write a Python function that reverses a singly linked list in place.","max_tokens":256,"temperature":0,"ignore_eos":true}')
+printf '%s' "$_R" | python3 -c '
+import hashlib, json, sys
+d=json.load(sys.stdin); t=d["choices"][0]["text"]
+print(f"    tokens: {d[\"usage\"][\"completion_tokens\"]}")
+print(f"    sha256: {hashlib.sha256(t.encode()).hexdigest()}")
+' 2>/dev/null || echo "    (hash probe failed)"
+
+echo; echo "--- ms/step (acceptance-INDEPENDENT: the pure per-step cost) ---"
+echo "    steps/s = tok/s / mean_acceptance_length ;  ms/step = 1000 / steps/s"
+echo "    reference: baseline 33.8 tok/s @ accept 1.00 = 29.6 ms/step"
+echo "               ngram    30.7 @ 2.27 = 73.9 ms/step (2.50x)"
+echo "               ngram-g  31.0 @ 2.22 = 71.6 ms/step (2.42x)"
+echo "    break-even acceptance at 2.42x per-step cost = 2.42 tokens/step"
+echo "    -> compute this row's ms/step from the decode and acceptance numbers above."
 
 echo; echo "--- RESULTS TABLE (decode AND ttft: 0.29 Mamba/GDN caching moves ttft, not decode) ---"
 python3 - <<'PY'
