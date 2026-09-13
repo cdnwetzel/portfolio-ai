@@ -88,13 +88,40 @@ diagnose. `respawn_max=0` everywhere. vLLM additionally needs an orphan reaper �
 separate processes that survive the API server and hold ~19 GB of VRAM each, which deadlocks
 restarts. See `home/vllm-service/` and `plans/fleet-assessment-2026-08-30.md` §3.
 
+Two corrections to that paragraph, both found 2026-09-12 by reading live state rather than units:
+
+- **`respawn_delay` above 30 is silently clamped.** OpenRC 0.63 maps only
+  `respawn_delay`/`respawn_max`/`respawn_period` onto supervise-daemon arguments
+  (`/usr/libexec/rc/sh/supervise-daemon.sh:42-44`). It has no variable for
+  `--respawn-delay-cap`, which defaults to **30s** and is active whenever
+  `--respawn-delay-step` is above 0 — and that defaults to 128ms. So `vllm-qwen38`'s
+  deliberate `respawn_delay=60` ran as 30s, and the only evidence was one line at start
+  ("Please increase the value of --respawn-delay (60000ms) to more than
+  --respawn-delay-cap (30000ms)"). Fixed with `supervise_daemon_args="--respawn-delay-cap 60"`,
+  which OpenRC appends unquoted at line 53. Swept: `vllm-qwen38` is the only affected unit —
+  every other supervised unit sets `respawn_delay` ≤ 15.
+- **"`respawn_max=0` everywhere" is not true on the T5810.** `qdrant` still has
+  `respawn_max=8` and `rerank-service` `respawn_max=5`. For qdrant that may well be
+  deliberate — `OPERATIONS.md` says alert-only, no auto-restart of stateful services, because
+  blind respawn hid the 2026-06-14 outage — but the two documents then contradict each other
+  and the reranker's bounded cap is the bad case, since a latched-off reranker just fails open
+  to cosine top-5 and vanishes. Decide which rule governs and make the units and both docs
+  agree. Not changed here.
+
 **Query routing** (`cloud/query_router.py`) runs before retrieval: `meta` and `off_topic` return
 instant canned responses with no GPU call, everything else goes to full RAG. Its default is
 `on_topic` **by design** — the router is a cost optimization, not a grounding gate, and inverting
-that assumption is what caused it to deflect a third of the golden set (DEFECT_LEDGER #6). Grounding
-is enforced by `RAG_MIN_SCORE`; adversarial input by the guardrail below. Both run independently of
-the router. Every canned path carries a `FOLLOWUPS` block so it renders suggestion chips instead of
-being a dead end.
+that assumption is what caused it to deflect a third of the golden set (DEFECT_LEDGER #6).
+Adversarial input is handled by the guardrail below, independently of the router. Every canned
+path carries a `FOLLOWUPS` block so it renders suggestion chips instead of being a dead end.
+
+**Grounding is NOT enforced by `RAG_MIN_SCORE` — this file claimed it was, and that was false.**
+`RAG_MIN_SCORE = 0.0`, hardcoded and DISABLED (`cloud/api-proxy.py:142`): the original 0.35 was
+tuned for all-MiniLM *cosine* and, applied to bge-reranker scores, refused every query (P1,
+2026-06-18). So today grounding rests entirely on the system prompt's GROUNDING rules. The
+calibration needed to re-enable it now exists in `cloud/verify_gate.py` — off-topic top scores
+cluster at ~0 (max 0.017), the lowest on-topic seen is 0.0046, which is why `VERIFY_MIN_SCORE`
+is 0.002 in production. Adopt that value or keep saying "the prompt does it", but not both.
 
 `/ws/chat` is limited to **2 concurrent connections per IP** (`cloud/rate_limit.py`). Not 1: the
 client opens the next turn's socket before the previous close is processed, and a limit of 1
@@ -265,6 +292,30 @@ VLLM_CUDAGRAPH_SIZES=[1,2,4,8]   # 3. vLLM captures ~70 sizes by default; captur
 CUDAHOSTCXX=/usr/bin/g++-14      # Gentoo ships gcc 15; CUDA hard-fails above 14 and
                                  # flashinfer JIT-compiles at engine init
 # Verify after any restart:  /opt/vllm-service/bench-vllm.sh 8007 3   -> expect ~27-30 tok/s
+
+# --enable-prefix-caching       # IN THE REPO LAUNCHER, NOT YET DEPLOYED (2026-09-13).
+#   Measured and favourable, but its quality evidence was gathered while DEFECT_LEDGER #17
+#   was still corrupting context, so it is gated on a clean-pipeline re-run before
+#   `10-install-service-files.sh` promotes it. Live `/opt` does not have it yet.
+#   Kept in the LAUNCHER's argv rather than conf.d (not conf.d).
+#   vLLM 0.27.1 defaults it off for this model: arg_utils.py:2604 computes
+#   `is_prefix_caching_supported and not is_hybrid`, and Qwen3.8 is hybrid, so it is
+#   supported-but-opt-in. Measured: TTFT 1342/1354 -> 503/491 ms on full 192-token
+#   generations, hit rate to 64.6%, decode untouched (prefill mechanism).
+#   DO NOT quote -63% as the site's win: the probe shares ~1,800 prefix tokens while
+#   cwdotcom shares only the ~600-token SYSTEM_PREFIX against ~11.5K tokens of per-query
+#   chunks that never repeat. Turn 1 gains less, follow-ups more.
+#   The flag DOES produce empty completions (finish_reason=stop, zero tokens) on
+#   /v1/completions -- 25/30 at production sampling, and worse at temp 0.2 than at 0.
+#   It does NOT reach the shape this site uses: 0/40 through /v1/chat/completions with the
+#   real SYSTEM_PREFIX. If anything here ever starts calling /v1/completions, re-run
+#   scripts/tuning/prefix_empty_probe.py first. Full record:
+#   plans/vllm-flag-experiments-2026-09-12.md
+# VLLM_EXTRA_ARGS is the EXPERIMENT slot in conf.d, left empty on purpose --
+#   scripts/tuning/09-vllm-experiments.sh refuses to start when it is already occupied.
+#   OpenRC does not export conf.d on its own; the unit's export block is what delivers it,
+#   and VLLM_PORT is deliberately excluded (it is also a real vLLM env var that rebases the
+#   engine's internal port range onto 8008/8009, the sibling slots).
 
 # labrouter (OpenRC: labrouter) — :8004, the contract port. Supervised since 2026-08-31
 # (supervise-daemon, respawn_max=0); validates labrouter.yaml before start and waits

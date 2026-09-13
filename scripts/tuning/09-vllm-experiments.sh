@@ -44,9 +44,42 @@ READY_WAIT=420
 
 banner(){ echo; echo "=================================================================="; echo " $*"; echo "=================================================================="; }
 
-backup_once() {
-    [ -f "$BAKDIR/start-qwen38.sh.orig" ] || { cp -a "$LAUNCHER" "$BAKDIR/start-qwen38.sh.orig"; echo "  backed up launcher"; }
-    [ -f "$BAKDIR/vllm-qwen38.orig" ]     || { cp -a "$CONF"     "$BAKDIR/vllm-qwen38.orig";     echo "  backed up conf.d"; }
+# Refuse to start on top of a previous, unreverted experiment. This replaces a
+# `backup_once` that skipped the copy whenever a .orig already existed -- which turned
+# those files into a TIME BOMB: the Aug-31 run left .orig copies behind, so any later
+# `revert` would have restored the Aug-31 launcher and conf.d over whatever was current,
+# silently undoing unrelated fixes and reinstating the stale unexported VLLM_EXTRA_ARGS
+# line, while reporting "reverted and serving". Backing up unconditionally is only safe
+# if the live state is genuinely a baseline, so assert that instead of assuming it.
+assert_clean_baseline() {
+    # Read the value the way OpenRC will: source the file. A regex gets this wrong --
+    # `VLLM_EXTRA_ARGS=\'\'` is an EMPTY setting, not an active experiment, and a commented
+    # line is not a setting at all.
+    # Absolute path required: POSIX `.` searches PATH for a name with no slash, so a
+    # relative $CONF would silently source nothing and report a clean baseline.
+    case "$CONF" in /*) _c="$CONF" ;; *) _c="$PWD/$CONF" ;; esac
+    _cur=$(sh -c '. "$1" >/dev/null 2>&1; printf %s "${VLLM_EXTRA_ARGS:-}"' _ "$_c" 2>/dev/null || true)
+    if [ -n "$_cur" ]; then
+        echo "!! $CONF already carries an active VLLM_EXTRA_ARGS=$_cur"
+        grep -nE '^[[:space:]]*(export[[:space:]]+)?VLLM_EXTRA_ARGS=' "$CONF" | sed 's/^/     /'
+        echo "   That is a previous experiment that was never reverted. Backing up now would"
+        echo "   record an EXPERIMENT as the baseline, and every later revert would restore it."
+        echo "   Run:  sudo $0 revert    then try again."
+        exit 7
+    fi
+}
+
+backup_baseline() {
+    # Unconditional, with the previous copy rotated rather than discarded.
+    for f in "start-qwen38.sh:$LAUNCHER" "vllm-qwen38:$CONF"; do
+        _n=${f%%:*}; _src=${f#*:}
+        if [ -f "$BAKDIR/${_n}.orig" ] && ! cmp -s "$BAKDIR/${_n}.orig" "$_src"; then
+            cp -a "$BAKDIR/${_n}.orig" "$BAKDIR/${_n}.orig.superseded-$(date +%Y%m%d-%H%M%S)"
+            echo "  rotated a stale backup of ${_n} (live file had changed since)"
+        fi
+        cp -a "$_src" "$BAKDIR/${_n}.orig"
+    done
+    echo "  baseline backed up: $BAKDIR"
 }
 
 add_hook() {
@@ -75,15 +108,50 @@ PY
     bash -n "$LAUNCHER" || { echo "!! launcher syntax broke — restoring"; cp -a "$BAKDIR/start-qwen38.sh.orig" "$LAUNCHER"; exit 3; }
 }
 
+# Wrap a string in single quotes for safe shell re-parsing, escaping embedded quotes.
+shq() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
+
 set_extra() {
-    # MUST be `export`. OpenRC sources conf.d into the INIT SCRIPT's shell; an
-    # unexported assignment never reaches the daemon. Verified 2026-08-31: the running
-    # vLLM has ZERO VLLM_* vars in /proc/<pid>/environ, so every value in this conf.d
-    # has been inert and the launcher's own defaults are what actually run. They happen
-    # to be identical, which is why nobody noticed.
+    # MUST be `export`. OpenRC sources conf.d into the INIT SCRIPT's shell; an unexported
+    # assignment never reaches the daemon. (As of 2026-09-12 the unit exports conf.d itself,
+    # so this is belt-and-braces rather than the only mechanism -- but keep it: a conf.d line
+    # that works regardless of which unit is installed is strictly safer.)
+    #
+    # AND IT MUST BE SHELL-QUOTED AS ONE WORD. `echo "export VLLM_EXTRA_ARGS=$1"` worked for
+    # the prefix experiment, whose EXTRA is a single quoted word, and produced a conf.d that
+    # DOES NOT PARSE for ngram, whose EXTRA is two words:
+    #   export VLLM_EXTRA_ARGS='--speculative-config' '{"method":"ngram",...}'
+    # bash reads that as exporting TWO names and rejects the JSON as "not a valid identifier",
+    # so `rc-service` failed with "error loading .../conf.d/vllm-qwen38" and then "failed to
+    # stop" -- which, luckily, meant the old engine kept serving rather than the box being left
+    # with no backend. The ngram experiment had therefore never run even once.
     sed -i '/^\(export \)\?VLLM_EXTRA_ARGS=/d' "$CONF"
-    [ -n "$1" ] && echo "export VLLM_EXTRA_ARGS=$1" >> "$CONF"
+    [ -n "$1" ] && printf 'export VLLM_EXTRA_ARGS=%s\n' "$(shq "$1")" >> "$CONF"
     echo "  VLLM_EXTRA_ARGS=${1:-<empty>}"
+}
+
+assert_conf_parses() {
+    # Validate BEFORE restarting. The cost of not doing this was a failed restart that left
+    # conf.d unparseable, so every subsequent rc-service call on this unit would also fail.
+    # Check what OpenRC will do (source it) and what the launcher will do (eval the array).
+    local want="${1:-}"
+    if ! sh -c ". '$CONF'" >/dev/null 2>&1; then
+        echo "  !! $CONF does not parse -- refusing to restart. Error:"
+        sh -c ". '$CONF'" 2>&1 | sed 's/^/       /' | head -3
+        echo "     restoring the baseline conf.d"
+        cp -a "$BAKDIR/vllm-qwen38.orig" "$CONF"
+        exit 8
+    fi
+    local n
+    n=$(bash -c ". '$CONF' >/dev/null 2>&1; eval \"_e=(\${VLLM_EXTRA_ARGS:-})\"; echo \${#_e[@]}" 2>/dev/null)
+    echo "  conf.d parses; launcher will see $n extra argv word(s):"
+    bash -c ". '$CONF' >/dev/null 2>&1; eval \"_e=(\${VLLM_EXTRA_ARGS:-})\"; for a in \"\${_e[@]}\"; do printf '       [%s]\n' \"\$a\"; done" 2>/dev/null
+    if [ -n "$want" ]; then
+        bash -c ". '$CONF' >/dev/null 2>&1; eval \"_e=(\${VLLM_EXTRA_ARGS:-})\"; printf '%s\n' \"\${_e[@]}\"" 2>/dev/null \
+          | grep -q -- "$want" || {
+            echo "  !! expected '$want' among the extra argv and it is not there -- refusing to restart"
+            cp -a "$BAKDIR/vllm-qwen38.orig" "$CONF"; exit 9; }
+    fi
 }
 
 wait_ready() {
@@ -119,13 +187,28 @@ case "$EXP" in
     baseline) EXTRA="" ;;
     prefix)   EXTRA="'--enable-prefix-caching'" ;;
     ngram)    EXTRA="'--speculative-config' '{\"method\":\"ngram\",\"num_speculative_tokens\":4,\"prompt_lookup_min\":2,\"prompt_lookup_max\":4}'" ;;
-    *) echo "usage: $0 {baseline|prefix|ngram|revert}"; exit 1 ;;
+    # Both flags together. They act on different halves of a turn -- prefix caching on
+    # prefill, ngram on decode -- so this is the shape a production config takes if each
+    # wins its own A/B. Test the SINGLE flags first: a combined arm cannot tell you which
+    # half earned the gain, and prefix caching is not yet cleared on the empty-completion
+    # question (plans/vllm-flag-experiments-2026-09-12.md).
+    both)     EXTRA="'--enable-prefix-caching' '--speculative-config' '{\"method\":\"ngram\",\"num_speculative_tokens\":4,\"prompt_lookup_min\":2,\"prompt_lookup_max\":4}'" ;;
+    *) echo "usage: $0 {baseline|prefix|ngram|both|revert}"; exit 1 ;;
 esac
 
 banner "EXPERIMENT: $EXP — $(date)"
-backup_once
+assert_clean_baseline
+backup_baseline
 [ "$EXP" = baseline ] || add_hook
 set_extra "$EXTRA"
+
+echo; echo "--- conf.d validation (before any restart) ---"
+case "$EXP" in
+    prefix) assert_conf_parses "enable-prefix-caching" ;;
+    ngram)  assert_conf_parses "speculative-config" ;;
+    both)   assert_conf_parses "enable-prefix-caching"; assert_conf_parses "speculative-config" ;;
+    *)      assert_conf_parses ;;
+esac
 
 echo; echo "--- restarting vLLM (the site is down for this window) ---"
 OLDPID=$(pgrep -f "bin/vllm serve" | head -1); echo "  pid before: ${OLDPID:-none}"
@@ -143,6 +226,7 @@ if [ "$EXP" != baseline ]; then
     case "$EXP" in
       prefix) _need="enable-prefix-caching" ;;
       ngram)  _need="speculative-config" ;;
+      both)   _need="enable-prefix-caching" ;;   # the other is covered by assert_conf_parses
     esac
     if ! tr '\0' '\n' < "/proc/$_pid/cmdline" | grep -q -- "$_need"; then
         echo "    !! '$_need' is NOT in the live argv — the experiment did NOT apply."

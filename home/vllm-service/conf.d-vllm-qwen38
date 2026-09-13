@@ -40,7 +40,13 @@ VLLM_TOOLPARSER=qwen3_coder
 
 # --- startup timing ------------------------------------------------------
 VLLM_MIN_FREE_MIB=19000        # wait for a nearly-free card before starting
-VLLM_VRAM_WAIT=180
+# 300, not the 180 this carried until 2026-09-12. Once the unit actually exports conf.d, this
+# value reaches the LAUNCHER's VRAM wait as well as the unit's start_pre -- and the launcher's
+# copy is the one on the respawn path, where orphaned TP workers are still holding ~19 GB each
+# and start_pre never runs. The launcher's own default was 300 with a documented crash-loop
+# rationale; raising conf.d to match keeps the conservative value rather than silently
+# shortening the margin as a side effect of fixing the plumbing.
+VLLM_VRAM_WAIT=300
 VLLM_READY_WAIT=1800           # 29GB load + torch.compile + CUDA graph capture.
                                # 600 was too short: a COLD torch_compile_cache
                                # costs ~290s of Dynamo/inductor work on its own
@@ -55,3 +61,21 @@ CUDAHOSTCXX=/usr/bin/g++-14
 
 # --- logging -------------------------------------------------------------
 VLLM_LOG=/var/log/qwen38/writer.log
+
+# --- experiment hook -----------------------------------------------------
+# Extra argv appended verbatim to the vllm serve command line, parsed as a bash
+# ARRAY by the launcher so JSON values keep their double quotes. EMPTY by default:
+# with this unset, argv is byte-identical to a stock start.
+#
+# Set by scripts/tuning/09-vllm-experiments.sh, which also auto-reverts. Examples:
+#   VLLM_EXTRA_ARGS='--enable-prefix-caching'
+#   VLLM_EXTRA_ARGS='--speculative-config {"method":"ngram","num_speculative_tokens":4}'
+#
+# This is the ONLY variable in this file with no launcher-side default, which makes it
+# the only one whose absence is visible. It is also the reason the export block exists
+# in vllm-qwen38.openrc: OpenRC sources this file into the init script's shell but does
+# not export it, so from 2026-08-31 to 2026-09-12 this setting reached nothing and an
+# experiment reported success having changed the engine not at all. If you add a
+# variable here, add it to that export list, and verify with:
+#   tr '\0' '\n' < /proc/$(pgrep -f 'bin/vllm serve' | head -1)/environ | grep '^VLLM_'
+#VLLM_EXTRA_ARGS=''

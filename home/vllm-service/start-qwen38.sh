@@ -15,14 +15,28 @@
 # since been deleted out from under it. That command line existed nowhere on disk;
 # this file is now its home.
 #
-# Config comes from /etc/conf.d/vllm-qwen38 (OpenRC exports it before we run).
+# Config comes from /etc/conf.d/vllm-qwen38 -- but ONLY the variables the unit
+# explicitly exports. OpenRC sources conf.d into the INIT SCRIPT's shell; it does not
+# export anything, and supervise-daemon execs this launcher as a child, so an unexported
+# value never arrives. An earlier revision of this comment claimed "OpenRC exports it
+# before we run", which is false and is exactly why VLLM_EXTRA_ARGS sat in conf.d from
+# 2026-08-31 to 2026-09-12 with no effect. Every `: "${VAR:=default}"` below is therefore
+# load-bearing, not belt-and-braces. See the export block in vllm-qwen38.openrc.
+#
+# The serving port arrives as VLLM_SERVE_PORT, NOT VLLM_PORT: vLLM itself reads VLLM_PORT
+# as the base port for internal distributed/IPC allocation and increments from there, so
+# exporting VLLM_PORT=8007 would walk the engine into 8008/8009, the sibling slots.
 set -euo pipefail
 
 : "${VLLM_VENV:=/opt/pscode/vllm-serve-env-0.27.1}"
 : "${VLLM_MODEL:=/data/models/Qwen3.8-27B-FP8}"
 : "${VLLM_SERVED_NAME:=qwen3.8-27b}"
 : "${VLLM_HOST:=0.0.0.0}"
-: "${VLLM_PORT:=8007}"
+: "${VLLM_SERVE_PORT:=${VLLM_PORT:-8007}}"
+# Never let the engine inherit VLLM_PORT (see header): it would become the base of the
+# internal port range. Unset unconditionally -- whether it came from conf.d, the unit,
+# or an operator's shell.
+unset VLLM_PORT
 : "${VLLM_TP:=2}"
 : "${VLLM_UTIL:=0.93}"
 : "${VLLM_CTX:=32768}"
@@ -38,8 +52,8 @@ set -euo pipefail
 # --port 8004; had anyone run it, it would have taken the contract port away from
 # labrouter and broken the site in a way that looks like a routing failure.
 # Backend slots are 8007/8008/8009. This guard makes that mistake unrepeatable.
-if [ "${VLLM_PORT}" = "8004" ]; then
-    echo "FATAL: VLLM_PORT=8004 is labrouter's contract port. Backend slots are 8007/8008/8009." >&2
+if [ "${VLLM_SERVE_PORT}" = "8004" ]; then
+    echo "FATAL: serving port 8004 is labrouter's contract port. Backend slots are 8007/8008/8009." >&2
     exit 78   # EX_CONFIG
 fi
 
@@ -158,12 +172,46 @@ if command -v nvidia-smi >/dev/null 2>&1; then
     echo "VRAM ok: ${_free} MiB free on tightest GPU"
 fi
 
-echo "starting vllm: model=${VLLM_MODEL} name=${VLLM_SERVED_NAME} ${VLLM_HOST}:${VLLM_PORT} tp=${VLLM_TP} util=${VLLM_UTIL} ctx=${VLLM_CTX}"
+echo "starting vllm: model=${VLLM_MODEL} name=${VLLM_SERVED_NAME} ${VLLM_HOST}:${VLLM_SERVE_PORT} tp=${VLLM_TP} util=${VLLM_UTIL} ctx=${VLLM_CTX}"
+
+# --- why --enable-prefix-caching is in the argv above ------------------------
+# Measured 2026-09-12 (plans/vllm-flag-experiments-2026-09-12.md). vLLM 0.27.1 defaults it
+# OFF for this model -- arg_utils.py:2604 computes `is_prefix_caching_supported and not
+# is_hybrid`, and Qwen3.8 is hybrid, so it is supported-but-opt-in while the feature matures.
+#
+# Gain, on the trustworthy rows (full 192-token generations): TTFT 1342/1354 -> 503/491 ms,
+# with vLLM's own prefix cache hit rate reaching 64.6%. Decode is untouched (33.7-33.9 vs
+# 34.2-34.3 tok/s) because this is a PREFILL mechanism. Do not quote the -63% as cwdotcom's
+# production win: the probe shares ~1,800 prefix tokens, while the site shares only the
+# ~600-token SYSTEM_PREFIX against ~11.5K tokens of per-query KB chunks that never repeat.
+# Turn 1 gains less; follow-ups that resend history gain more.
+#
+# THE CAVEAT THAT NEARLY SANK IT. With this flag, /v1/completions returns EMPTY completions
+# (finish_reason=stop, zero tokens) on some prompts -- 25 of 30 at production sampling,
+# reproduced deterministically across two runs. It does NOT reach the shape cwdotcom uses:
+# 0 of 40 empties through /v1/chat/completions with the real SYSTEM_PREFIX,
+# enable_thinking=false, temp 0.2 / top_p 0.7, max_tokens 2048. The proxy additionally
+# retries once on a zero-token response and emits an error frame rather than a blank bubble
+# (cloud/api-proxy.py:844-899). If this project ever starts calling /v1/completions, re-run
+# scripts/tuning/prefix_empty_probe.py before trusting it.
+#
+# Kept in the LAUNCHER, not in conf.d's VLLM_EXTRA_ARGS, on purpose: VLLM_EXTRA_ARGS is the
+# experiment slot, and 09-vllm-experiments.sh refuses to start when it is already occupied.
+
+# --- experiment hook (scripts/tuning/09-vllm-experiments.sh) -----------------
+# Extra argv from VLLM_EXTRA_ARGS in /etc/conf.d/vllm-qwen38. Parsed into an ARRAY so
+# JSON values keep their double quotes — the same hazard this launcher exists to avoid.
+# Empty by default: with no VLLM_EXTRA_ARGS set, argv is byte-identical to before.
+_extra=()
+if [ -n "${VLLM_EXTRA_ARGS:-}" ]; then
+    eval "_extra=(${VLLM_EXTRA_ARGS})"
+    echo "extra args: ${_extra[*]}"
+fi
 
 exec "${VLLM_VENV}/bin/python" "${VLLM_VENV}/bin/vllm" serve "${VLLM_MODEL}" \
     --served-model-name "${VLLM_SERVED_NAME}" \
     --host "${VLLM_HOST}" \
-    --port "${VLLM_PORT}" \
+    --port "${VLLM_SERVE_PORT}" \
     --tensor-parallel-size "${VLLM_TP}" \
     --gpu-memory-utilization "${VLLM_UTIL}" \
     --max-model-len "${VLLM_CTX}" \
@@ -175,4 +223,6 @@ exec "${VLLM_VENV}/bin/python" "${VLLM_VENV}/bin/vllm" serve "${VLLM_MODEL}" \
     --disable-custom-all-reduce \
     --compilation-config "{\"cudagraph_capture_sizes\":${VLLM_CUDAGRAPH_SIZES}}" \
     --limit-mm-per-prompt '{"image":0,"video":0}' \
-    --trust-remote-code
+    --trust-remote-code \
+    --enable-prefix-caching \
+    "${_extra[@]}"
