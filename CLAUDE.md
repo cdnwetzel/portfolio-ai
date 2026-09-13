@@ -325,6 +325,17 @@ CUDAHOSTCXX=/usr/bin/g++-14      # Gentoo ships gcc 15; CUDA hard-fails above 14
 #   and VLLM_PORT is deliberately excluded (it is also a real vLLM env var that rebases the
 #   engine's internal port range onto 8008/8009, the sibling slots).
 
+# --speculative-config ngram    # MEASURED 2026-09-13 and DECLINED — a 9% REGRESSION.
+#   decode 33.8 -> 30.7 tok/s on the 256-token bench, and it lost HARDEST on the quoting
+#   probe it was supposed to win (34.1 -> 25.7 tok/s) while the non-quoting control fell
+#   too (34.0 -> 27.5). Suspected mechanism, unproven: spec-dec runs draft-then-verify with
+#   a VARIABLE token count per step, which plausibly falls outside
+#   cudagraph_capture_sizes=[1,2,4,8] and drops to eager — i.e. it fights the flag worth
+#   4.4x on this box. "No draft model, no VRAM cost" was true and was never the binding
+#   constraint. plans/vllm-flag-experiments-2026-09-12.md. Do not reopen without a
+#   mechanism; both spec-dec variants are now closed on measurement (draft-model on VRAM
+#   in rag-improvements.md §2.3, ngram on throughput here).
+
 # labrouter (OpenRC: labrouter) — :8004, the contract port. Supervised since 2026-08-31
 # (supervise-daemon, respawn_max=0); validates labrouter.yaml before start and waits
 # for /health. `rc-service labrouter reload` SIGHUPs config only, never code.

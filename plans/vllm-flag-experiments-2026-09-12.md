@@ -163,20 +163,51 @@ Note for whoever re-runs it: the first `prefix` restart took **365s** versus 105
 the compile cache had already seen. Changing the engine config changes the `torch.compile` cache
 key, and a cold cache costs ~290s of Dynamo/inductor work. Budget for it; it is not a hang.
 
-## n-gram speculative decoding — STILL UNTESTED
+## n-gram speculative decoding — MEASURED 2026-09-13, **DECLINED: it is a 9% REGRESSION**
 
-The run aborted on fault 3 above before the engine restarted. No measurement exists. The
-harness is now fixed and verified to produce the correct 2-word argv with the JSON's double
-quotes intact:
-```
-[--speculative-config]
-[{"method":"ngram","num_speculative_tokens":4,"prompt_lookup_min":2,"prompt_lookup_max":4}]
-```
-Read **probe C against probe D**: both sit at ~34.1 tok/s today, C quotes retrieved context and
-D does not, so a real n-gram gain separates them. `bench-vllm.sh` alone would show nothing —
-its prompt has nothing to copy. No draft model is involved, so the VRAM objection in
-`rag-improvements.md` §2.3 does not apply (and could not be met anyway: **1,268 MiB free per
-card**, and no compatible Qwen3 draft exists on disk).
+It ran properly for the first time (the conf.d quoting fault above had made every previous
+attempt abort before the engine restarted). Live argv carried `--speculative-config` with the
+JSON's double quotes intact, and the engine resolved
+`speculative_config=SpeculativeConfig(method='ngram')`. So this is a real measurement, not
+another null from a flag that never landed.
+
+Arm: `prefix + ngram`, against the `prefix only` arm measured the night before.
+
+| | decode (256-token bench) |
+|---|---|
+| baseline, no flags | 34.2 tok/s |
+| prefix only | 33.8 tok/s |
+| **prefix + ngram** | **30.7 tok/s — −9.2%** |
+
+**And it lost hardest exactly where it should have won.** Probe C quotes retrieved context back
+verbatim, which is the workload n-gram exists for; probe D is original prose and should be
+unaffected.
+
+| probe | prefix only | prefix + ngram |
+|---|---|---|
+| C, quoting | 34.1 tok/s | **25.7 tok/s (−24.6%)** |
+| D, non-quoting control | 34.0 tok/s | 27.5 tok/s (−19.1%) |
+
+One caveat on those two rows, stated rather than buried: probe C emitted **74 tokens** this run
+against 192 before, so its rate is noisier and not a clean like-for-like. The 256-token bench is
+clean, and it is the −9.2% that decides this.
+
+**Hypothesis for WHY, offered as a hypothesis — not established.** This box gets its 4.4x from
+`cudagraph_capture_sizes=[1,2,4,8]`, deliberately capped because capturing ~70 sizes OOMed.
+Speculative decoding runs draft-then-verify with a *variable* number of tokens per step, so those
+steps plausibly fall outside the captured sizes and drop to eager execution. That would explain a
+roughly uniform slowdown across BOTH probes rather than a quoting-specific one, and it predicts
+n-gram is structurally incompatible with this box's single largest tuning win rather than merely
+unhelpful here. Testable by widening the capture sizes or grepping the engine log for graph
+misses — but the test risks the thing worth 4.4x, so it is not worth running.
+
+**Do not reopen without a mechanism.** "No draft model, no VRAM cost" was the argument for trying
+it and it remains true; it is simply not the binding constraint. The binding constraint is that
+acceptance has to pay for verification, and on this model at TP=2 with capped CUDA graphs it does
+not. `rag-improvements.md` §2.3 ruled out the *draft-model* variant on VRAM grounds; this closes
+the ngram variant on throughput grounds. Both are now measured rather than assumed.
+
+Reverted immediately — production ran ~9% slower for the length of the experiment window.
 
 ## What this session settled about method
 
