@@ -451,6 +451,26 @@ embed -> search -> rerank -> per-doc-cap pipeline:
 **Delta: 0 questions.** Adding 8 chunks changed which chunks fill the evidence slots but not
 whether the expected facts arrive. The 2 partials are pre-existing, present in both arms.
 
+**`documents_pre` is RETAINED, not left behind.** It is the pre-2026-09-14 corpus, built from
+git `9b45867`, and it is kept because this A/B used exactly one metric (expect_substrings
+recall at top-5); a different top-k, a per-question diff, or a look at the 2 partials is then
+instant instead of a rebuild. Nothing queries it — the proxy pins `documents` — so it is inert.
+
+It is derived data and exactly reproducible, so dropping it costs nothing:
+
+```bash
+# recreate
+git archive 9b45867 knowledge_base | tar -x -C /tmp/kbpre
+/home/chris/miniforge3/bin/python3 scripts/index_with_embeddings.py \
+  --kb-path /tmp/kbpre/knowledge_base --collection documents_pre --wipe
+# drop
+curl -X DELETE http://localhost:6333/collections/documents_pre
+```
+
+**If you are reading this and `documents_pre` no longer matches `9b45867`, delete it rather
+than trusting it.** A stale parallel collection that looks current is DEFECT_LEDGER #14's
+failure mode wearing different clothes.
+
 Worth generalising: the vLLM side now has three layers of protection against silent
 degradation (startup assertions, the contention-gated bench, live-state asserts) and the
 **corpus** side has none, even though the corpus is what the answers are made of. A reindex
