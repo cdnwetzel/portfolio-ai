@@ -325,10 +325,20 @@ CUDAHOSTCXX=/usr/bin/g++-14      # Gentoo ships gcc 15; CUDA hard-fails above 14
 #   chunks that never repeat. Turn 1 gains less, follow-ups more.
 #   The flag DOES produce empty completions (finish_reason=stop, zero tokens) on
 #   /v1/completions -- 25/30 at production sampling, and worse at temp 0.2 than at 0.
-#   It does NOT reach the shape this site uses: 0/40 through /v1/chat/completions with the
-#   real SYSTEM_PREFIX. If anything here ever starts calling /v1/completions, re-run
-#   scripts/tuning/prefix_empty_probe.py first. Full record:
-#   plans/vllm-flag-experiments-2026-09-12.md
+#   It does NOT reach the shape this site uses: 0/40 through /v1/chat/completions.
+#   *** CORRECTED 2026-09-14: this line used to end "with the real SYSTEM_PREFIX". It was
+#   not. *** prefix_empty_probe.py sent a SYNTHETIC prefix in every cell, and the
+#   `--prod-shape` option its own output told you to use was never implemented. The 0/40
+#   happened; the "real SYSTEM_PREFIX" part was a claim the instrument never supported --
+#   the fifth instrument in this effort found asserting more than it measured.
+#   The option now exists and reads SYSTEM_PREFIX/SYSTEM_SUFFIX out of cloud/api-proxy.py
+#   with `ast` (no import, so it cannot drift from a copied string):
+#       python3 scripts/tuning/prefix_empty_probe.py --prod-shape -n 20
+#   The STRONGER evidence is meanwhile end-to-end and already collected: 50 repeat_sample
+#   generations and a 54-item graded eval through the live /ws/chat produced 0 transport
+#   errors and no blank bubbles. Cite those for production blast radius, not the probe.
+#   If anything here ever starts calling /v1/completions, re-run the probe first. Full
+#   record: plans/vllm-flag-experiments-2026-09-12.md
 # VLLM_EXTRA_ARGS is the EXPERIMENT slot in conf.d, left empty on purpose --
 #   scripts/tuning/09-vllm-experiments.sh refuses to start when it is already occupied.
 #   OpenRC does not export conf.d on its own; the unit's export block is what delivers it,

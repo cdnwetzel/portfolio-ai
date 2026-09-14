@@ -46,10 +46,30 @@ if [ "$#" -gt 1 ]; then
 fi
 
 _before=$(wc -l < "$LOG")
-OUT=$( cd /opt/vllm-service && ./bench-vllm.sh "$PORT" "$RUNS" 2>&1 )
+OUT=$( cd /opt/vllm-service && ./bench-vllm.sh "$PORT" "$RUNS" 2>&1 ); _bench_rc=$?
 _after=$(wc -l < "$LOG")
 
 echo "$OUT" | grep -E '^  run |MEAN'
+
+# Propagate the inner failure. Without this the wrapper printed its VALID/INVALID verdict off
+# an empty or partial $OUT and exited 0 -- i.e. it could report a clean single-stream window
+# while having no decode measurement at all. A contention gate that passes on no data is worse
+# than no gate, because it is quoted with the same confidence as a real row.
+if [ "$_bench_rc" -ne 0 ]; then
+    echo "FATAL: bench-vllm.sh exited ${_bench_rc}. There is NO decode measurement in this run." >&2
+    echo "$OUT" | tail -15 | sed 's/^/    /' >&2
+    exit "$_bench_rc"
+fi
+
+# ...and assert the shape of what came back, not just the exit status: a bench that returns 0
+# having printed nothing is the same non-result wearing a success code.
+_runs_seen=$(echo "$OUT" | grep -cE '^  run ' || true)
+if [ "${_runs_seen:-0}" -ne "$RUNS" ]; then
+    echo "FATAL: expected ${RUNS} run lines from bench-vllm.sh, parsed ${_runs_seen:-0}." >&2
+    echo "       Refusing to print a validity verdict over an incomplete measurement." >&2
+    echo "$OUT" | tail -15 | sed 's/^/    /' >&2
+    exit 3
+fi
 
 # Every "Running: N reqs" line the engine emitted during the window. The bench itself is 1.
 _max=$(sed -n "$((_before+1)),${_after}p" "$LOG" \
@@ -68,9 +88,15 @@ echo "  VALID: single-stream throughout"
 # figure described a different workload than the tok/s it was divided into. ms/step is
 # tok/s / acceptance, so mixing windows corrupts the one axis the whole cost model rests on.
 # Co-locating them here makes both describe the same 256-token bench prompt.
-sed -n "$((_before+1)),${_after}p" "$LOG" | grep -a 'SpecDecoding metrics' > /tmp/.spec.$$ || true
-if [ -s /tmp/.spec.$$ ]; then
-  python3 - /tmp/.spec.$$ <<'PY'
+# mktemp, not a $$-derived path : 09-vllm-experiments.sh invokes this script AS ROOT, and $$ is
+# guessable, so a local user could pre-plant a symlink at that path and have the root shell's
+# `>` truncate a file of their choosing. Standalone non-root use never crossed a privilege
+# boundary; the root invocation does. Removed by the EXIT trap on every path.
+_SPEC_TMP="$(mktemp "${TMPDIR:-/tmp}/vllm-spec.XXXXXX")" || { echo "FATAL: mktemp failed" >&2; exit 4; }
+trap 'rm -f "$_SPEC_TMP"' EXIT
+sed -n "$((_before+1)),${_after}p" "$LOG" | grep -a 'SpecDecoding metrics' > "$_SPEC_TMP" || true
+if [ -s "$_SPEC_TMP" ]; then
+  python3 - "$_SPEC_TMP" <<'PY'
 import re, sys
 rows=[]
 for l in open(sys.argv[1]):
@@ -91,4 +117,3 @@ PY
 else
   echo "  (no SpecDecoding metrics in window — non-speculative config)"
 fi
-rm -f /tmp/.spec.$$

@@ -134,7 +134,17 @@ for i in range(2):
 #
 # Three runs is not enough to act on, so measure the rate with a real n. Deliberately the
 # cwdotcom shape: one constant long prefix, a different short question each time.
-N_EMPTY = int(__import__("os").environ.get("EMPTY_N", "20"))
+# Validated, not just cast. EMPTY_N=0 reached `100.0 * e_empty / N_EMPTY` and died with a
+# ZeroDivisionError AFTER the probe had already spent a restart window; a non-integer died on
+# the cast with a traceback that says nothing about which knob was wrong. Both now fail
+# immediately with the variable named.
+_raw_empty_n = __import__("os").environ.get("EMPTY_N", "20")
+try:
+    N_EMPTY = int(_raw_empty_n)
+except ValueError:
+    raise SystemExit(f"FATAL: EMPTY_N={_raw_empty_n!r} is not an integer (probe E sample count).")
+if N_EMPTY < 1:
+    raise SystemExit(f"FATAL: EMPTY_N={N_EMPTY} must be >= 1; probe E computes a rate over it.")
 print("E. empty-completion rate, %d repeated cache-hit prompts  <-- correctness, not speed" % N_EMPTY)
 e_empty = 0; e_ttft = []; reasons = {}
 for i in range(N_EMPTY):

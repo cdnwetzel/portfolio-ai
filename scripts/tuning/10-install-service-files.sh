@@ -58,6 +58,15 @@ exec > >(tee -a "$LOG") 2>&1
 banner(){ echo; echo "=================================================================="; echo " $*"; echo "=================================================================="; }
 die(){ echo "!! $*" >&2; exit 1; }
 
+# Reject unknown modes. This script does NOT use `set -e`, and the dispatch below only tests
+# for --dry-run and --rollback, so any other argument -- a typo like `--dryrun`, `-n`, or
+# `--roll-back` -- fell through to the LIVE INSTALL path and restarted production. Validated
+# here rather than at the MODE assignment because `die` has to exist first.
+case "$MODE" in
+    install|--dry-run|--rollback) ;;
+    *) die "unknown mode: '$MODE'   (expected: --dry-run | --rollback | no argument)" ;;
+esac
+
 # --dry-run reads only world-readable files, so it needs no root: the diffs should be
 # reviewable before anyone types sudo.
 [ "$MODE" = "--dry-run" ] || [ "$(id -u)" -eq 0 ] || die "must run as root (sudo). Try --dry-run first."
@@ -122,15 +131,28 @@ restart_and_assert() {
     curl -s -m 10 http://127.0.0.1:8004/health | sed 's/^/      /'
 }
 
+# Exit codes are the contract, because a human reads the banner but automation reads $?:
+#   0  rolled back (or --rollback requested) and the service came back
+#   1  rolled back after a failed install; service is healthy but the install did NOT apply
+#   2  RESTORED THE FILES BUT THE SERVICE DID NOT COME BACK — needs a human, now
+# The previous version printed a warning and exited 0 in the case that matters most, so a
+# caller could not tell a clean rollback from a dead backend.
 rollback() {
+    local rc="${1:-0}"
     banner "ROLLBACK — restoring the pre-install copies"
     [ -d "$BAKDIR" ] || die "no backup directory $BAKDIR — nothing to roll back"
     for f in vllm-qwen38.unit:"$UNIT" vllm-qwen38.conf:"$CONF" start-qwen38.sh:"$LAUNCHER"; do
         local n=${f%%:*} dst=${f#*:}
         if [ -f "$BAKDIR/$n" ]; then cp -a "$BAKDIR/$n" "$dst"; echo "  restored $dst"; fi
     done
-    restart_and_assert || echo "  !! did not come back cleanly — check /var/log/qwen38/writer.log"
-    exit 0
+    if restart_and_assert; then
+        echo "  rolled back and serving"
+        exit "$rc"
+    fi
+    echo "!! ROLLBACK RESTORED THE FILES BUT THE SERVICE DID NOT COME BACK." >&2
+    echo "   This is the bad case: pre-install files are on disk and :$PORT is not answering." >&2
+    echo "   Check /var/log/qwen38/writer.log and \`rc-service vllm-qwen38 status\`." >&2
+    exit 2
 }
 
 show_diffs() {
@@ -152,16 +174,20 @@ show_diffs() {
     fi
 }
 
-[ "$MODE" = "--rollback" ] && rollback
+[ "$MODE" = "--rollback" ] && rollback 0
 
 banner "INSTALL vLLM service files — $(date)"
 echo "repo: $REPO_DIR"
 
 echo; echo "--- syntax check the repo copies BEFORE touching anything ---"
 bash -n "$SRC/start-qwen38.sh" || die "launcher does not parse"
-tail -n +2 "$SRC/vllm-qwen38.openrc" > /tmp/.unit-syntax.$$ && sh -n /tmp/.unit-syntax.$$ \
-    || { rm -f /tmp/.unit-syntax.$$; die "unit does not parse"; }
-rm -f /tmp/.unit-syntax.$$
+# mktemp, not /tmp/.unit-syntax.$$ : this script runs as ROOT, and $$ is guessable, so any
+# local user could pre-plant a symlink at that path and have the root shell's `>` truncate a
+# file of their choosing. The EXIT trap removes it on every path, including `die`.
+_TMP_UNIT="$(mktemp "${TMPDIR:-/tmp}/vllm-unit-syntax.XXXXXX")" || die "mktemp failed"
+trap 'rm -f "$_TMP_UNIT"' EXIT
+tail -n +2 "$SRC/vllm-qwen38.openrc" > "$_TMP_UNIT" || die "cannot stage the unit for parsing"
+sh -n "$_TMP_UNIT" || die "unit does not parse"
 echo "  both parse"
 
 echo; echo "--- what would change ---"
@@ -194,8 +220,21 @@ if [ -d "$EXPBAK" ]; then
 fi
 
 echo; echo "--- installing ---"
-install -o root -g root -m 0755 "$SRC/vllm-qwen38.openrc" "$UNIT"    && echo "  $UNIT"
-install -o root -g root -m 0755 "$SRC/start-qwen38.sh"    "$LAUNCHER" && echo "  $LAUNCHER"
+# Both statuses are checked. Without `set -e` a failed `install` used to be swallowed by the
+# `&&`, so a PARTIAL installation (new unit, old launcher, or vice versa) could reach the
+# restart and be reported as a success -- the live-state assertions below do not cover every
+# launcher behaviour, so the mismatch would not necessarily surface.
+if ! install -o root -g root -m 0755 "$SRC/vllm-qwen38.openrc" "$UNIT"; then
+    echo "!! failed to install $UNIT — rolling back rather than leaving a partial install" >&2
+    rollback 1
+fi
+echo "  $UNIT"
+if ! install -o root -g root -m 0755 "$SRC/start-qwen38.sh" "$LAUNCHER"; then
+    echo "!! failed to install $LAUNCHER — the unit is already new, so this is exactly the" >&2
+    echo "   partial state that must not reach a restart. Rolling back." >&2
+    rollback 1
+fi
+echo "  $LAUNCHER"
 
 # Strip any active VLLM_EXTRA_ARGS so this restart is a clean baseline. Keep the commented
 # documentation form the repo's conf.d carries.

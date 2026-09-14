@@ -54,14 +54,42 @@ banner(){ echo; echo "==========================================================
 # silently undoing unrelated fixes and reinstating the stale unexported VLLM_EXTRA_ARGS
 # line, while reporting "reverted and serving". Backing up unconditionally is only safe
 # if the live state is genuinely a baseline, so assert that instead of assuming it.
+# Which flags must be confirmed in the LIVE argv for a given $EXTRA.
+#
+# Returns EVERY recognised flag, not just the first. A `case` stops at its first match, and
+# `both` mode sets prefix caching AND a speculative config -- so the previous form asserted
+# only `speculative-config` and would have PASSED a `both` run in which prefix caching never
+# applied, yielding a confounded row that looked verified. A function (rather than inline
+# cases) so tests/test_tuning_guards.py can exercise the shipped logic instead of a copy.
+needles_for() {
+    _n=""
+    case "$1" in *enable-prefix-caching*) _n="$_n enable-prefix-caching" ;; esac
+    case "$1" in *speculative-config*)    _n="$_n speculative-config" ;; esac
+    printf '%s' "${_n# }"
+}
+
 assert_clean_baseline() {
-    # Read the value the way OpenRC will: source the file. A regex gets this wrong --
-    # `VLLM_EXTRA_ARGS=\'\'` is an EMPTY setting, not an active experiment, and a commented
-    # line is not a setting at all.
     # Absolute path required: POSIX `.` searches PATH for a name with no slash, so a
     # relative $CONF would silently source nothing and report a clean baseline.
     case "$CONF" in /*) _c="$CONF" ;; *) _c="$PWD/$CONF" ;; esac
-    _cur=$(sh -c '. "$1" >/dev/null 2>&1; printf %s "${VLLM_EXTRA_ARGS:-}"' _ "$_c" 2>/dev/null || true)
+
+    # STEP 1: the file must SOURCE CLEANLY. This used to be folded into the read below, whose
+    # errors went to /dev/null under a trailing `|| true` -- so a conf.d with a syntax error or
+    # an unreadable file produced _cur="" and was reported as a CLEAN BASELINE. backup_baseline
+    # would then copy that broken file over the revert target, and every later `revert` would
+    # faithfully restore it. A config that cannot be read is not a config that is empty.
+    if ! _src_err=$(sh -c '. "$1"' _ "$_c" 2>&1 >/dev/null); then
+        echo "!! $CONF does not source cleanly — refusing to treat it as a baseline."
+        [ -n "$_src_err" ] && printf '%s\n' "$_src_err" | sed 's/^/     /'
+        echo "   Backing up an unparseable conf.d would make it the revert target."
+        echo "   Fix the file, then re-run.  (sh -n '$_c' will point at the line.)"
+        exit 12
+    fi
+
+    # STEP 2: now that it is known to parse, read the value the way OpenRC will -- by sourcing.
+    # A regex gets this wrong: `VLLM_EXTRA_ARGS=''` is an EMPTY setting, not an active
+    # experiment, and a commented line is not a setting at all.
+    _cur=$(sh -c '. "$1" >/dev/null 2>&1; printf %s "${VLLM_EXTRA_ARGS:-}"' _ "$_c")
     if [ -n "$_cur" ]; then
         echo "!! $CONF already carries an active VLLM_EXTRA_ARGS=$_cur"
         grep -nE '^[[:space:]]*(export[[:space:]]+)?VLLM_EXTRA_ARGS=' "$CONF" | sed 's/^/     /'
@@ -386,22 +414,21 @@ if [ "$EXP" != baseline ]; then
     # switch needing an update for every new mode -- it did not get one, so mtp/ngram-g/ngram-g2
     # left _need unset and `set -u` killed the script AFTER a successful 365s restart, with no
     # measurement taken and no revert performed. One source of truth now, and fail-closed.
-    case "$EXTRA" in
-      *speculative-config*)    _need="speculative-config" ;;
-      *enable-prefix-caching*) _need="enable-prefix-caching" ;;
-      *)                       _need="" ;;
-    esac
-    if [ -z "$_need" ]; then
+    _needles=$(needles_for "$EXTRA")
+    if [ -z "$_needles" ]; then
         echo "    !! mode '$EXP' sets EXTRA with no recognised flag to assert. Refusing to report"
         echo "       a measurement that cannot be attributed to a config. Reverting."
         revert; exit 11
     fi
-    if ! tr '\0' '\n' < "/proc/$_pid/cmdline" | grep -q -- "$_need"; then
-        echo "    !! '$_need' is NOT in the live argv — the experiment did NOT apply."
-        echo "       Reverting rather than reporting a meaningless measurement."
-        revert; exit 6
-    fi
-    echo "    ok: '$_need' confirmed in live argv"
+    _argv=$(tr '\0' '\n' < "/proc/$_pid/cmdline")
+    for _need in $_needles; do
+        if ! printf '%s\n' "$_argv" | grep -q -- "$_need"; then
+            echo "    !! '$_need' is NOT in the live argv — the experiment did NOT apply."
+            echo "       Reverting rather than reporting a meaningless measurement."
+            revert; exit 6
+        fi
+        echo "    ok: '$_need' confirmed in live argv"
+    done
 fi
 
 echo; echo "--- engine config as RESOLVED (not as requested) ---"
