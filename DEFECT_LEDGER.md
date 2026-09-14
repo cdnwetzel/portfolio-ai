@@ -8,6 +8,47 @@
 
 ## OPEN DEFECTS (Priority Order)
 
+### 18. The 14B judge scored a correct, fully-supported answer 1/5 — LOW, but it is the metric everything else is graded by
+**Found 2026-09-14.** In the k=3 graded eval, `What was the payback period for the AVD migration?`
+scored **grounding 1, faithfulness 1** with the judge's note *"No cost savings per user or total
+costs shown."* That note is **false**. Verified directly against the evidence the judge received:
+slot 5 of 5 contains `$200k`, `155/user` and `32.5k`. The answer itself was correct (~6 months,
+$200k upfront, $32.5k/month) and the deterministic checks all passed — `expect_match: True`,
+`forbid_hit: None`, `kind_pass: True`, `refused: False`.
+
+The same question scored **5/5 twice** in the pre-MTP baselines (`baseline-postfix`,
+`baseline-forbidfix`), both noted "Fully supported by the sources."
+
+**This one row is the entire score delta:** 4.75 − 4/44 = 4.659 ≈ the 4.66 that was measured.
+Every other row held.
+
+**Three hypotheses were raised and the first two were measured WRONG.** Recording them because the
+wrong ones cost more time than the right one:
+
+1. *A forbid collision* — the golden set forbids `"5 month"`, which is a substring of `"10.5
+   months"` elsewhere in the corpus. Plausible, and wrong: `forbid_hit` was `None`.
+2. *Retrieval dilution from the same-day reindex* — the corpus grew 101 → 109 chunks and two
+   irrelevant "Professional Context" chunks now occupy evidence slots 2 and 3. This was argued
+   fairly confidently and is **also wrong**: a parallel-collection A/B (`documents_pre` rebuilt
+   from commit 9b45867 vs live `documents`) returned **identical recall, 34/36 both arms, delta 0
+   questions**. The reindex did not degrade retrieval.
+3. *Judge error* — what survives. Evidence ordering did change, which plausibly provoked it, but
+   "the ordering changed" is not "retrieval got worse", and only the second would have mattered.
+
+**Why it is LOW and not ignored.** It is one row, it is not a user-visible defect, and the answer
+a visitor sees is correct. But the graded eval is the instrument every other change on this project
+is judged by, and a 5 → 1 swing on a correct, supported answer is not a ±1 ladder wobble. It bounds
+how much any single-row movement in a graded eval can be trusted — including movements that get
+read as regressions.
+
+**Do NOT "fix" this by tuning the judge prompt against this one row.** That is fitting the
+instrument to the sample. The useful follow-up is the one the plan already names: a continuous,
+paired metric with a bootstrap CI, where a single judge misfire cannot move the headline.
+
+**Related:** the same class as `How old is Chris?` scoring 1 because the judge's evidence lacked
+the server-facts block (fixed in `b23a88b`) — there the judge was right about its evidence and the
+evidence was wrong; here the evidence was right and the judge was wrong.
+
 ### 17. P0 — Context compression silently corrupts the evidence the generator sees
 **Found 2026-09-13.** The VPS routes every chat turn through the Headroom compressor and the
 generator is given the **compressed** text. At production scale it removes 44.9% of tokens by

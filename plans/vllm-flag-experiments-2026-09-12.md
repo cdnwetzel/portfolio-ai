@@ -407,3 +407,53 @@ both of which the one-session design principle says are resources to spend.
 Both are the same failure mode the ledger keeps recording: **the measuring code fails more often
 than the system**, and a masked error reads exactly like a passing one.
 
+### Graded eval — k=3, 2026-09-14: PASSED
+
+`=== GRADED EVAL PASSED ===` — 54 items / **44 grounded**, judge
+`qwen2.5:14b-instruct-q4_k_m` on the asrock, **mean grounding 4.66**, faithfulness 4.86,
+**0 safety hard-fails, 0 transport errors**. All 54 rows were LLM-judged (0 programmatic
+fallbacks); 2 rows had a judge error confined to the faithfulness dimension, both adversarial.
+
+Raw: `eval/results/mtp3-20260914.jsonl` (gitignored; metadata-only, no answer text).
+
+This closes the last gap in k=3's evidence. It now has everything prefix caching had:
+gated bench, real production turns, a 50-generation stability gate, a reproducible output
+hash, prefill parity, and a full graded eval.
+
+**Read this as a GATE, not an A/B.** The 4.75 baseline predates the same-day KB rewrite, so
+the corpus AND the decode config both moved. A delta is not attributable to MTP, and none is
+claimed.
+
+**Two grounded rows scored below 2.5, neither a gate failure:**
+
+- `What would you do differently if you started over?` — **pre-existing and unchanged.**
+  Identical `g=1, refused=True` in both pre-MTP baselines, same 234-character refusal. The
+  question scores 0.0031, below `verify_gate.py`'s 0.0046 lowest-on-topic floor, so the model
+  refuses correctly; the KB has the content under "Lessons Learned" and the question's
+  vocabulary never meets it. Both of those baselines also printed PASSED with this row failing.
+- `What was the payback period for the AVD migration?` — **a judge error, and it is the entire
+  score delta** (4.75 − 4/44 = 4.659 ≈ 4.66). Correct answer, supported evidence, judge scored
+  1/1 anyway. Full diagnosis, including two hypotheses that were measured and rejected, in
+  DEFECT_LEDGER #18.
+
+### The same-day reindex was A/B'd and is clean
+
+Because the KB rewrite and the k=3 promotion landed on the same day, "did the KB edit degrade
+retrieval?" had to be answered separately rather than assumed. The old KB was rebuilt from
+commit `9b45867` into a parallel `documents_pre` collection and compared through the same
+embed -> search -> rerank -> per-doc-cap pipeline:
+
+| collection | points | top-5 recall |
+|---|---|---|
+| `documents_pre` (before) | 101 | 34/36 (2 partial) |
+| `documents` (live) | 109 | 34/36 (2 partial) |
+
+**Delta: 0 questions.** Adding 8 chunks changed which chunks fill the evidence slots but not
+whether the expected facts arrive. The 2 partials are pre-existing, present in both arms.
+
+Worth generalising: the vLLM side now has three layers of protection against silent
+degradation (startup assertions, the contention-gated bench, live-state asserts) and the
+**corpus** side has none, even though the corpus is what the answers are made of. A reindex
+should be gated by `compare_retrieval.py` the way a config change is gated by the bench. This
+A/B was run by hand; nothing requires it.
+
