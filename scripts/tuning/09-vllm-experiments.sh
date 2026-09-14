@@ -235,6 +235,38 @@ revert() {
 }
 [ "$EXP" = "revert" ] && { revert; exit 0; }
 
+# `rebaseline` — adopt the CURRENT live files as the new revert target.
+#
+# Why this exists (2026-09-14). revert() restores BOTH the launcher and conf.d from
+# $BAKDIR, and those backups are whatever was live before the last experiment. So the
+# moment a flag is PROMOTED from the experiment slot into the launcher's permanent argv,
+# the backups become stale: the next `revert` quietly restores the pre-promotion launcher
+# and conf.d, undoing the promotion while printing "reverted and serving".
+#
+# That is not hypothetical. Promoting MTP k=3 also required VLLM_CUDAGRAPH_SIZES to move
+# [1,2,4,8] -> [1,2,4,8,12,16], because k=3 decodes at widths 4/8/12/16. A revert onto the
+# old conf.d would have restored [1,2,4,8], left 12 and 16 uncaptured, and silently dropped
+# FULL cudagraphs to PIECEWISE -- a slower box, no error, while the KB advertised 77 tok/s.
+#
+# Run this immediately after installing a promoted config, BEFORE the next experiment.
+if [ "$EXP" = "rebaseline" ]; then
+    banner "REBASELINE — adopting the live launcher + conf.d as the new revert target"
+    assert_clean_baseline          # refuse if an experiment is still in the slot
+    for f in "start-qwen38.sh:$LAUNCHER" "vllm-qwen38:$CONF"; do
+        _n=${f%%:*}; _src=${f#*:}
+        if [ -f "$BAKDIR/${_n}.orig" ] && ! cmp -s "$BAKDIR/${_n}.orig" "$_src"; then
+            echo "  ${_n}: backup differs from live — this is what would have been restored:"
+            diff -u "$BAKDIR/${_n}.orig" "$_src" | sed -n '3,$p' | grep -E '^[+-]' \
+                | grep -vE '^[+-]{3}' | head -20 | sed 's/^/      /'
+        else
+            echo "  ${_n}: already in sync"
+        fi
+    done
+    backup_baseline
+    echo "  revert now restores the CURRENT configuration."
+    exit 0
+fi
+
 case "$EXP" in
     baseline) EXTRA="" ;;
     prefix)   EXTRA="'--enable-prefix-caching'" ;;
@@ -286,7 +318,7 @@ case "$EXP" in
     ngram-gpu) EXTRA="'--speculative-config' '{\"method\":\"ngram_gpu\",\"num_speculative_tokens\":4,\"prompt_lookup_min\":2,\"prompt_lookup_max\":4}'"
               SIZES="[1,2,4,5,8,10,15,20]"; SPEC_K=4 ;;
 
-    *) echo "usage: $0 {baseline|prefix|ngram|both|mtp|mtp2|ngram-g|ngram-g2|ngram-gpu|revert}"; exit 1 ;;
+    *) echo "usage: $0 {baseline|prefix|ngram|both|mtp|mtp2|ngram-g|ngram-g2|ngram-gpu|revert|rebaseline}"; exit 1 ;;
 esac
 
 banner "EXPERIMENT: $EXP — $(date)"

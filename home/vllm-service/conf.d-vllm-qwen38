@@ -28,7 +28,15 @@ VLLM_GDN=triton
 
 # CUDA graphs ON. This is the tuning win — capturing these batch sizes is worth
 # roughly 4x over eager mode on this hardware. Do not "simplify" it away.
-VLLM_CUDAGRAPH_SIZES=[1,2,4,8]
+#
+# COUPLED TO VLLM_SPEC_K (2026-09-14). These are not free-form sizes any more. With
+# speculative decoding at depth k, uniform decode runs at query_len = 1 + k, so the only
+# reachable widths are the MULTIPLES of (1+k) up to VLLM_SEQS*(1+k). At the live k=3 that
+# is 4, 8, 12, 16 — and each must be captured EXACTLY. A missing width does NOT error;
+# vLLM silently drops FULL cudagraphs to PIECEWISE and the box just runs slower.
+# The launcher refuses to start if this list and VLLM_SPEC_K disagree. Change one, change
+# both. (For the k=2 fallback the list is [1,2,3,4,6,8,9,12].)
+VLLM_CUDAGRAPH_SIZES=[1,2,4,8,12,16]
 
 # --- qwen3-specific parsers ---------------------------------------------
 # This is a reasoning model: it emits chain-of-thought into a separate `reasoning`

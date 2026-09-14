@@ -198,6 +198,58 @@ echo "starting vllm: model=${VLLM_MODEL} name=${VLLM_SERVED_NAME} ${VLLM_HOST}:$
 # Kept in the LAUNCHER, not in conf.d's VLLM_EXTRA_ARGS, on purpose: VLLM_EXTRA_ARGS is the
 # experiment slot, and 09-vllm-experiments.sh refuses to start when it is already occupied.
 
+# --- why --speculative-config mtp is in the argv above -----------------------
+# Measured 2026-09-14 (plans/vllm-flag-experiments-2026-09-12.md). A small learned draft head
+# proposes VLLM_SPEC_K tokens per step and the full model verifies them in a single pass.
+# Decode 33.8 -> 77.2 tok/s on the 256-token bench (+128%), acceptance 3.27 tokens/step,
+# 41.7 ms/step. Real site turns: ~47 tok/s on a cold new chat, 60-75 on warm follow-ups.
+# Prefill is UNAFFECTED (0.340 -> 0.346 ms/token), so the entire gain is decode-side.
+# Quality gate: 50 generations, 0 FORBIDDEN / 0 UNSTABLE / 0 VARIABLE / 0 transport errors.
+# Output hash 5ec1924e... reproduced 3/3 and is byte-identical to the k=2 capture.
+#
+# THE COST, because this is NOT a free speedup: ms/step rises 29.5 -> 41.7 for EVERY step,
+# accepted or not. At acceptance 1.0 that is ~24 tok/s -- BELOW baseline's 33.8 -- and the
+# non-quoting control probe measured exactly that. It wins here because this site's answers
+# are mostly structured explanations, which draft well. k=2 (64.6 tok/s, 39.0 ms/step) is the
+# documented fallback; the `ngram` method was measured at -9% and DECLINED.
+#
+# Kept in the LAUNCHER, not in conf.d's VLLM_EXTRA_ARGS, for the same reason as prefix
+# caching: that slot is the experiment slot, and 09-vllm-experiments.sh refuses to start
+# when it is already occupied.
+: "${VLLM_SPEC_K:=3}"
+
+# --- capture sizes MUST match the speculative draft depth --------------------
+# This guard exists because the failure it prevents is SILENT. With k drafts, uniform decode
+# runs at query_len = 1 + k, so the only reachable widths are the MULTIPLES of (1+k) up to
+# max_num_seqs*(1+k). A width not captured EXACTLY does not error: vLLM quietly drops FULL
+# cudagraphs to PIECEWISE (cudagraph_dispatcher.py:143-148) and the server keeps answering,
+# just slower, with nothing in any health check to notice.
+#
+# The concrete trap this was written for: VLLM_CUDAGRAPH_SIZES sat at [1,2,4,8] in the repo's
+# conf.d while k=3 needs 4/8/12/16, so any `revert` restoring that file would have
+# de-optimised the box invisibly while the knowledge base advertised 77 tok/s.
+_q=$(( 1 + VLLM_SPEC_K ))
+_sizes=",$(echo "${VLLM_CUDAGRAPH_SIZES}" | tr -d '[] '),"
+_missing=""
+_i=1
+while [ "${_i}" -le "${VLLM_SEQS}" ]; do
+    _w=$(( _i * _q ))
+    case "${_sizes}" in
+        *",${_w},"*) ;;
+        *) _missing="${_missing} ${_w}" ;;
+    esac
+    _i=$(( _i + 1 ))
+done
+if [ -n "${_missing}" ]; then
+    echo "FATAL: speculative decoding k=${VLLM_SPEC_K} needs every multiple of ${_q} up to" >&2
+    echo "       ${VLLM_SEQS}*${_q}=$(( VLLM_SEQS * _q )) captured EXACTLY." >&2
+    echo "       VLLM_CUDAGRAPH_SIZES=${VLLM_CUDAGRAPH_SIZES} is MISSING:${_missing}" >&2
+    echo "       Uncaptured widths downgrade FULL cudagraphs to PIECEWISE *silently*." >&2
+    echo "       Fix VLLM_CUDAGRAPH_SIZES in /etc/conf.d/vllm-qwen38, or set VLLM_SPEC_K to match." >&2
+    exit 1
+fi
+echo "spec-decode k=${VLLM_SPEC_K}: widths (multiples of ${_q} up to $(( VLLM_SEQS * _q ))) all captured"
+
 # --- experiment hook (scripts/tuning/09-vllm-experiments.sh) -----------------
 # Extra argv from VLLM_EXTRA_ARGS in /etc/conf.d/vllm-qwen38. Parsed into an ARRAY so
 # JSON values keep their double quotes — the same hazard this launcher exists to avoid.
@@ -225,4 +277,5 @@ exec "${VLLM_VENV}/bin/python" "${VLLM_VENV}/bin/vllm" serve "${VLLM_MODEL}" \
     --limit-mm-per-prompt '{"image":0,"video":0}' \
     --trust-remote-code \
     --enable-prefix-caching \
+    --speculative-config "{\"method\":\"mtp\",\"num_speculative_tokens\":${VLLM_SPEC_K}}" \
     "${_extra[@]}"
