@@ -74,7 +74,13 @@ CASES = [
      # figures to ~47 tok/s on a cold turn, 60-75 warm, 77 on the synthetic bench, so the old
      # probe would have demanded a stale number and failed a CORRECT answer. Range 45-79
      # covers every current figure without matching the historical 29.4/32.6/33.2/34.2.
-     [("current_throughput", r"(4[5-9]|[5-7]\d)\s*(tok|tokens)")],
+     # Two defects in the first version of this pattern, both found in review on PR #1:
+     #   - no decimals: `\s*` cannot cross the point, so "77.2 tok/s" and "76.1 tok/s" MISSED.
+     #     Only the integer phrasing happened to be live, so it passed by luck.
+     #   - no left boundary: "1477 tokens" MATCHED on its trailing "77".
+     # `\b` fixes the second; `(\.\d+)?` the first. Verified to still miss every historical
+     # figure (29.4 / 32.6 / 33.2 / 33.4 / 34.2), which is the point of the range.
+     [("current_throughput", r"\b(4[5-9]|[5-7]\d)(\.\d+)?\s*(tok|tokens)")],
      [r"6 tokens per second", r"enforce_eager"]),
     ("What was the payback period for the AVD migration?",
      [("six_months", r"(6|six)\s*month")],

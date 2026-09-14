@@ -31,8 +31,32 @@ agrees by luck. Do not "fix" it by adding them without checking the code default
 | file | sets | note |
 |---|---|---|
 | `deploy-sha.conf` | `DEPLOY_GIT_SHA` | rewritten by `cloud/deploy.sh`; do not hand-edit |
-| `headroom.conf` | `COMPRESS_URL`, `COMPRESS_TIMEOUT=15` | **MUST STAY DISABLED — DEFECT_LEDGER #17** |
+| `headroom.conf.disabled` | **nothing — it is not loaded** | **MUST STAY DISABLED — DEFECT_LEDGER #17.** See the warning below before touching it. |
 | `override.conf` | `VERIFIER_GPU` | display string for `/api/system-info` |
 | `system-info.conf` | `KB_DOC_COUNT=35`, `KB_CHUNK_COUNT=99` | chunk count is stale and unused — the proxy reads it live from Qdrant (`_live_chunk_count`) |
 | `verifier.conf` | `VERIFIER_URL` | enables the out-of-band judge; unset = judge off |
 | `verify-gate.conf` | `VERIFY_MIN_SCORE=0.002` | calibrated off-topic gate (`verify_gate.py`) |
+
+### Why the headroom row says "not loaded" — read before renaming anything
+
+systemd loads **only** files matching `*.conf` from a drop-in directory. The suffix is the
+entire disabling mechanism. On the VPS the file is:
+
+```
+/etc/systemd/system/api-proxy.service.d/headroom.conf.disabled-20260913-042628
+```
+
+Verified live 2026-09-14: that filename, and `systemctl show api-proxy -p Environment` carries
+**no `COMPRESS_*` at all**.
+
+This row previously read `headroom.conf` / sets `COMPRESS_URL`, under a heading that says
+"Live contents". That was wrong in both halves and it was the dangerous kind of wrong: an
+operator reconciling the VPS against this mirror would have recreated an **active**
+`headroom.conf` and re-enabled the P0 that shredded the generator's evidence for three months.
+The tracked copy here is `headroom.conf.disabled` for the same reason — so that a plain
+`cp * /etc/systemd/system/api-proxy.service.d/` cannot arm it.
+
+**To re-enable it you would have to rename it to end in `.conf`.** Do not, without reading
+DEFECT_LEDGER #17 first: it was measured at ~45% token loss, taking device names ("Ti") and
+counts ("two") out of the evidence, and fabricated-GPU answers went 67% -> 0% when it was
+switched off.

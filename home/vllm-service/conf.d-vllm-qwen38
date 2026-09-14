@@ -77,7 +77,21 @@ VLLM_LOG=/var/log/qwen38/writer.log
 #
 # Set by scripts/tuning/09-vllm-experiments.sh, which also auto-reverts. Examples:
 #   VLLM_EXTRA_ARGS='--enable-prefix-caching'
+#   VLLM_EXTRA_ARGS="'--speculative-config' '{\"method\":\"ngram\",\"num_speculative_tokens\":4}'"
+#
+# THE VALUE IS PARSED TWICE, and the second parse is the one that bites. OpenRC sources this
+# file (parse 1), then the launcher runs `eval "_extra=(${VLLM_EXTRA_ARGS})"` (parse 2). Each
+# WORD must therefore still be quoted *inside* the value. The single-quoted form this file
+# used to document was measured wrong on 2026-09-14:
+#
 #   VLLM_EXTRA_ARGS='--speculative-config {"method":"ngram","num_speculative_tokens":4}'
+#     -> 3 elements: [--speculative-config] [method:ngram] [num_speculative_tokens:4]
+#
+# The braces survive parse 1 unquoted, so parse 2 applies BRACE EXPANSION on the commas and
+# the JSON is shredded into separate argv words. The corrected form above gives 2 elements
+# with the JSON intact. This is the same hazard that made `shq()` necessary in
+# 09-vllm-experiments.sh — the harness already writes the correct form; only this comment
+# was wrong, which is worse, because a comment is what someone copies by hand.
 #
 # This is the ONLY variable in this file with no launcher-side default, which makes it
 # the only one whose absence is visible. It is also the reason the export block exists

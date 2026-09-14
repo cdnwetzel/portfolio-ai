@@ -216,7 +216,72 @@ echo "starting vllm: model=${VLLM_MODEL} name=${VLLM_SERVED_NAME} ${VLLM_HOST}:$
 # Kept in the LAUNCHER, not in conf.d's VLLM_EXTRA_ARGS, for the same reason as prefix
 # caching: that slot is the experiment slot, and 09-vllm-experiments.sh refuses to start
 # when it is already occupied.
+# --- experiment hook (scripts/tuning/09-vllm-experiments.sh) -----------------
+# Extra argv from VLLM_EXTRA_ARGS in /etc/conf.d/vllm-qwen38. Parsed into an ARRAY so
+# JSON values keep their double quotes — the same hazard this launcher exists to avoid.
+# Empty by default: with no VLLM_EXTRA_ARGS set, argv is byte-identical to before.
+#
+# This array is built BEFORE the speculative-config resolution below, and that ordering is
+# load-bearing. The slot can carry its own --speculative-config, so the EFFECTIVE draft depth
+# is not knowable until this array exists. The first version of this guard validated before
+# parsing the slot, which would have refused to start every experiment mode that sets its own
+# capture sizes: ngram-g (k=4) wants widths 5/10/15/20 and mtp2 (k=2) wants 3/6/9/12, while
+# the guard demanded k=3's 4/8/12/16 regardless. Caught in review on PR #1.
+_extra=()
+if [ -n "${VLLM_EXTRA_ARGS:-}" ]; then
+    eval "_extra=(${VLLM_EXTRA_ARGS})"
+    echo "extra args: ${_extra[*]}"
+fi
+
+# --- resolve the EFFECTIVE speculative config (one source of truth) ----------
+# The launcher owns the promoted config via VLLM_SPEC_K, but the experiment slot OUTRANKS it,
+# because overriding the promoted config is the entire purpose of that slot. When the slot
+# supplies a --speculative-config the launcher emits none of its own: duplicate flags would
+# still "work" through argparse last-wins, but a log showing two contradictory speculative
+# configs is exactly the kind of ambiguity that costs an afternoon.
 : "${VLLM_SPEC_K:=3}"
+_spec_from="launcher"
+_spec_json=""
+if [ "${#_extra[@]}" -gt 0 ]; then
+    _i=0
+    while [ "${_i}" -lt "${#_extra[@]}" ]; do
+        case "${_extra[${_i}]}" in
+            --speculative-config)
+                _spec_from="experiment slot"
+                _n=$(( _i + 1 ))
+                [ "${_n}" -lt "${#_extra[@]}" ] && _spec_json="${_extra[${_n}]}"
+                ;;
+            --speculative-config=*)
+                _spec_from="experiment slot"
+                _spec_json="${_extra[${_i}]#--speculative-config=}"
+                ;;
+        esac
+        _i=$(( _i + 1 ))
+    done
+fi
+
+if [ "${_spec_from}" = "experiment slot" ]; then
+    if [ -z "${_spec_json}" ]; then
+        echo "FATAL: VLLM_EXTRA_ARGS carries --speculative-config with no value." >&2
+        exit 1
+    fi
+    # Draft depth drives the cudagraph widths for EVERY method -- ngram, mtp and ngram_gpu
+    # alike -- because uniform decode runs at query_len = 1 + num_speculative_tokens.
+    # `|| true` is required: under `set -e` with `pipefail`, a grep that matches nothing makes
+    # the command substitution fail and would abort the launcher instead of reaching the clear
+    # error below.
+    _k=$(printf '%s' "${_spec_json}" \
+         | grep -oE '"num_speculative_tokens"[[:space:]]*:[[:space:]]*[0-9]+' \
+         | grep -oE '[0-9]+' | tail -1 || true)
+    if [ -z "${_k}" ]; then
+        echo "FATAL: cannot read num_speculative_tokens from the experiment slot's" >&2
+        echo "       --speculative-config: ${_spec_json}" >&2
+        echo "       An unvalidated draft depth silently loses FULL cudagraphs, which is the" >&2
+        echo "       exact failure this guard exists to prevent. Refusing to start." >&2
+        exit 1
+    fi
+    VLLM_SPEC_K="${_k}"
+fi
 
 # --- capture sizes MUST match the speculative draft depth --------------------
 # This guard exists because the failure it prevents is SILENT. With k drafts, uniform decode
@@ -241,23 +306,24 @@ while [ "${_i}" -le "${VLLM_SEQS}" ]; do
     _i=$(( _i + 1 ))
 done
 if [ -n "${_missing}" ]; then
-    echo "FATAL: speculative decoding k=${VLLM_SPEC_K} needs every multiple of ${_q} up to" >&2
-    echo "       ${VLLM_SEQS}*${_q}=$(( VLLM_SEQS * _q )) captured EXACTLY." >&2
+    echo "FATAL: speculative decoding k=${VLLM_SPEC_K} (from the ${_spec_from}) needs every" >&2
+    echo "       multiple of ${_q} up to ${VLLM_SEQS}*${_q}=$(( VLLM_SEQS * _q )) captured EXACTLY." >&2
     echo "       VLLM_CUDAGRAPH_SIZES=${VLLM_CUDAGRAPH_SIZES} is MISSING:${_missing}" >&2
     echo "       Uncaptured widths downgrade FULL cudagraphs to PIECEWISE *silently*." >&2
-    echo "       Fix VLLM_CUDAGRAPH_SIZES in /etc/conf.d/vllm-qwen38, or set VLLM_SPEC_K to match." >&2
+    if [ "${_spec_from}" = "experiment slot" ]; then
+        echo "       This depth came from VLLM_EXTRA_ARGS. 09-vllm-experiments.sh sets a matching" >&2
+        echo "       VLLM_CUDAGRAPH_SIZES for each mode; if you set the slot by hand, set both." >&2
+    else
+        echo "       Fix VLLM_CUDAGRAPH_SIZES in /etc/conf.d/vllm-qwen38, or set VLLM_SPEC_K to match." >&2
+    fi
     exit 1
 fi
-echo "spec-decode k=${VLLM_SPEC_K}: widths (multiples of ${_q} up to $(( VLLM_SEQS * _q ))) all captured"
+echo "spec-decode k=${VLLM_SPEC_K} (${_spec_from}): widths (multiples of ${_q} up to $(( VLLM_SEQS * _q ))) all captured"
 
-# --- experiment hook (scripts/tuning/09-vllm-experiments.sh) -----------------
-# Extra argv from VLLM_EXTRA_ARGS in /etc/conf.d/vllm-qwen38. Parsed into an ARRAY so
-# JSON values keep their double quotes — the same hazard this launcher exists to avoid.
-# Empty by default: with no VLLM_EXTRA_ARGS set, argv is byte-identical to before.
-_extra=()
-if [ -n "${VLLM_EXTRA_ARGS:-}" ]; then
-    eval "_extra=(${VLLM_EXTRA_ARGS})"
-    echo "extra args: ${_extra[*]}"
+# The launcher's own speculative config is emitted ONLY when the slot did not supply one.
+_spec_args=()
+if [ "${_spec_from}" = "launcher" ]; then
+    _spec_args=(--speculative-config "{\"method\":\"mtp\",\"num_speculative_tokens\":${VLLM_SPEC_K}}")
 fi
 
 exec "${VLLM_VENV}/bin/python" "${VLLM_VENV}/bin/vllm" serve "${VLLM_MODEL}" \
@@ -277,5 +343,5 @@ exec "${VLLM_VENV}/bin/python" "${VLLM_VENV}/bin/vllm" serve "${VLLM_MODEL}" \
     --limit-mm-per-prompt '{"image":0,"video":0}' \
     --trust-remote-code \
     --enable-prefix-caching \
-    --speculative-config "{\"method\":\"mtp\",\"num_speculative_tokens\":${VLLM_SPEC_K}}" \
+    "${_spec_args[@]}" \
     "${_extra[@]}"
