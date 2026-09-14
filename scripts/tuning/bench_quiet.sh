@@ -27,6 +27,24 @@ PORT=8007
 RUNS="${1:-3}"
 LOG=/var/log/qwen38/writer.log
 
+# Refuse a port passed where runs belong. This signature differs from its own sibling:
+# bench-vllm.sh is `bench-vllm.sh <port> <runs>`, this is `bench_quiet.sh <runs>` because
+# the port is pinned above. Calling `bench_quiet.sh 8007 3` therefore sets RUNS=8007 and
+# silently starts EIGHT THOUSAND benchmark runs against the live GPU -- which happened on
+# 2026-09-14 and ran ~8 minutes against the production engine before it was noticed, because
+# the only symptom is that nothing prints until the very end.
+if ! printf '%s' "$RUNS" | grep -qE '^[0-9]+$' || [ "$RUNS" -lt 1 ] || [ "$RUNS" -gt 100 ]; then
+    echo "FATAL: runs='$RUNS' is not a sane run count (expected 1-100)." >&2
+    echo "       usage: $0 [runs]      <- NO port argument; it is pinned to $PORT" >&2
+    echo "       If you meant a port, you are thinking of bench-vllm.sh <port> <runs>." >&2
+    exit 2
+fi
+if [ "$#" -gt 1 ]; then
+    echo "FATAL: $0 takes at most ONE argument (runs); got $#: $*" >&2
+    echo "       The port is pinned to $PORT. Did you mean: $0 ${2:-3}" >&2
+    exit 2
+fi
+
 _before=$(wc -l < "$LOG")
 OUT=$( cd /opt/vllm-service && ./bench-vllm.sh "$PORT" "$RUNS" 2>&1 )
 _after=$(wc -l < "$LOG")

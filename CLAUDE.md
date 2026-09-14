@@ -359,9 +359,24 @@ CUDAHOSTCXX=/usr/bin/g++-14      # Gentoo ships gcc 15; CUDA hard-fails above 14
 #   ran 24.3 tok/s, below baseline's 33.8. It wins here because the site's answers are mostly
 #   structured explanations, which draft well. k=2 (64.6 tok/s, 39.0 ms/step) is the documented
 #   fallback if that ever stops being true.
-#   STILL IN THE EXPERIMENT SLOT as of 2026-09-14 — conf.d VLLM_EXTRA_ARGS, not the launcher's
-#   permanent argv. That means a `revert` silently removes it and the slot is blocked for the
-#   next experiment. Promote it the way --enable-prefix-caching was promoted.
+#   PROMOTED 2026-09-14 into the launcher's permanent argv (depth from VLLM_SPEC_K, default 3),
+#   the same channel --enable-prefix-caching uses. Experiment slot is EMPTY again. Verified from
+#   live sources: --speculative-config in /proc/<pid>/cmdline, speculative_config=
+#   SpeculativeConfig(method='mtp') resolved, capture sizes resolved [1,2,4,8,12,16], gated
+#   bench 76.2/76.1/76.1 tok/s VALID, acceptance 3.12.
+#
+#   PROMOTION WAS NOT JUST THE FLAG. k=3 decodes at query_len 1+3=4, so VLLM_CUDAGRAPH_SIZES
+#   had to move [1,2,4,8] -> [1,2,4,8,12,16] in the SAME change. The repo's conf.d still
+#   carried the old list (the harness had only rewritten the live file), so shipping the flag
+#   alone would have left a `revert` that restores [1,2,4,8], leaves widths 12 and 16
+#   uncaptured, and drops FULL cudagraphs to PIECEWISE *silently*. The launcher now REFUSES
+#   TO START when VLLM_CUDAGRAPH_SIZES and VLLM_SPEC_K disagree — a loud failure in place of
+#   an invisible one. Changing k means changing both; for k=2 the list is [1,2,3,4,6,8,9,12].
+#
+#   AFTER ANY PROMOTION, run: sudo ./scripts/tuning/09-vllm-experiments.sh rebaseline
+#   revert() restores both files from /root/vllm-exp-backups, and 10-install-service-files.sh
+#   RETIRES those backups without recreating them — so between an install and the next
+#   experiment, `revert` restores NOTHING while still printing "reverted and serving".
 
 # labrouter (OpenRC: labrouter) — :8004, the contract port. Supervised since 2026-08-31
 # (supervise-daemon, respawn_max=0); validates labrouter.yaml before start and waits

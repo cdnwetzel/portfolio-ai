@@ -254,7 +254,14 @@ if [ "$EXP" = "rebaseline" ]; then
     assert_clean_baseline          # refuse if an experiment is still in the slot
     for f in "start-qwen38.sh:$LAUNCHER" "vllm-qwen38:$CONF"; do
         _n=${f%%:*}; _src=${f#*:}
-        if [ -f "$BAKDIR/${_n}.orig" ] && ! cmp -s "$BAKDIR/${_n}.orig" "$_src"; then
+        if [ ! -f "$BAKDIR/${_n}.orig" ]; then
+            # NOT the same as "in sync", and saying so was a real bug in the first version
+            # of this mode: 10-install-service-files.sh RETIRES these files (mv to
+            # .orig.pre-install-*) and never recreates them, so between an install and the
+            # next experiment `revert` restores NOTHING while still printing "reverted and
+            # serving". A silent no-op is exactly what this mode exists to expose.
+            echo "  ${_n}: NO BACKUP EXISTS — revert would have been a silent no-op. Creating one."
+        elif ! cmp -s "$BAKDIR/${_n}.orig" "$_src"; then
             echo "  ${_n}: backup differs from live — this is what would have been restored:"
             diff -u "$BAKDIR/${_n}.orig" "$_src" | sed -n '3,$p' | grep -E '^[+-]' \
                 | grep -vE '^[+-]{3}' | head -20 | sed 's/^/      /'
