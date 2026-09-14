@@ -66,8 +66,15 @@ CASES = [
      [r"cross-compil", r"beelink"]),
     ("How fast is generation, in tokens per second?",
      # Require the CURRENT figure rather than forbidding the historical one: "moved from
-     # 29.4 to 33.2" is a correct sentence and must not be flagged.
-     [("current_throughput", r"33(\.\d)?\s*(tok|tokens)")],
+     # 29.4 to 33.2" is a correct sentence and must not be flagged. Deliberately NO forbid
+     # on the old 33.x figure for that same reason -- "up from 33.2" is correct and is not
+     # one of expectations.RETIREMENT_FRAMES, so a forbid would flag a true sentence.
+     #
+     # 2026-09-14: was r"33(\.\d)?\s*(tok|tokens)". MTP speculative decoding moved the real
+     # figures to ~47 tok/s on a cold turn, 60-75 warm, 77 on the synthetic bench, so the old
+     # probe would have demanded a stale number and failed a CORRECT answer. Range 45-79
+     # covers every current figure without matching the historical 29.4/32.6/33.2/34.2.
+     [("current_throughput", r"(4[5-9]|[5-7]\d)\s*(tok|tokens)")],
      [r"6 tokens per second", r"enforce_eager"]),
     ("What was the payback period for the AVD migration?",
      [("six_months", r"(6|six)\s*month")],

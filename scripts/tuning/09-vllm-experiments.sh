@@ -432,12 +432,20 @@ echo; echo "--- OUTPUT HASH (golden ledger; temp 0 + ignore_eos, same prompt eve
 # reduction order move, and a hash check there would cry wolf.
 _R=$(curl -s -m 180 "http://127.0.0.1:$PORT/v1/completions" -H 'Content-Type: application/json' \
   -d '{"model":"qwen3.8-27b","prompt":"Write a Python function that reverses a singly linked list in place.","max_tokens":256,"temperature":0,"ignore_eos":true}')
+# NOTE 2026-09-14: this probe was DEAD FROM THE START and printed "(hash probe failed)"
+# on every row -- escaped quotes inside an f-string expression inside shell single-quotes
+# are a SyntaxError, and `2>/dev/null || echo ...` swallowed it. Three experiment logs
+# carry the failure string and ZERO hashes; the "golden ledger" was empty the whole time.
+# Fixed by dropping f-strings entirely (plain `"` needs no escaping inside '...') and by
+# letting the interpreter's error reach the log instead of hiding it.
 printf '%s' "$_R" | python3 -c '
 import hashlib, json, sys
-d=json.load(sys.stdin); t=d["choices"][0]["text"]
-print(f"    tokens: {d[\"usage\"][\"completion_tokens\"]}")
-print(f"    sha256: {hashlib.sha256(t.encode()).hexdigest()}")
-' 2>/dev/null || echo "    (hash probe failed)"
+d = json.load(sys.stdin)
+t = d["choices"][0]["text"]
+print("    tokens: " + str(d["usage"]["completion_tokens"]))
+print("    sha256: " + hashlib.sha256(t.encode()).hexdigest())
+' || { echo "    (hash probe failed -- error above is REAL, do not ignore it)"; \
+       printf '    raw response head: %s\n' "$(printf '%s' "$_R" | head -c 200)"; }
 
 echo; echo "--- ms/step (acceptance-INDEPENDENT: the pure per-step cost) ---"
 echo "    steps/s = tok/s / mean_acceptance_length ;  ms/step = 1000 / steps/s"

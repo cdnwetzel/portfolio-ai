@@ -287,11 +287,21 @@ VLLM_CTX=32768
 # the server still answers, just ~4x slower, and no health check notices.
 #   1. CUDA graphs ON        (i.e. NO --enforce-eager)
 #   2. --disable-custom-all-reduce   custom AR breaks graph capture on this A4500 pair
-VLLM_CUDAGRAPH_SIZES=[1,2,4,8]   # 3. vLLM captures ~70 sizes by default; capture memory
-                                 #    scales with the count, which is what OOMed before
+VLLM_CUDAGRAPH_SIZES=[1,2,4,8,12,16]  # 3. vLLM captures ~70 sizes by default; capture memory
+                                 #    scales with the count, which is what OOMed before.
+                                 #    NOT [1,2,4,8] any more: MTP k=3 makes uniform decode
+                                 #    query_len = 1+3 = 4, so the reachable widths are the
+                                 #    MULTIPLES OF 4 up to max_num_seqs*4 = 16. A width that
+                                 #    is not captured EXACTLY silently drops FULL cudagraphs
+                                 #    to PIECEWISE (cudagraph_dispatcher.py:143-148) -- the
+                                 #    harness asserts requested-vs-RESOLVED for this reason.
 CUDAHOSTCXX=/usr/bin/g++-14      # Gentoo ships gcc 15; CUDA hard-fails above 14 and
                                  # flashinfer JIT-compiles at engine init
-# Verify after any restart:  /opt/vllm-service/bench-vllm.sh 8007 3   -> expect ~27-30 tok/s
+# Verify after any restart:  /opt/vllm-service/bench-vllm.sh 8007 3   -> expect ~75-78 tok/s
+#   *** ~33 tok/s is NOT "fine", it is the FAILURE SIGNATURE. *** That is the box running
+#   correctly on CUDA graphs but with MTP speculative decoding lost, which is exactly the
+#   silent-loss mode this block warns about. This line said "expect ~27-30" until 2026-09-14
+#   and would have passed a spec-dec-less box as healthy.
 
 # --enable-prefix-caching       # LIVE and DEPLOYED in the launcher's argv (2026-09-13).
 #   Verified from live sources, not files: flag in /proc/<pid>/cmdline,
@@ -332,9 +342,26 @@ CUDAHOSTCXX=/usr/bin/g++-14      # Gentoo ships gcc 15; CUDA hard-fails above 14
 #   a VARIABLE token count per step, which plausibly falls outside
 #   cudagraph_capture_sizes=[1,2,4,8] and drops to eager — i.e. it fights the flag worth
 #   4.4x on this box. "No draft model, no VRAM cost" was true and was never the binding
-#   constraint. plans/vllm-flag-experiments-2026-09-12.md. Do not reopen without a
-#   mechanism; both spec-dec variants are now closed on measurement (draft-model on VRAM
-#   in rag-improvements.md §2.3, ngram on throughput here).
+#   constraint. plans/vllm-flag-experiments-2026-09-12.md.
+#   *** The last clause of this note was WRONG and is corrected below. *** It read "both
+#   spec-dec variants are now closed on measurement". That generalised from ngram to the
+#   whole technique, and MTP then beat baseline by +128%. ngram is closed; SPECULATIVE
+#   DECODING IS NOT. The suspected mechanism above was also wrong: capture sizes were the
+#   real constraint, and they are satisfiable -- see VLLM_CUDAGRAPH_SIZES.
+
+# --speculative-config mtp      # MEASURED 2026-09-14 and PROMOTED — decode 33.8 -> 77.2 tok/s
+#   on the 256-token bench (+128%), acceptance 3.27 tokens/step, 41.7 ms/step. Real site turns:
+#   ~47 tok/s median on a cold new chat, 60-75 on warm follow-ups. Prefill UNAFFECTED
+#   (0.346 vs 0.340 ms/token). Quality gate: 50 generations, 0 FORBIDDEN / 0 UNSTABLE /
+#   0 VARIABLE / 0 transport errors. Output hash 5ec1924e... is byte-identical to k=2.
+#   THE COST, and it is real: ms/step rises 29.6 -> 41.7 for EVERY step, accepted or not, so
+#   on text the draft head predicts badly this is a REGRESSION -- the non-quoting control probe
+#   ran 24.3 tok/s, below baseline's 33.8. It wins here because the site's answers are mostly
+#   structured explanations, which draft well. k=2 (64.6 tok/s, 39.0 ms/step) is the documented
+#   fallback if that ever stops being true.
+#   STILL IN THE EXPERIMENT SLOT as of 2026-09-14 — conf.d VLLM_EXTRA_ARGS, not the launcher's
+#   permanent argv. That means a `revert` silently removes it and the slot is blocked for the
+#   next experiment. Promote it the way --enable-prefix-caching was promoted.
 
 # labrouter (OpenRC: labrouter) — :8004, the contract port. Supervised since 2026-08-31
 # (supervise-daemon, respawn_max=0); validates labrouter.yaml before start and waits

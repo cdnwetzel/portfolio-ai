@@ -192,15 +192,61 @@ Comparable cloud GPU inference (2× A4500 equivalent) would cost $3-5/hour. At m
 | Top-p | 0.7 |
 | Presence penalty | 0.0 (penalties punish re-using retrieved wording, which causes paraphrase drift on a factual task) |
 
-### Speed (measured 2026-08-31)
+### Speed (measured 2026-09-14)
 
-- **Generation throughput:** **33.2 tokens/sec**, sustained over a 10-minute continuous soak.
-- **Time to first token:** **~900 ms** for a realistic retrieval prompt (~2,800 tokens). Prefill
-  runs at roughly 330 ms per 1,000 tokens.
-- **Retrieval pre-step:** ~1 second end to end — embedding ~24 ms, Qdrant search ~1 ms, GPU
-  rerank ~14 ms, plus network hops.
-- **End-to-end per query:** dominated by answer length rather than hardware. A 256-token answer
-  completes in about 8 seconds; a detailed 800-token answer takes roughly 25.
+Generation speed depends on what is being generated, so it is quoted three ways rather than
+collapsed into one number:
+
+- **A fresh question in a new chat: ~47 tokens/sec** (median of 12 measured turns, range 36–58).
+- **Follow-up turns in an ongoing conversation: ~60–75 tokens/sec.** The conversation's shared
+  prefix is already cached, so less work is repeated.
+- **Synthetic single-stream benchmark: 77 tokens/sec.** This is a ceiling, not an experience —
+  the benchmark prompt is repetitive and unusually easy to predict.
+
+The spread is not measurement noise. It tracks how *predictable* the text is: answers with
+headings and repeated structure generate faster than short conversational prose, because the
+draft model guesses structured text well. See "Speculative decoding" below.
+
+- **Time to first token:** **~2.2 seconds** median on a real site turn. About 0.6 s of that is
+  the retrieval pre-step (embedding, Qdrant search, GPU rerank, network hops); the rest is
+  prefill, which runs at roughly **0.35 ms per token (~2,900 tokens/sec)** measured cold.
+- **End-to-end per query:** dominated by answer length rather than hardware. A ~530-token
+  answer completes in about 11 seconds.
+
+*Superseded — this is what the same box did before speculative decoding was enabled on
+2026-09-14, kept only so the improvement is checkable:* generation ran **33.2 tokens/sec** on a
+10-minute soak, and time-to-first-token was ~900 ms for a ~2,800-token prompt. Prefill was
+measured at ~330 ms per 1,000 tokens then and ~350 ms now — i.e. **prefill did not change**;
+the entire gain is in generation.
+
+### Speculative decoding (this is where the 2026-09 speed gain came from)
+
+The model runs with **MTP speculative decoding at draft depth 3** (vLLM's `mtp` method,
+`num_speculative_tokens: 3`). Instead of producing one token per forward pass, a small learned
+draft head proposes several tokens ahead and the full model verifies them in a single step. Every
+accepted guess is a token that cost no extra pass, and a rejected one is discarded rather than
+used — so the technique is designed to change speed, not wording. What has actually been verified
+here is narrower than that design claim: draft depths 2 and 3 produce **byte-identical output** on
+a fixed temperature-0 completion. The comparison against speculative decoding switched off has not
+been re-run under the same protocol, so it is not asserted.
+
+Measured on this hardware, 2026-09-14: **3.27 tokens accepted per step**, 77 tokens/sec on the
+benchmark, and 41.7 ms per step. Prefill is unaffected (0.346 vs 0.340 ms/token) — the gain is
+entirely in generation.
+
+**The honest caveat, because it is the interesting part.** Speculative decoding raises the cost of
+*every* step whether or not the guesses are accepted. This box went from 29.6 ms/step to 41.7. On
+text the draft head predicts well — structured answers with headings and repeated scaffolding —
+that trade is strongly positive. On text it predicts badly, a control measurement ran **24.3
+tokens/sec, which is slower than the 33.8 it managed with speculative decoding off**. So this is
+not a free speedup; it is a bet on the output being predictable, and it pays here because the
+answers this site produces are mostly structured explanations.
+
+**A different speculative-decoding method was measured and rejected.** The `ngram` method guesses
+by copying repeated strings out of the prompt, which sounds ideal for retrieval-augmented answers
+that quote their sources. It was a 9% regression (30.7 tokens/sec against 33.8) because acceptance
+never rose enough to cover the higher per-step cost. The learned draft head succeeds where string
+copying fails. Only the MTP method is in use.
 
 **Current GPU power and clock settings (state this when asked how the GPUs are configured):**
 
@@ -208,7 +254,7 @@ Comparable cloud GPU inference (2× A4500 equivalent) would cost $3-5/hour. At m
 |---|---|
 | Power cap | **165 W per card** (of a 200 W rating) |
 | SM clock | **unrestricted to 2100 MHz**; applications clock 1650 MHz |
-| Why 165 and not 200 | measured 33.4 tok/s at 71 °C vs 34.2 at 79 °C — 97.7 % of the throughput for an 8 °C thermal margin |
+| Why 165 and not 200 | measured 33.4 tok/s at 71 °C vs 34.2 at 79 °C — 97.7 % of the throughput for an 8 °C thermal margin. Both arms were measured on 2026-08-31 under the same settings, so the *comparison* stands; the absolute figures are pre-speculative-decoding and are not the current speed |
 
 *History, superseded — none of the following describes the machine today.* These figures follow
 a hardware correction on 2026-08-31. Until that date the GPUs ran under a leftover

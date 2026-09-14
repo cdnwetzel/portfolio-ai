@@ -231,3 +231,179 @@ Reverted immediately — production ran ~9% slower for the length of the experim
   current one — silently undoing unrelated fixes while printing "reverted and serving".
   Replaced with a clean-baseline assertion plus an unconditional rotating backup. Confirmed
   working: the revert after the prefix run left the new launcher intact.
+
+---
+
+# MTP speculative decoding — ADOPTED 2026-09-13. **+91% decode, and it is live.**
+
+`--speculative-config '{"method":"mtp","num_speculative_tokens":2}'` with capture sizes
+`[1,2,3,4,6,8,9,12]`. Head auto-resolves from the target checkpoint (`speculative.py:703-712`,
+"use the draft model from the same model") and inherits FP8; `mtp.safetensors` is 455 MB and had
+been sitting unused on disk since the model landed.
+
+| row | tok/s | vs base | accept | ms/step | ratio |
+|---|---|---|---|---|---|
+| baseline (gated) | 33.9 | — | 1.00 | 29.5 | 1.00x |
+| ngram-g k=4 | 31.0 | −9% | 2.22 | 71.6 | 2.43x |
+| ngram-g2 k=2 | 30.2 | −11% | 1.69 | 56.0 | 1.90x |
+| **MTP k=2** | **64.6** | **+91%** | **2.52** | **39.0** | **1.32x** |
+
+Gated: 64.7/64.6/64.5, peak concurrency 1, VALID. Break-even acceptance is **1.32** against a
+measured **2.52** — a 1.9x margin, where every ngram row was a coin flip it lost.
+
+**The ngram-derived cost model did not transfer, and that is the finding.** It predicted 56.0
+ms/step; actual was 39.0. `29.5 + 10.8 + 7.8k` was fitted on a hash-lookup proposer plus its
+acceptance machinery; MTP drafts with one learned layer. Different structure, so **per-method
+break-evens only** — a single ladder manufactures retroactive confusion.
+
+**Production evidence, not just bench.** A real user turn (uncontended, `running=1` throughout)
+on the same question went **30.5 s → 15.5 s end-to-end**, 21.4 → 47.8 tok/s client-measured.
+Acceptance on real RAG turns runs **2.60 / 2.77 / 2.63** — *higher* than the synthetic bench,
+because grounded answers reproduce phrasing from retrieved chunks. This workload suits MTP
+better than the benchmark does, the exact inverse of ngram, which lost hardest on the quoting
+probe it should have won.
+
+## Costs accepted, named
+
+**TTFT roughly doubled** — ~890 ms settled on the 2k probe vs ~470 ms on ngram rows. Measured as
+a slope, not an anomaly:
+
+```
+TTFT = 32 ms + 0.660 ms/token        prefill ~1,516 tok/s
+residuals across 515-7,985 tokens: +15 / +32 / −28 / −34 / −14 / +29 ms
+```
+
+**The `max_num_scheduled_tokens=2048` clamp is NOT the cause.** A per-chunk penalty would show
+steps at 2048/4096/6144; the fit is dead straight across four boundaries. So the planned
+"raise `max_num_batched_tokens`" row is **dead before it spent a restart** — the pre-registration
+discipline paying for itself. Production's 3.0 s TTFT decomposes as ~1 s retrieval + ~2 s prefill
+≈ 3,000 prompt tokens, exactly on the line.
+
+Still open: this curve exists only under MTP. Whether MTP *slows* prefill needs the same sweep at
+baseline — one comparable point (2,047 tokens: ~470 ms then vs ~890 ms now) suggests the draft
+head runs during prefill too. Cheap to settle on the next revert.
+
+**KV 47,606 tokens / 1.45x concurrency — and this is not a cost at all.**
+
+**Design principle, stated by Chris 2026-09-13 and worth applying to every future row: this is a
+PORTFOLIO showcase, not a user-facing production service. The target is ONE FAST SESSION, not two
+concurrent ones.** 47.6k tokens holds a single 32k session with 45% margin, which is the entire
+requirement.
+
+That inverts how the remaining matrix should be read. Concurrency is not a resource to protect,
+it is a resource to SPEND:
+
+- A change that trades concurrency for single-stream speed is a **win here**, not a trade-off.
+  MTP is exactly that trade, which is why it fits this box so well.
+- `--max-num-seqs 4` is sized for a fleet this box is not. Real prompts are 3-6k against a 32k
+  `max-model-len`; both are candidates to spend on latency.
+- **fp8-KV drops down the queue.** It was queued as "ammunition" for a KV-capacity problem that
+  does not exist at n=1. Revisit only if it buys speed directly, not capacity.
+- The `/ws/chat` 2-connections-per-IP limit stays — that is one user's turn handoff
+  (DEFECT_LEDGER #7), not multi-user concurrency, and is unrelated.
+
+The one genuine concurrency consumer is the health aggregator's E2E smoke probe, which is
+throttled to every 30 min and is why `bench_quiet.sh` exists.
+
+## Evidence grade — deliberately recorded as thinner than prefix caching's
+
+| | prefix caching | **MTP k=2** |
+|---|---|---|
+| gated bench | yes | yes, +91% |
+| production turn | — | yes, −50% E2E |
+| `repeat_sample` 50 gen | yes | **yes — 0 FORBIDDEN / 0 UNSTABLE / 0 VARIABLE / 0 transport, 2026-09-13** |
+| full graded eval | yes (PASSED 4.75) | **not run** |
+
+Promoted on a **thinner** standard than prefix caching was, justified by effect size, and written
+down as thinner rather than rewritten as "validated".
+
+**Gate closed 2026-09-13.** The `repeat_sample` row above is no longer pending: 10 questions x 5
+runs against the live mtp2 config, all 10 `[OK]`, including `What is the GPU power cap on the T5810?`
+(the retirement/negation shape that has historically missed). One caveat worth stating, because it
+bounds what this gate proves: `How fast is generation, in tokens per second?` also scored `[OK]` --
+and its answer is *stably wrong*, sourced from a KB that still says ~33 tok/s. `repeat_sample`
+measures agreement across runs, not truth; a uniformly stale corpus produces uniformly consistent
+answers. That question is the live re-check after the KB speed update + reindex. Revert is one line:
+`sudo ./scripts/tuning/09-vllm-experiments.sh revert`.
+
+**Watch item, live for the next few rows:** probe E's 20-prompt empty-completion check. 0/20 so
+far on MTP, but MTP is new here and blank-bubble behaviour under odd prompt shapes is exactly the
+2026-08-29 failure mode. Early good numbers are not clearance.
+
+---
+
+## MTP k=3 — MEASURED 2026-09-14, PROMOTED
+
+Decode **77.2 tok/s** (3 runs, contention-gated VALID, single-stream), acceptance **3.27**
+tokens/step, **41.7 ms/step**. Capture sizes `[1,2,4,8,12,16]` resolved exactly; query_len=4
+reaches widths [4,8,12,16] and all four were captured, so FULL cudagraphs at every concurrency.
+Pre-registered band was 60-75 tok/s decode, 2.8-3.2 acceptance, 39-48 ms/step: decode came in
+ABOVE the band, the other two inside it.
+
+**The bench number is not the site number, and the gap is the whole story.** Probe D (the
+non-quoting control) ran **24.3 tok/s** -- a 28% REGRESSION against baseline's 33.8. That is not
+noise, it is arithmetic: at 41.7 ms/step, acceptance 1.0 yields 1000/41.7 = 24 tok/s. Spec decode
+raises the per-step cost unconditionally and only pays it back when drafts are accepted. So the
+row lives or dies on acceptance under REAL traffic, not on the bench prompt.
+
+Real turns, measured through `/ws/chat` with the proxy's own done-frame telemetry:
+
+| shape | decode |
+|---|---|
+| long structured walkthroughs (headings, repeated `Strategy:`/`Reasoning:` scaffolding) | 60-73 tok/s |
+| short conversational prose | 32-41 tok/s |
+
+Answer SHAPE, not config, is the dominant variance driver -- structured text drafts well. An
+early 5-question set skewed conversational and produced a misleading 40.6 median; the set now
+spans both shapes deliberately.
+
+**Prefill: MTP is free.** This was the open question and the answer is no.
+
+| arm | fit | prefill |
+|---|---|---|
+| baseline | 51 ms + **0.340** ms/token | ~2,938 tok/s |
+| MTP k=3  | 68 ms + **0.346** ms/token | ~2,892 tok/s |
+
+A +1.8% slope difference and ~17 ms of fixed overhead. The earlier "MTP roughly doubles prefill"
+hint (470 -> 890 ms) was an instrument artifact, not physics -- see the probe defect below.
+
+**Quality gate: PASSED** -- 10 questions x 5 runs = 50 generations, 0 FORBIDDEN, 0 UNSTABLE,
+0 VARIABLE, 0 transport errors. Same standard k=2 met.
+
+**Output hash** (idle, single-stream, temp 0 + ignore_eos, 256 tok):
+`5ec1924e829f945b204c1d4196b107fe0eee2de47a93ec7c2c026f7ef3e06567` -- **reproduced 3/3
+consecutive idle captures**, so this is a golden value and not one sample. Byte-identical to the
+k=2 capture, i.e. draft depth changes speed, not text.
+
+Baseline's and k=2's hashes are NOT re-verifiable without spending reverts on closed rows, and
+that is deliberately not being done: the ledger's honest annotation is worth more than
+retroactive completeness. **Every hash from here on is captured under the fixed probe**; the
+pre-fix values are recorded as such. Baseline in particular is re-baselined forward, not
+backfilled.
+
+**Decision: k=3 promoted; k=2's row preserved as the documented fallback.** k=3 wins bench decode
+(77.2 vs 64.6), real warm turns (60-73 vs 47.8) and matches on prefill. Its costs are a higher
+per-step floor (41.7 vs 39.0 ms) and a smaller KV budget (45,056 tokens / 1.38x vs 61,208 / 1.87x),
+both of which the one-session design principle says are resources to spend.
+
+### Two instrument defects found while measuring this row
+
+1. **`scripts/tuning/ttft_probe.py` was silently invalidated by prefix caching.** Every prompt was
+   built from the same repeated sentence (so each size shared its prefix with every smaller size)
+   and the warm-up call used the EXACT prompt about to be measured. With caching on, all three
+   timed runs were guaranteed hits: the probe reported TTFT 185 ms at 346 tokens and 203 ms at
+   11,111 tokens -- an 11k prefill apparently costing the same as a 346-token one. Fixed with a
+   unique nonce at position 0 (vLLM hashes prefix blocks in a CHAIN, so a differing first block
+   invalidates all of them). Cross-check that the fix is right: the corrected probe gives 340 ms
+   per 1,000 tokens, and the KB's independent 2026-08-31 measurement -- taken before prefix
+   caching existed -- says 330. Agreement to 3%.
+
+2. **The harness OUTPUT HASH probe had never run.** Escaped quotes inside an f-string expression
+   inside shell single-quotes are a SyntaxError, and `2>/dev/null || echo "(hash probe failed)"`
+   swallowed it on every row. Three logs carry the failure string and zero hashes. Fixed by
+   dropping f-strings and letting the error reach the log. The hash above is the first the harness
+   itself can produce.
+
+Both are the same failure mode the ledger keeps recording: **the measuring code fails more often
+than the system**, and a masked error reads exactly like a passing one.
+
