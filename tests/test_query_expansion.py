@@ -61,3 +61,25 @@ def test_school_alias_group():
     assert "education" in terms
     assert "college" in terms
     assert "school" not in terms  # already in the query
+
+
+def test_hindsight_vocabulary_reaches_the_lessons_content():
+    # The KB writes its reflection as "Lessons Learned"; visitors ask "what would you do
+    # differently". Measured 2026-09-13: unexpanded, that question's top rerank score was
+    # 0.0031 -- below the 0.0046 lowest-on-topic floor in verify_gate.py -- with an unrelated
+    # chunk at rank 1, so the model correctly refused a question the golden set marks grounded.
+    out = expand_query("What would you do differently if you started over?").lower()
+    assert "lessons learned" in out
+    assert "retrospective" in out
+
+
+def test_lessons_question_also_pulls_hindsight_terms():
+    out = expand_query("What are the lessons learned from the AVD migration?").lower()
+    assert "hindsight" in out
+    assert "azure virtual desktop" in out          # existing avd group still fires
+
+
+def test_hindsight_group_does_not_fire_on_unrelated_questions():
+    out = expand_query("What GPUs does Chris run?").lower()
+    for term in ("lessons learned", "hindsight", "retrospective", "mistakes"):
+        assert term not in out

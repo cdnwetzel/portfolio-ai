@@ -15,14 +15,28 @@
 # since been deleted out from under it. That command line existed nowhere on disk;
 # this file is now its home.
 #
-# Config comes from /etc/conf.d/vllm-qwen38 (OpenRC exports it before we run).
+# Config comes from /etc/conf.d/vllm-qwen38 -- but ONLY the variables the unit
+# explicitly exports. OpenRC sources conf.d into the INIT SCRIPT's shell; it does not
+# export anything, and supervise-daemon execs this launcher as a child, so an unexported
+# value never arrives. An earlier revision of this comment claimed "OpenRC exports it
+# before we run", which is false and is exactly why VLLM_EXTRA_ARGS sat in conf.d from
+# 2026-08-31 to 2026-09-12 with no effect. Every `: "${VAR:=default}"` below is therefore
+# load-bearing, not belt-and-braces. See the export block in vllm-qwen38.openrc.
+#
+# The serving port arrives as VLLM_SERVE_PORT, NOT VLLM_PORT: vLLM itself reads VLLM_PORT
+# as the base port for internal distributed/IPC allocation and increments from there, so
+# exporting VLLM_PORT=8007 would walk the engine into 8008/8009, the sibling slots.
 set -euo pipefail
 
 : "${VLLM_VENV:=/opt/pscode/vllm-serve-env-0.27.1}"
 : "${VLLM_MODEL:=/data/models/Qwen3.8-27B-FP8}"
 : "${VLLM_SERVED_NAME:=qwen3.8-27b}"
 : "${VLLM_HOST:=0.0.0.0}"
-: "${VLLM_PORT:=8007}"
+: "${VLLM_SERVE_PORT:=${VLLM_PORT:-8007}}"
+# Never let the engine inherit VLLM_PORT (see header): it would become the base of the
+# internal port range. Unset unconditionally -- whether it came from conf.d, the unit,
+# or an operator's shell.
+unset VLLM_PORT
 : "${VLLM_TP:=2}"
 : "${VLLM_UTIL:=0.93}"
 : "${VLLM_CTX:=32768}"
@@ -38,8 +52,8 @@ set -euo pipefail
 # --port 8004; had anyone run it, it would have taken the contract port away from
 # labrouter and broken the site in a way that looks like a routing failure.
 # Backend slots are 8007/8008/8009. This guard makes that mistake unrepeatable.
-if [ "${VLLM_PORT}" = "8004" ]; then
-    echo "FATAL: VLLM_PORT=8004 is labrouter's contract port. Backend slots are 8007/8008/8009." >&2
+if [ "${VLLM_SERVE_PORT}" = "8004" ]; then
+    echo "FATAL: serving port 8004 is labrouter's contract port. Backend slots are 8007/8008/8009." >&2
     exit 78   # EX_CONFIG
 fi
 
@@ -158,12 +172,164 @@ if command -v nvidia-smi >/dev/null 2>&1; then
     echo "VRAM ok: ${_free} MiB free on tightest GPU"
 fi
 
-echo "starting vllm: model=${VLLM_MODEL} name=${VLLM_SERVED_NAME} ${VLLM_HOST}:${VLLM_PORT} tp=${VLLM_TP} util=${VLLM_UTIL} ctx=${VLLM_CTX}"
+echo "starting vllm: model=${VLLM_MODEL} name=${VLLM_SERVED_NAME} ${VLLM_HOST}:${VLLM_SERVE_PORT} tp=${VLLM_TP} util=${VLLM_UTIL} ctx=${VLLM_CTX}"
+
+# --- why --enable-prefix-caching is in the argv above ------------------------
+# Measured 2026-09-12 (plans/vllm-flag-experiments-2026-09-12.md). vLLM 0.27.1 defaults it
+# OFF for this model -- arg_utils.py:2604 computes `is_prefix_caching_supported and not
+# is_hybrid`, and Qwen3.8 is hybrid, so it is supported-but-opt-in while the feature matures.
+#
+# Gain, on the trustworthy rows (full 192-token generations): TTFT 1342/1354 -> 503/491 ms,
+# with vLLM's own prefix cache hit rate reaching 64.6%. Decode is untouched (33.7-33.9 vs
+# 34.2-34.3 tok/s) because this is a PREFILL mechanism. Do not quote the -63% as cwdotcom's
+# production win: the probe shares ~1,800 prefix tokens, while the site shares only the
+# ~600-token SYSTEM_PREFIX against ~11.5K tokens of per-query KB chunks that never repeat.
+# Turn 1 gains less; follow-ups that resend history gain more.
+#
+# THE CAVEAT THAT NEARLY SANK IT. With this flag, /v1/completions returns EMPTY completions
+# (finish_reason=stop, zero tokens) on some prompts -- 25 of 30 at production sampling,
+# reproduced deterministically across two runs. It does NOT reach the shape cwdotcom uses:
+# 0 of 40 empties through /v1/chat/completions with the real SYSTEM_PREFIX,
+# enable_thinking=false, temp 0.2 / top_p 0.7, max_tokens 2048. The proxy additionally
+# retries once on a zero-token response and emits an error frame rather than a blank bubble
+# (cloud/api-proxy.py:844-899). If this project ever starts calling /v1/completions, re-run
+# scripts/tuning/prefix_empty_probe.py before trusting it.
+#
+# Kept in the LAUNCHER, not in conf.d's VLLM_EXTRA_ARGS, on purpose: VLLM_EXTRA_ARGS is the
+# experiment slot, and 09-vllm-experiments.sh refuses to start when it is already occupied.
+
+# --- why --speculative-config mtp is in the argv above -----------------------
+# Measured 2026-09-14 (plans/vllm-flag-experiments-2026-09-12.md). A small learned draft head
+# proposes VLLM_SPEC_K tokens per step and the full model verifies them in a single pass.
+# Decode 33.8 -> 77.2 tok/s on the 256-token bench (+128%), acceptance 3.27 tokens/step,
+# 41.7 ms/step. Real site turns: ~47 tok/s on a cold new chat, 60-75 on warm follow-ups.
+# Prefill is UNAFFECTED (0.340 -> 0.346 ms/token), so the entire gain is decode-side.
+# Quality gate: 50 generations, 0 FORBIDDEN / 0 UNSTABLE / 0 VARIABLE / 0 transport errors.
+# Output hash 5ec1924e... reproduced 3/3 and is byte-identical to the k=2 capture.
+#
+# THE COST, because this is NOT a free speedup: ms/step rises 29.5 -> 41.7 for EVERY step,
+# accepted or not. At acceptance 1.0 that is ~24 tok/s -- BELOW baseline's 33.8 -- and the
+# non-quoting control probe measured exactly that. It wins here because this site's answers
+# are mostly structured explanations, which draft well. k=2 (64.6 tok/s, 39.0 ms/step) is the
+# documented fallback; the `ngram` method was measured at -9% and DECLINED.
+#
+# Kept in the LAUNCHER, not in conf.d's VLLM_EXTRA_ARGS, for the same reason as prefix
+# caching: that slot is the experiment slot, and 09-vllm-experiments.sh refuses to start
+# when it is already occupied.
+# --- experiment hook (scripts/tuning/09-vllm-experiments.sh) -----------------
+# Extra argv from VLLM_EXTRA_ARGS in /etc/conf.d/vllm-qwen38. Parsed into an ARRAY so
+# JSON values keep their double quotes — the same hazard this launcher exists to avoid.
+# Empty by default: with no VLLM_EXTRA_ARGS set, argv is byte-identical to before.
+#
+# This array is built BEFORE the speculative-config resolution below, and that ordering is
+# load-bearing. The slot can carry its own --speculative-config, so the EFFECTIVE draft depth
+# is not knowable until this array exists. The first version of this guard validated before
+# parsing the slot, which would have refused to start every experiment mode that sets its own
+# capture sizes: ngram-g (k=4) wants widths 5/10/15/20 and mtp2 (k=2) wants 3/6/9/12, while
+# the guard demanded k=3's 4/8/12/16 regardless. Caught in review on PR #1.
+_extra=()
+if [ -n "${VLLM_EXTRA_ARGS:-}" ]; then
+    eval "_extra=(${VLLM_EXTRA_ARGS})"
+    echo "extra args: ${_extra[*]}"
+fi
+
+# --- resolve the EFFECTIVE speculative config (one source of truth) ----------
+# The launcher owns the promoted config via VLLM_SPEC_K, but the experiment slot OUTRANKS it,
+# because overriding the promoted config is the entire purpose of that slot. When the slot
+# supplies a --speculative-config the launcher emits none of its own: duplicate flags would
+# still "work" through argparse last-wins, but a log showing two contradictory speculative
+# configs is exactly the kind of ambiguity that costs an afternoon.
+: "${VLLM_SPEC_K:=3}"
+_spec_from="launcher"
+_spec_json=""
+if [ "${#_extra[@]}" -gt 0 ]; then
+    _i=0
+    while [ "${_i}" -lt "${#_extra[@]}" ]; do
+        case "${_extra[${_i}]}" in
+            --speculative-config)
+                _spec_from="experiment slot"
+                _n=$(( _i + 1 ))
+                [ "${_n}" -lt "${#_extra[@]}" ] && _spec_json="${_extra[${_n}]}"
+                ;;
+            --speculative-config=*)
+                _spec_from="experiment slot"
+                _spec_json="${_extra[${_i}]#--speculative-config=}"
+                ;;
+        esac
+        _i=$(( _i + 1 ))
+    done
+fi
+
+if [ "${_spec_from}" = "experiment slot" ]; then
+    if [ -z "${_spec_json}" ]; then
+        echo "FATAL: VLLM_EXTRA_ARGS carries --speculative-config with no value." >&2
+        exit 1
+    fi
+    # Draft depth drives the cudagraph widths for EVERY method -- ngram, mtp and ngram_gpu
+    # alike -- because uniform decode runs at query_len = 1 + num_speculative_tokens.
+    # `|| true` is required: under `set -e` with `pipefail`, a grep that matches nothing makes
+    # the command substitution fail and would abort the launcher instead of reaching the clear
+    # error below.
+    _k=$(printf '%s' "${_spec_json}" \
+         | grep -oE '"num_speculative_tokens"[[:space:]]*:[[:space:]]*[0-9]+' \
+         | grep -oE '[0-9]+' | tail -1 || true)
+    if [ -z "${_k}" ]; then
+        echo "FATAL: cannot read num_speculative_tokens from the experiment slot's" >&2
+        echo "       --speculative-config: ${_spec_json}" >&2
+        echo "       An unvalidated draft depth silently loses FULL cudagraphs, which is the" >&2
+        echo "       exact failure this guard exists to prevent. Refusing to start." >&2
+        exit 1
+    fi
+    VLLM_SPEC_K="${_k}"
+fi
+
+# --- capture sizes MUST match the speculative draft depth --------------------
+# This guard exists because the failure it prevents is SILENT. With k drafts, uniform decode
+# runs at query_len = 1 + k, so the only reachable widths are the MULTIPLES of (1+k) up to
+# max_num_seqs*(1+k). A width not captured EXACTLY does not error: vLLM quietly drops FULL
+# cudagraphs to PIECEWISE (cudagraph_dispatcher.py:143-148) and the server keeps answering,
+# just slower, with nothing in any health check to notice.
+#
+# The concrete trap this was written for: VLLM_CUDAGRAPH_SIZES sat at [1,2,4,8] in the repo's
+# conf.d while k=3 needs 4/8/12/16, so any `revert` restoring that file would have
+# de-optimised the box invisibly while the knowledge base advertised 77 tok/s.
+_q=$(( 1 + VLLM_SPEC_K ))
+_sizes=",$(echo "${VLLM_CUDAGRAPH_SIZES}" | tr -d '[] '),"
+_missing=""
+_i=1
+while [ "${_i}" -le "${VLLM_SEQS}" ]; do
+    _w=$(( _i * _q ))
+    case "${_sizes}" in
+        *",${_w},"*) ;;
+        *) _missing="${_missing} ${_w}" ;;
+    esac
+    _i=$(( _i + 1 ))
+done
+if [ -n "${_missing}" ]; then
+    echo "FATAL: speculative decoding k=${VLLM_SPEC_K} (from the ${_spec_from}) needs every" >&2
+    echo "       multiple of ${_q} up to ${VLLM_SEQS}*${_q}=$(( VLLM_SEQS * _q )) captured EXACTLY." >&2
+    echo "       VLLM_CUDAGRAPH_SIZES=${VLLM_CUDAGRAPH_SIZES} is MISSING:${_missing}" >&2
+    echo "       Uncaptured widths downgrade FULL cudagraphs to PIECEWISE *silently*." >&2
+    if [ "${_spec_from}" = "experiment slot" ]; then
+        echo "       This depth came from VLLM_EXTRA_ARGS. 09-vllm-experiments.sh sets a matching" >&2
+        echo "       VLLM_CUDAGRAPH_SIZES for each mode; if you set the slot by hand, set both." >&2
+    else
+        echo "       Fix VLLM_CUDAGRAPH_SIZES in /etc/conf.d/vllm-qwen38, or set VLLM_SPEC_K to match." >&2
+    fi
+    exit 1
+fi
+echo "spec-decode k=${VLLM_SPEC_K} (${_spec_from}): widths (multiples of ${_q} up to $(( VLLM_SEQS * _q ))) all captured"
+
+# The launcher's own speculative config is emitted ONLY when the slot did not supply one.
+_spec_args=()
+if [ "${_spec_from}" = "launcher" ]; then
+    _spec_args=(--speculative-config "{\"method\":\"mtp\",\"num_speculative_tokens\":${VLLM_SPEC_K}}")
+fi
 
 exec "${VLLM_VENV}/bin/python" "${VLLM_VENV}/bin/vllm" serve "${VLLM_MODEL}" \
     --served-model-name "${VLLM_SERVED_NAME}" \
     --host "${VLLM_HOST}" \
-    --port "${VLLM_PORT}" \
+    --port "${VLLM_SERVE_PORT}" \
     --tensor-parallel-size "${VLLM_TP}" \
     --gpu-memory-utilization "${VLLM_UTIL}" \
     --max-model-len "${VLLM_CTX}" \
@@ -175,4 +341,7 @@ exec "${VLLM_VENV}/bin/python" "${VLLM_VENV}/bin/vllm" serve "${VLLM_MODEL}" \
     --disable-custom-all-reduce \
     --compilation-config "{\"cudagraph_capture_sizes\":${VLLM_CUDAGRAPH_SIZES}}" \
     --limit-mm-per-prompt '{"image":0,"video":0}' \
-    --trust-remote-code
+    --trust-remote-code \
+    --enable-prefix-caching \
+    "${_spec_args[@]}" \
+    "${_extra[@]}"

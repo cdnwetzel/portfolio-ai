@@ -19,6 +19,7 @@ import argparse, asyncio, re, sys
 from collections import defaultdict
 sys.path.insert(0, "scripts")
 from run_diagnostic_battery import ask
+from expectations import forbid_hit
 
 # (question, [(probe_label, regex), ...], [forbidden regexes])
 #
@@ -36,18 +37,24 @@ from run_diagnostic_battery import ask
 CASES = [
     ("What has Chris built?",
      [("a4500", r"a4500"), ("27b", r"27b")],
-     # NOT forbidding "3060": "retired RTX 3060 Ti" is a correct historical statement here.
-     # The defect was the 3060 presented as CURRENT, which the targeted questions below cover.
-     [r"qwen2\.5[- ]7b"]),
+     # 2026-09-13: "3060" is forbidden here again. It was dropped because "retired RTX 3060 Ti"
+     # is a correct historical statement and a bare regex could not tell that from the defect --
+     # true of substrings, no longer true of claim-shaped rules. Both are now sentence-scoped.
+     [{"match": r"3060"}, {"match": r"qwen2\.5[- ]7b"}]),
     ("Tell me about the GPU home lab setup",
      [("40gb_total", r"40\s*gb"), ("165w", r"165\s*w"), ("a4500", r"a4500")],
      [r"capped at 130", r"130\s*w per card", r"56\s*gb total"]),
     ("What specific models are running on the AI Portfolio Chat system?",
      [("qwen38", r"qwen3\.8"), ("judge14b", r"14b"), ("bge", r"bge")],
-     [r"3060", r"qwen2\.5[- ]7b"]),
+     # CLAIM-SHAPED (2026-09-13). As bare regexes these fired on "There is no RTX 3060 or 7B
+     # model in the current active system" -- a correct sentence, and the same false positive
+     # that failed the graded-eval deploy gate. Dict entries are scoped to one SENTENCE and
+     # exempt when that sentence frames the mention as history (expectations.RETIREMENT_FRAMES);
+     # a wrong claim in any other sentence still fails.
+     [{"match": r"3060"}, {"match": r"qwen2\.5[- ]7b"}]),
     ("How does this chat system work end to end?",
      [("qdrant", r"qdrant"), ("rerank", r"rerank"), ("vllm", r"vllm")],
-     [r"3060"]),
+     [{"match": r"3060"}]),
     ("How much VRAM do the two A4500s have in total?",
      [("40gb", r"40\s*gb"), ("20gb_each", r"20\s*gb")],
      [r"56\s*gb"]),
@@ -59,8 +66,21 @@ CASES = [
      [r"cross-compil", r"beelink"]),
     ("How fast is generation, in tokens per second?",
      # Require the CURRENT figure rather than forbidding the historical one: "moved from
-     # 29.4 to 33.2" is a correct sentence and must not be flagged.
-     [("current_throughput", r"33(\.\d)?\s*(tok|tokens)")],
+     # 29.4 to 33.2" is a correct sentence and must not be flagged. Deliberately NO forbid
+     # on the old 33.x figure for that same reason -- "up from 33.2" is correct and is not
+     # one of expectations.RETIREMENT_FRAMES, so a forbid would flag a true sentence.
+     #
+     # 2026-09-14: was r"33(\.\d)?\s*(tok|tokens)". MTP speculative decoding moved the real
+     # figures to ~47 tok/s on a cold turn, 60-75 warm, 77 on the synthetic bench, so the old
+     # probe would have demanded a stale number and failed a CORRECT answer. Range 45-79
+     # covers every current figure without matching the historical 29.4/32.6/33.2/34.2.
+     # Two defects in the first version of this pattern, both found in review on PR #1:
+     #   - no decimals: `\s*` cannot cross the point, so "77.2 tok/s" and "76.1 tok/s" MISSED.
+     #     Only the integer phrasing happened to be live, so it passed by luck.
+     #   - no left boundary: "1477 tokens" MATCHED on its trailing "77".
+     # `\b` fixes the second; `(\.\d+)?` the first. Verified to still miss every historical
+     # figure (29.4 / 32.6 / 33.2 / 33.4 / 34.2), which is the point of the range.
+     [("current_throughput", r"\b(4[5-9]|[5-7]\d)(\.\d+)?\s*(tok|tokens)")],
      [r"6 tokens per second", r"enforce_eager"]),
     ("What was the payback period for the AVD migration?",
      [("six_months", r"(6|six)\s*month")],
@@ -97,9 +117,9 @@ async def main(url, n):
             for label, rx in probes:
                 m = re.search(rx, a)
                 values[label].append(m.group(0).strip() if m else None)
-            for f in forbidden:
-                if re.search(f, a):
-                    hits.add(f)
+            f = forbid_hit(forbidden, a, use_regex=True)
+            if f:
+                hits.add(f)
             await asyncio.sleep(0.5)
 
         # Contradiction = two runs produced DIFFERENT non-None values for the same fact.

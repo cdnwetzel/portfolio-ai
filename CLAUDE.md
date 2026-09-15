@@ -53,7 +53,8 @@ T5810 Home Server / precision-t5810 (Gentoo/OpenRC) — 2x RTX A4500 NVLink, 256
 ├─ Qdrant (port 6333) — dense 768-d cosine. Live counts: `/api/system-info`, which reads
 │  them from the collection. Deliberately not written here — see the note below.
 ├─ Embedding service (port 8005) — BAAI/bge-base-en-v1.5, 768-d, CPU
-└─ compress service (port 8788) — token compression (COMPRESS_URL)
+└─ compress service (port 8788) — token compression. **Was live and corrupting the
+│     generator's evidence until 2026-09-13; see DEFECT_LEDGER #17.** Keep COMPRESS_URL unset.
     ↓ tunnel also forwards :8016 → asrock:8006 (GPU reranker) and :8007 → asrock (verifier)
 asrock B550 (Gentoo/OpenRC) — RTX 5060 Ti 16 GB, 64 GB RAM
 ├─ Reranker service (port 8006, GPU) — bge-reranker-base, 15.8x faster than CPU
@@ -87,13 +88,40 @@ diagnose. `respawn_max=0` everywhere. vLLM additionally needs an orphan reaper �
 separate processes that survive the API server and hold ~19 GB of VRAM each, which deadlocks
 restarts. See `home/vllm-service/` and `plans/fleet-assessment-2026-08-30.md` §3.
 
+Two corrections to that paragraph, both found 2026-09-12 by reading live state rather than units:
+
+- **`respawn_delay` above 30 is silently clamped.** OpenRC 0.63 maps only
+  `respawn_delay`/`respawn_max`/`respawn_period` onto supervise-daemon arguments
+  (`/usr/libexec/rc/sh/supervise-daemon.sh:42-44`). It has no variable for
+  `--respawn-delay-cap`, which defaults to **30s** and is active whenever
+  `--respawn-delay-step` is above 0 — and that defaults to 128ms. So `vllm-qwen38`'s
+  deliberate `respawn_delay=60` ran as 30s, and the only evidence was one line at start
+  ("Please increase the value of --respawn-delay (60000ms) to more than
+  --respawn-delay-cap (30000ms)"). Fixed with `supervise_daemon_args="--respawn-delay-cap 60"`,
+  which OpenRC appends unquoted at line 53. Swept: `vllm-qwen38` is the only affected unit —
+  every other supervised unit sets `respawn_delay` ≤ 15.
+- **"`respawn_max=0` everywhere" is not true on the T5810.** `qdrant` still has
+  `respawn_max=8` and `rerank-service` `respawn_max=5`. For qdrant that may well be
+  deliberate — `OPERATIONS.md` says alert-only, no auto-restart of stateful services, because
+  blind respawn hid the 2026-06-14 outage — but the two documents then contradict each other
+  and the reranker's bounded cap is the bad case, since a latched-off reranker just fails open
+  to cosine top-5 and vanishes. Decide which rule governs and make the units and both docs
+  agree. Not changed here.
+
 **Query routing** (`cloud/query_router.py`) runs before retrieval: `meta` and `off_topic` return
 instant canned responses with no GPU call, everything else goes to full RAG. Its default is
 `on_topic` **by design** — the router is a cost optimization, not a grounding gate, and inverting
-that assumption is what caused it to deflect a third of the golden set (DEFECT_LEDGER #6). Grounding
-is enforced by `RAG_MIN_SCORE`; adversarial input by the guardrail below. Both run independently of
-the router. Every canned path carries a `FOLLOWUPS` block so it renders suggestion chips instead of
-being a dead end.
+that assumption is what caused it to deflect a third of the golden set (DEFECT_LEDGER #6).
+Adversarial input is handled by the guardrail below, independently of the router. Every canned
+path carries a `FOLLOWUPS` block so it renders suggestion chips instead of being a dead end.
+
+**Grounding is NOT enforced by `RAG_MIN_SCORE` — this file claimed it was, and that was false.**
+`RAG_MIN_SCORE = 0.0`, hardcoded and DISABLED (`cloud/api-proxy.py:142`): the original 0.35 was
+tuned for all-MiniLM *cosine* and, applied to bge-reranker scores, refused every query (P1,
+2026-06-18). So today grounding rests entirely on the system prompt's GROUNDING rules. The
+calibration needed to re-enable it now exists in `cloud/verify_gate.py` — off-topic top scores
+cluster at ~0 (max 0.017), the lowest on-topic seen is 0.0046, which is why `VERIFY_MIN_SCORE`
+is 0.002 in production. Adopt that value or keep saying "the prompt does it", but not both.
 
 `/ws/chat` is limited to **2 concurrent connections per IP** (`cloud/rate_limit.py`). Not 1: the
 client opens the next turn's socket before the previous close is processed, and a limit of 1
@@ -105,6 +133,15 @@ A deterministic **prompt-extraction guardrail** (`cloud/guardrails.py`) refuses
 "reveal/repeat your prompt"-style attacks before they reach the LLM. A **graded eval**
 (`scripts/eval_graded.py` + `eval/golden_set.yaml`) gates changes. A **hybrid dense+BM25** path
 exists (`HYBRID_SEARCH`) but is **OFF** — an A/B showed it regressed on this small KB (4.41 vs 4.82).
+
+> **CONFOUNDED — read DEFECT_LEDGER #17 before citing anything in this section.** From
+> 2026-06-22 to 2026-09-13 the VPS handed the generator *compressed* context, losing ~45% of
+> tokens including device names ("Ti") and counts ("two"). Every grounding figure below was
+> measured through that. The deltas survive (both arms compressed); the absolute numbers and
+> the "settled" verdict do not. Specifically, "candidates 6-8 add tokens, not evidence" is
+> suspect: a bigger prompt feeds a compressor that strips a fixed fraction, so the extra
+> evidence was partly destroyed before generation. `compare_retrieval.py`'s 20/20 is clean —
+> it bypasses the proxy. **Re-measure before treating this as closed.**
 
 **"More retrieval" has now lost three A/Bs in a row on this KB.** Hybrid dense+BM25 (4.41 vs
 4.82), `chunk_size=250` (19/20 vs 20/20), and — measured 2026-09-01 — wider retrieval:
@@ -250,11 +287,106 @@ VLLM_CTX=32768
 # the server still answers, just ~4x slower, and no health check notices.
 #   1. CUDA graphs ON        (i.e. NO --enforce-eager)
 #   2. --disable-custom-all-reduce   custom AR breaks graph capture on this A4500 pair
-VLLM_CUDAGRAPH_SIZES=[1,2,4,8]   # 3. vLLM captures ~70 sizes by default; capture memory
-                                 #    scales with the count, which is what OOMed before
+VLLM_CUDAGRAPH_SIZES=[1,2,4,8,12,16]  # 3. vLLM captures ~70 sizes by default; capture memory
+                                 #    scales with the count, which is what OOMed before.
+                                 #    NOT [1,2,4,8] any more: MTP k=3 makes uniform decode
+                                 #    query_len = 1+3 = 4, so the reachable widths are the
+                                 #    MULTIPLES OF 4 up to max_num_seqs*4 = 16. A width that
+                                 #    is not captured EXACTLY silently drops FULL cudagraphs
+                                 #    to PIECEWISE (cudagraph_dispatcher.py:143-148) -- the
+                                 #    harness asserts requested-vs-RESOLVED for this reason.
 CUDAHOSTCXX=/usr/bin/g++-14      # Gentoo ships gcc 15; CUDA hard-fails above 14 and
                                  # flashinfer JIT-compiles at engine init
-# Verify after any restart:  /opt/vllm-service/bench-vllm.sh 8007 3   -> expect ~27-30 tok/s
+# Verify after any restart:  /opt/vllm-service/bench-vllm.sh 8007 3   -> expect ~75-78 tok/s
+#   *** ~33 tok/s is NOT "fine", it is the FAILURE SIGNATURE. *** That is the box running
+#   correctly on CUDA graphs but with MTP speculative decoding lost, which is exactly the
+#   silent-loss mode this block warns about. This line said "expect ~27-30" until 2026-09-14
+#   and would have passed a spec-dec-less box as healthy.
+
+# --enable-prefix-caching       # LIVE and DEPLOYED in the launcher's argv (2026-09-13).
+#   Verified from live sources, not files: flag in /proc/<pid>/cmdline,
+#   enable_prefix_caching=True resolved, conf.d's VLLM_EXTRA_ARGS slot EMPTY, repo launcher
+#   byte-identical to /opt. It had been live accidentally since 2026-09-12 23:32 via the
+#   experiment slot (a `prefix` run that was never reverted); it now runs through the
+#   documented channel and the slot is free for the ngram experiment.
+#   The clean-pipeline re-gate it was being held for happened, accidentally but
+#   validly: everything measured after the DEFECT_LEDGER #17 fix ran with it on --
+#   repeat_sample 50 generations (0 UNSTABLE, 0 transport errors) and a full graded eval
+#   (PASSED, 4.75, 0 transport errors). NOTE BOTH BASELINES WERE MEASURED WITH IT ON; do
+#   not later read 4.64/4.75 as no-prefix-caching numbers. There is still NO comparison
+#   arm -- no clean-pipeline measurement with it OFF -- so the claim is "passes the gates",
+#   not "better than off".
+#   vLLM 0.27.1 defaults it off for this model: arg_utils.py:2604 computes
+#   `is_prefix_caching_supported and not is_hybrid`, and Qwen3.8 is hybrid, so it is
+#   supported-but-opt-in. Measured: TTFT 1342/1354 -> 503/491 ms on full 192-token
+#   generations, hit rate to 64.6%, decode untouched (prefill mechanism).
+#   DO NOT quote -63% as the site's win: the probe shares ~1,800 prefix tokens while
+#   cwdotcom shares only the ~600-token SYSTEM_PREFIX against ~11.5K tokens of per-query
+#   chunks that never repeat. Turn 1 gains less, follow-ups more.
+#   The flag DOES produce empty completions (finish_reason=stop, zero tokens) on
+#   /v1/completions -- 25/30 at production sampling, and worse at temp 0.2 than at 0.
+#   It does NOT reach the shape this site uses: 0/40 through /v1/chat/completions.
+#   *** CORRECTED 2026-09-14: this line used to end "with the real SYSTEM_PREFIX". It was
+#   not. *** prefix_empty_probe.py sent a SYNTHETIC prefix in every cell, and the
+#   `--prod-shape` option its own output told you to use was never implemented. The 0/40
+#   happened; the "real SYSTEM_PREFIX" part was a claim the instrument never supported --
+#   the fifth instrument in this effort found asserting more than it measured.
+#   The option now exists and reads SYSTEM_PREFIX/SYSTEM_SUFFIX out of cloud/api-proxy.py
+#   with `ast` (no import, so it cannot drift from a copied string):
+#       python3 scripts/tuning/prefix_empty_probe.py --prod-shape -n 20
+#   The STRONGER evidence is meanwhile end-to-end and already collected: 50 repeat_sample
+#   generations and a 54-item graded eval through the live /ws/chat produced 0 transport
+#   errors and no blank bubbles. Cite those for production blast radius, not the probe.
+#   If anything here ever starts calling /v1/completions, re-run the probe first. Full
+#   record: plans/vllm-flag-experiments-2026-09-12.md
+# VLLM_EXTRA_ARGS is the EXPERIMENT slot in conf.d, left empty on purpose --
+#   scripts/tuning/09-vllm-experiments.sh refuses to start when it is already occupied.
+#   OpenRC does not export conf.d on its own; the unit's export block is what delivers it,
+#   and VLLM_PORT is deliberately excluded (it is also a real vLLM env var that rebases the
+#   engine's internal port range onto 8008/8009, the sibling slots).
+
+# --speculative-config ngram    # MEASURED 2026-09-13 and DECLINED — a 9% REGRESSION.
+#   decode 33.8 -> 30.7 tok/s on the 256-token bench, and it lost HARDEST on the quoting
+#   probe it was supposed to win (34.1 -> 25.7 tok/s) while the non-quoting control fell
+#   too (34.0 -> 27.5). Suspected mechanism, unproven: spec-dec runs draft-then-verify with
+#   a VARIABLE token count per step, which plausibly falls outside
+#   cudagraph_capture_sizes=[1,2,4,8] and drops to eager — i.e. it fights the flag worth
+#   4.4x on this box. "No draft model, no VRAM cost" was true and was never the binding
+#   constraint. plans/vllm-flag-experiments-2026-09-12.md.
+#   *** The last clause of this note was WRONG and is corrected below. *** It read "both
+#   spec-dec variants are now closed on measurement". That generalised from ngram to the
+#   whole technique, and MTP then beat baseline by +128%. ngram is closed; SPECULATIVE
+#   DECODING IS NOT. The suspected mechanism above was also wrong: capture sizes were the
+#   real constraint, and they are satisfiable -- see VLLM_CUDAGRAPH_SIZES.
+
+# --speculative-config mtp      # MEASURED 2026-09-14 and PROMOTED — decode 33.8 -> 77.2 tok/s
+#   on the 256-token bench (+128%), acceptance 3.27 tokens/step, 41.7 ms/step. Real site turns:
+#   ~47 tok/s median on a cold new chat, 60-75 on warm follow-ups. Prefill UNAFFECTED
+#   (0.346 vs 0.340 ms/token). Quality gate: 50 generations, 0 FORBIDDEN / 0 UNSTABLE /
+#   0 VARIABLE / 0 transport errors. Output hash 5ec1924e... is byte-identical to k=2.
+#   THE COST, and it is real: ms/step rises 29.6 -> 41.7 for EVERY step, accepted or not, so
+#   on text the draft head predicts badly this is a REGRESSION -- the non-quoting control probe
+#   ran 24.3 tok/s, below baseline's 33.8. It wins here because the site's answers are mostly
+#   structured explanations, which draft well. k=2 (64.6 tok/s, 39.0 ms/step) is the documented
+#   fallback if that ever stops being true.
+#   PROMOTED 2026-09-14 into the launcher's permanent argv (depth from VLLM_SPEC_K, default 3),
+#   the same channel --enable-prefix-caching uses. Experiment slot is EMPTY again. Verified from
+#   live sources: --speculative-config in /proc/<pid>/cmdline, speculative_config=
+#   SpeculativeConfig(method='mtp') resolved, capture sizes resolved [1,2,4,8,12,16], gated
+#   bench 76.2/76.1/76.1 tok/s VALID, acceptance 3.12.
+#
+#   PROMOTION WAS NOT JUST THE FLAG. k=3 decodes at query_len 1+3=4, so VLLM_CUDAGRAPH_SIZES
+#   had to move [1,2,4,8] -> [1,2,4,8,12,16] in the SAME change. The repo's conf.d still
+#   carried the old list (the harness had only rewritten the live file), so shipping the flag
+#   alone would have left a `revert` that restores [1,2,4,8], leaves widths 12 and 16
+#   uncaptured, and drops FULL cudagraphs to PIECEWISE *silently*. The launcher now REFUSES
+#   TO START when VLLM_CUDAGRAPH_SIZES and VLLM_SPEC_K disagree — a loud failure in place of
+#   an invisible one. Changing k means changing both; for k=2 the list is [1,2,3,4,6,8,9,12].
+#
+#   AFTER ANY PROMOTION, run: sudo ./scripts/tuning/09-vllm-experiments.sh rebaseline
+#   revert() restores both files from /root/vllm-exp-backups, and 10-install-service-files.sh
+#   RETIRES those backups without recreating them — so between an install and the next
+#   experiment, `revert` restores NOTHING while still printing "reverted and serving".
 
 # labrouter (OpenRC: labrouter) — :8004, the contract port. Supervised since 2026-08-31
 # (supervise-daemon, respawn_max=0); validates labrouter.yaml before start and waits
@@ -394,6 +526,20 @@ worth remembering:
   The router was meanwhile defaulting to `off_topic`, deflecting **13 of 40 golden-set `grounded`
   questions** with a canned redirect — a routing bug that no retrieval metric could see. Default is
   now `on_topic`, with grounding left to `RAG_MIN_SCORE` where it always was. See DEFECT_LEDGER #6–8.
+  (That last clause was itself wrong and is corrected above: `RAG_MIN_SCORE` has been 0.0/DISABLED
+  since 2026-06-18, so grounding was left to the *system prompt*, not to a threshold.)
+- **2026-09-12** — `eval/golden_set.yaml`'s `expect_substrings` grew one level of nesting so a
+  list can express "one fact, several spellings" as well as "several facts". It had to: the field
+  was read as ANY-of-strings against the answer by `eval_graded.py` and ALL-of-strings against the
+  retrieved context by `compare_retrieval.py`, so `["6", "six"]` was two required facts on the
+  context side while the KB only ever writes the digit. Three items were pinned at "partial"
+  permanently and the retrieval metric's ceiling was **33/36 (92%), not 100%**. Both readings now
+  come from one implementation, `scripts/expectations.py` (unit-tested in
+  `tests/test_expectations.py`). The ceiling is 36/36. **This does not void the three declined
+  retrieval A/Bs** — a constant ceiling applies to both arms, so it cost sensitivity, not
+  validity; those 3 rows simply could never show a difference. Also fixed the same day: the
+  context-window item still expected `"16"` from the 14B/16K era, which nothing true contains
+  (the model has served 32,768 since 2026-08-26) and which `"16 GB"` satisfied by accident.
 
 **When you change the system, change the docs in the same commit.** A wrong doc is worse than a
 missing one: it is confidently wrong, and it survives long after the person who knew better moved on.

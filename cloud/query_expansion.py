@@ -42,6 +42,32 @@ ALIAS_GROUPS: List[List[str]] = [
     ["favorite", "favourite", "preferred", "prefers", "preference", "enjoys most", "go-to"],
     ["nvlink", "tensor parallel", "tensor parallelism"],
     ["websocket", "streaming", "real-time chat", "real time chat"],
+    # Hindsight vocabulary reaches nothing in the KB, which writes its reflection as "Lessons
+    # Learned" (AVD, SAP, ai_portfolio_iterations). Golden question: "What would you do
+    # differently if you started over?" -- top rerank score 0.0031, BELOW the 0.0046
+    # lowest-on-topic floor in verify_gate.py, rank-1 an unrelated chunk, model refuses 3/3.
+    #
+    # *** THIS GROUP DOES NOT FIX THAT QUESTION. Verified live after deploy: top score still
+    # 0.0031, rank-1 still unrelated, still refuses 3/3. Kept only as a legitimate embedding-side
+    # vocabulary bridge. ***
+    #
+    # The pre-deploy measurement that suggested otherwise (0.0031 -> 0.0055) was INVALID: it fed
+    # the pre-expanded string to /api/retrieve, which made it both the embed query AND the rerank
+    # query. Production does not do that. `search_knowledge_base` expands only the EMBEDDING
+    # (main.py:402) and reranks on the ORIGINAL query (main.py:455) -- the comment there says so
+    # explicitly: "the reranker below still scores the ORIGINAL query so final relevance is
+    # unchanged."
+    #
+    # So there is a structural ceiling on what any alias group can achieve: expansion changes
+    # WHICH CANDIDATES Qdrant returns, and can never change how the cross-encoder ranks them.
+    # When a question's vocabulary does not match the corpus, expansion pulls the right chunk
+    # into the candidate set and the reranker then discards it -- exactly what happens here (AVD
+    # Migration moved rank 4 -> 3, score unchanged at 0.0007). Reranking on the expanded query
+    # would lift that ceiling and is a real experiment, but it changes relevance for every query
+    # and must be A/B'd, not assumed.
+    ["lessons learned", "lesson", "hindsight", "do differently", "done differently",
+     "started over", "start over", "mistakes", "what went wrong", "retrospective",
+     "looking back", "in retrospect"],
 ]
 
 # Cap appended terms so the embedding stays anchored to the real query.

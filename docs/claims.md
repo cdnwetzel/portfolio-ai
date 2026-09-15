@@ -14,7 +14,12 @@ third is the one that makes the first two worth believing.
 | Claim | Evidence | Verified |
 |---|---|---|
 | Qwen3.8-27B-FP8 on 2× RTX A4500 (NVLink, TP=2), 32K context | `/api/system-info`, `/v1/models` | 2026-09-04 |
-| **33.6–34.0 tok/s** single-stream generation | `bench-vllm.sh 8007 3`, three runs | 2026-09-04 |
+| **77.2 tok/s** single-stream generation (synthetic bench) | `bench-vllm.sh 8007 3`, three runs, contention-gated | 2026-09-14 |
+| **~47 tok/s** median on a real cold site turn; **60–75** on warm follow-ups | proxy `done`-frame telemetry, 12 gated turns | 2026-09-14 |
+| **+128% from MTP speculative decoding** (33.8 → 77.2), acceptance 3.27 tok/step | `plans/vllm-flag-experiments-2026-09-12.md` | 2026-09-14 |
+| Speculative decoding **costs** 29.6 → 41.7 ms/step and is a **regression** on hard-to-draft text (control probe 24.3 tok/s, below baseline) | same row, probe D | 2026-09-14 |
+| Prefill **unchanged** by speculative decoding: 0.340 → 0.346 ms/token | cold-prefill sweep, both arms, cards ≤50 °C | 2026-09-14 |
+| **33.6–34.0 tok/s** single-stream generation — *superseded, pre-speculative-decoding* | `bench-vllm.sh 8007 3`, three runs | 2026-09-04 |
 | CUDA graphs on, custom all-reduce disabled, capture sizes capped | bench asserts all three flags, not assumed | 2026-09-04 |
 | **~4.4× from CUDA-graph tuning** (6.2 → 27.7 tok/s at the time) | `t5810-vllm-cudagraph-tuning-2026-08-19.md` | 2026-08-19 |
 | 40 GB VRAM total (20 GB per card) | `nvidia-smi` | 2026-09-04 |

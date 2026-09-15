@@ -27,7 +27,9 @@
 - **GPU power cap: 165 W per card** (of a 200 W rating), applied at boot by
   `/usr/local/bin/gpu-tune.sh`. The SM clock is unrestricted to its 2100 MHz maximum. This is
   a deliberate tuning choice, not a limit: measured 33.4 tok/s at 71 °C versus 34.2 at 79 °C
-  for the full 200 W, i.e. 97.7 % of the throughput for an 8 °C thermal margin. (Repeated here
+  for the full 200 W, i.e. 97.7 % of the throughput for an 8 °C thermal margin. (Both arms
+  measured 2026-08-31 before speculative decoding; the ratio is what justifies the cap, not the
+  absolute figures — current speed is in the GPU tuning section below.) (Repeated here
   as well as under GPU tuning below: a "what is the GPU power cap" question lands on this
   hardware section, and retrieval returns at most two chunks per document.)
 - **Power supplies:** **two PSUs run at the same time.** The Dell 825 W internal PSU powers the
@@ -129,16 +131,28 @@ on the **asrock B550 (Ryzen 9 + RTX 5060 Ti)** — two distinct GPU boxes, one h
 
 ### GPU tuning — where the throughput comes from
 Measured on this hardware, not inherited defaults:
-- **~33 tokens/sec** generation on the 27B, single stream. The same box ran ~6 tok/s before
-  tuning — a **~4.4x** improvement that came from CUDA graphs, not from new hardware.
+- **~47 tokens/sec** generation on the 27B for a fresh question, **~60-75** on follow-up turns
+  in a conversation, and 77 on a synthetic single-stream benchmark (measured 2026-09-14). Two
+  separate changes produced that, and they are worth keeping apart rather than multiplied
+  together into one headline number:
+  - **CUDA graphs, 2026-08:** ~6 → ~28 tokens/sec, a **~4.4x** improvement that came from
+    configuration, not new hardware.
+  - **MTP speculative decoding, 2026-09:** ~34 → the figures above, roughly a further 1.4x on a
+    cold question and 2x on a warm follow-up. A small draft head proposes several tokens per
+    step and the full model verifies them at once.
 - Three settings produce it and must survive together: CUDA graphs on (no `--enforce-eager`),
   `--disable-custom-all-reduce` (custom all-reduce *breaks* graph capture on this A4500 NVLink
-  pair), and a **capped** set of captured batch sizes (`[1,2,4,8]` — vLLM captures ~70 by
-  default and capture memory scales with the count, which caused OOM at every utilization
-  setting until it was capped).
+  pair), and a **capped** set of captured batch sizes (vLLM captures ~70 by default and capture
+  memory scales with the count, which caused OOM at every utilization setting until it was
+  capped). The cap is currently `[1,2,4,8,12,16]`: with speculative decoding each step verifies
+  4 tokens at once, so the sizes that actually get used are the multiples of 4, and any of them
+  left uncaptured silently falls back to a slower path.
 - **Power cap: 165 W per card** (default is 200 W), set at boot. Measured trade-off:
   130 W → 29.4 tok/s, 150 W → 32.6, **165 W → 33.4 at 71 °C**, 200 W → 34.2 at 79 °C. 165 W
-  keeps 97.7% of the throughput with an 8 °C thermal margin instead of 1 °C. It replaced an
+  keeps 97.7% of the throughput with an 8 °C thermal margin instead of 1 °C. (That sweep was run
+  on 2026-08-31 with speculative decoding off. All four arms shared those settings, so the
+  comparison between them is still the reason for the cap — but the absolute tokens/sec figures
+  are historical and are not the current speed, which is above.) It replaced an
   older *crypto-mining* efficiency profile that was power-starving the cards.
 - **Power draw:** ~28 W total at idle with the model resident; **~330 W total under load**
   (both cards at the cap). Whole machine is roughly 150 W idle / 520 W under inference.

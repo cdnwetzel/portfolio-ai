@@ -28,7 +28,15 @@ VLLM_GDN=triton
 
 # CUDA graphs ON. This is the tuning win — capturing these batch sizes is worth
 # roughly 4x over eager mode on this hardware. Do not "simplify" it away.
-VLLM_CUDAGRAPH_SIZES=[1,2,4,8]
+#
+# COUPLED TO VLLM_SPEC_K (2026-09-14). These are not free-form sizes any more. With
+# speculative decoding at depth k, uniform decode runs at query_len = 1 + k, so the only
+# reachable widths are the MULTIPLES of (1+k) up to VLLM_SEQS*(1+k). At the live k=3 that
+# is 4, 8, 12, 16 — and each must be captured EXACTLY. A missing width does NOT error;
+# vLLM silently drops FULL cudagraphs to PIECEWISE and the box just runs slower.
+# The launcher refuses to start if this list and VLLM_SPEC_K disagree. Change one, change
+# both. (For the k=2 fallback the list is [1,2,3,4,6,8,9,12].)
+VLLM_CUDAGRAPH_SIZES=[1,2,4,8,12,16]
 
 # --- qwen3-specific parsers ---------------------------------------------
 # This is a reasoning model: it emits chain-of-thought into a separate `reasoning`
@@ -40,7 +48,13 @@ VLLM_TOOLPARSER=qwen3_coder
 
 # --- startup timing ------------------------------------------------------
 VLLM_MIN_FREE_MIB=19000        # wait for a nearly-free card before starting
-VLLM_VRAM_WAIT=180
+# 300, not the 180 this carried until 2026-09-12. Once the unit actually exports conf.d, this
+# value reaches the LAUNCHER's VRAM wait as well as the unit's start_pre -- and the launcher's
+# copy is the one on the respawn path, where orphaned TP workers are still holding ~19 GB each
+# and start_pre never runs. The launcher's own default was 300 with a documented crash-loop
+# rationale; raising conf.d to match keeps the conservative value rather than silently
+# shortening the margin as a side effect of fixing the plumbing.
+VLLM_VRAM_WAIT=300
 VLLM_READY_WAIT=1800           # 29GB load + torch.compile + CUDA graph capture.
                                # 600 was too short: a COLD torch_compile_cache
                                # costs ~290s of Dynamo/inductor work on its own
@@ -55,3 +69,35 @@ CUDAHOSTCXX=/usr/bin/g++-14
 
 # --- logging -------------------------------------------------------------
 VLLM_LOG=/var/log/qwen38/writer.log
+
+# --- experiment hook -----------------------------------------------------
+# Extra argv appended verbatim to the vllm serve command line, parsed as a bash
+# ARRAY by the launcher so JSON values keep their double quotes. EMPTY by default:
+# with this unset, argv is byte-identical to a stock start.
+#
+# Set by scripts/tuning/09-vllm-experiments.sh, which also auto-reverts. Examples:
+#   VLLM_EXTRA_ARGS='--enable-prefix-caching'
+#   VLLM_EXTRA_ARGS="'--speculative-config' '{\"method\":\"ngram\",\"num_speculative_tokens\":4}'"
+#
+# THE VALUE IS PARSED TWICE, and the second parse is the one that bites. OpenRC sources this
+# file (parse 1), then the launcher runs `eval "_extra=(${VLLM_EXTRA_ARGS})"` (parse 2). Each
+# WORD must therefore still be quoted *inside* the value. The single-quoted form this file
+# used to document was measured wrong on 2026-09-14:
+#
+#   VLLM_EXTRA_ARGS='--speculative-config {"method":"ngram","num_speculative_tokens":4}'
+#     -> 3 elements: [--speculative-config] [method:ngram] [num_speculative_tokens:4]
+#
+# The braces survive parse 1 unquoted, so parse 2 applies BRACE EXPANSION on the commas and
+# the JSON is shredded into separate argv words. The corrected form above gives 2 elements
+# with the JSON intact. This is the same hazard that made `shq()` necessary in
+# 09-vllm-experiments.sh — the harness already writes the correct form; only this comment
+# was wrong, which is worse, because a comment is what someone copies by hand.
+#
+# This is the ONLY variable in this file with no launcher-side default, which makes it
+# the only one whose absence is visible. It is also the reason the export block exists
+# in vllm-qwen38.openrc: OpenRC sources this file into the init script's shell but does
+# not export it, so from 2026-08-31 to 2026-09-12 this setting reached nothing and an
+# experiment reported success having changed the engine not at all. If you add a
+# variable here, add it to that export list, and verify with:
+#   tr '\0' '\n' < /proc/$(pgrep -f 'bin/vllm serve' | head -1)/environ | grep '^VLLM_'
+#VLLM_EXTRA_ARGS=''
