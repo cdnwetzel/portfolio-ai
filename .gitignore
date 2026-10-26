@@ -1,0 +1,115 @@
+# Environment
+.env
+.env.local
+.env.prod
+*.pem
+*.key
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+.venv/
+env/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Node
+node_modules/
+dist/
+.next/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnp
+.pnp.js
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+*.sublime-project
+*.sublime-workspace
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Docker
+docker-compose.override.yml
+.dockerignore
+
+# Secrets (never commit!)
+secrets/
+ssh-keys/
+.env.production
+.env.staging
+
+# Build outputs
+*.o
+*.a
+*.so
+dist/
+build/
+
+# Logs
+*.log
+logs/
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Backups
+*.sql
+*.sql.gz
+backup/
+
+# Stale local scripts / one-off init files
+run_phase0.sh
+run_phase0_direct.sh
+scripts/cwdotcom-api.initd
+
+# KB subdirs not tracked in git
+knowledge_base/pxx_docs/
+
+# Diagnostic venv (T5810) + run output
+.venv-diag/
+diagnostic-battery-results.json
+
+# Eval run artifacts (reproducible via scripts/eval_graded.py; golden_set.yaml IS tracked)
+eval/results/
+
+# Regenerable Qdrant export snapshots (rerun scripts/export_qdrant_md.py)
+exports/
+
+# Claude Code local permissions (machine-specific; contains LAN hosts)
+.claude/settings.local.json
+
+# operator-local deploy targets (see .deploy.env.example)
+.deploy.env

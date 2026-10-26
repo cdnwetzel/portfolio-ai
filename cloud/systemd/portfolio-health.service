@@ -1,0 +1,37 @@
+[Unit]
+Description=Portfolio AI deep health probe (proxy + tunneled vLLM/Qdrant/embed/rerank/verifier + E2E)
+After=network.target api-proxy.service portfolio-ai-tunnel.service
+# If the probe process itself crashes (a bug, an OOM) before it can send its own ntfy,
+# this fires the alert oneshot so the failure-of-the-monitor never goes silent.
+OnFailure=portfolio-health-alert.service
+
+[Service]
+Type=oneshot
+# Config (NOT in the repo) — create on the VPS once:
+#   NTFY_URL=https://ntfy.sh/<your-private-topic>
+#   HEALTHCHECKS_URL=https://hc-ping.com/<uuid>     # optional dead-man's switch
+# See cloud/setup-health-monitor.sh.
+EnvironmentFile=/etc/default/portfolio-health
+WorkingDirectory=/opt/portfolio-health
+# E2E smoke is ENABLED here as of 2026-08-31. It is no longer gated by --no-smoke
+# because health_aggregate.py now throttles it internally to SMOKE_INTERVAL_SEC
+# (default 30 min), so the cheap per-service probes still run every 5 min while the
+# expensive generation probe runs at most twice an hour. The original objection to
+# running it here — 4 real generations every 5 min would keep the GPU self-testing
+# half the time — was correct and is what the throttle solves.
+#
+# Why this changed: E2E was previously reachable ONLY via the daily heartbeat, so
+# detection latency for a generation-layer failure was up to 24 hours. It worked —
+# the 2026-08-26 vLLM outage was caught and paged as CRITICAL on Aug 27 and Aug 28 —
+# but a day is a long time to serve empty answers. Now it is at most 30 minutes.
+#
+# The comment this replaces also claimed coverage from "the 30-min T5810 canary".
+# That canary is NOT installed on the T5810 (verified 2026-08-31: not in any
+# runlevel, no cron entry). Do not count it as coverage until it exists.
+ExecStart=/usr/bin/python3 /opt/portfolio-health/health_aggregate.py
+# A CRITICAL service makes the script exit 1; that is the normal "something is down"
+# path (it already paged via ntfy), NOT a monitor failure — so don't treat exit 1 as
+# an OnFailure trigger. Only a real crash (signal / unhandled) should fire the alert.
+SuccessExitStatus=0 1
+StandardOutput=journal
+StandardError=journal

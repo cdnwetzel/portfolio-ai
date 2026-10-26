@@ -1,0 +1,26 @@
+# DISABLED 2026-09-13 — DEFECT_LEDGER #17. Do not restore without reading it.
+#
+# This drop-in routed every chat turn through the Headroom compressor and handed the
+# GENERATOR the compressed text. At production scale it removed 44.9% of tokens by deleting
+# short "low-information" words, which on a factual corpus are the facts:
+#
+#   "Ti" 8 -> 2     the word "two" 6 -> 4     "RTX 5060 Ti" 3 -> 1
+#   bare "RTX 5060" (a device that does not exist on this fleet) 0 -> 2
+#
+#   "on the **RTX 5060 Ti 16 GB** in the asrock B550"   ->  "on **RTX 5060 16 in B550"
+#   "the complete GPU inventory: two A4500s and one 5060 Ti."  ->  "inventory: A4500s one 5060 Ti."
+#
+# It also mangled the GROUNDING rules in SYSTEM_PREFIX and broke the FOLLOWUPS scaffold.
+# Live effect: 12/18 answers named a nonexistent RTX 5060, vs 0/16 with the same chunks
+# uncompressed.
+#
+# It bought nothing: MAX_CONTEXT_TOKENS is 14,384 and a real prompt is ~2,982 tokens, so the
+# budget was never tight; tokens are free on owned hardware; it added ~1,017 ms mean latency;
+# and it rewrote the prefix that prefix caching depends on.
+#
+# To restore it you would first need an integrity gate on device names and numerals. saved_pct
+# is not a quality metric.
+#
+# [Service]
+# Environment=COMPRESS_URL=http://127.0.0.1:8788
+# Environment=COMPRESS_TIMEOUT=15

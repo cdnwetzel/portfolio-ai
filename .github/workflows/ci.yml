@@ -1,0 +1,104 @@
+name: CI
+
+# Real CI for the portfolio RAG chat. Deliberately does NOT deploy: the production
+# deploy is `cloud/deploy.sh` (manual, per-action authorization, prod SSH, and a live
+# self-test gate). The previous workflow rsynced `src/`, `Dockerfile` and
+# `docker-compose.yml` — all of which live on the archived `legacy/saas-scaffold`
+# branch, not on main — so it could only ever have failed or lied.
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  # Nothing private belongs in this public repository: not in a file, and not
+  # in a commit message, PR title or PR body, which are published just the same.
+  privacy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Tracked files
+        run: python scripts/privacy_scan.py files
+      - name: PR title and body
+        if: github.event_name == 'pull_request'
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+          BODY: ${{ github.event.pull_request.body }}
+        run: printf '%s\n\n%s\n' "$TITLE" "$BODY" | python scripts/privacy_scan.py text --name pr
+      - name: Commit messages in this PR
+        if: github.event_name == 'pull_request'
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          status=0
+          for c in $(git rev-list "$BASE..$HEAD"); do
+            git log -1 --format=%B "$c" | python scripts/privacy_scan.py text --name "commit ${c:0:7}" || status=1
+          done
+          exit $status
+      - name: Commit messages pushed to main
+        if: github.event_name == 'push'
+        env:
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.event.after }}
+        run: |
+          range="$BEFORE..$AFTER"
+          git cat-file -e "$BEFORE^{commit}" 2>/dev/null || range="$AFTER"
+          status=0
+          for c in $(git rev-list "$range"); do
+            git log -1 --format=%B "$c" | python scripts/privacy_scan.py text --name "commit ${c:0:7}" || status=1
+          done
+          exit $status
+
+  python-tests:
+    name: Python unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      # The offline unit tests import only the Python stdlib: the pure-logic modules
+      # (guardrails, query_expansion, context_manager, sparse_bm25, verifier_core, and
+      # the indexer's chunker) were extracted precisely so they can be tested without
+      # the live stack. So install pytest alone — NOT the heavy runtime requirements.txt,
+      # and no postgres service.
+      - name: Install test deps
+        run: pip install pytest pytest-asyncio
+
+      # test_rag_system.py is deliberately excluded: it needs the full live stack
+      # (api-proxy :8000, vLLM :8004, Qdrant :6333, embeddings :8005) and is run by hand.
+      - name: Run unit tests
+        run: pytest tests/ home/verifier-service/test_verifier_core.py -v
+
+  frontend-build:
+    name: Frontend build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install
+        working-directory: frontend
+        run: npm ci
+
+      # Catches JSX/build breakage before it can reach the rsync in cloud/deploy.sh.
+      - name: Build
+        working-directory: frontend
+        run: npm run build

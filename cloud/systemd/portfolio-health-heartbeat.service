@@ -1,0 +1,15 @@
+[Unit]
+Description=Portfolio AI daily heartbeat (once-a-day "all green" ntfy + healthchecks ping)
+After=network.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/default/portfolio-health
+WorkingDirectory=/opt/portfolio-health
+# --heartbeat sends a single daily summary so silence never means "monitor is dead" —
+# a green day still produces one push, and the healthchecks.io ping keeps the
+# dead-man's switch fed.
+ExecStart=/usr/bin/python3 /opt/portfolio-health/health_aggregate.py --heartbeat
+SuccessExitStatus=0 1
+StandardOutput=journal
+StandardError=journal

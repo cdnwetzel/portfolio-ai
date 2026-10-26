@@ -1,0 +1,35 @@
+# Python dependencies for the portfolio RAG chat.
+#
+# Derived from what the code actually imports. The previous version of this file
+# listed sqlalchemy, asyncpg, alembic, redis, stripe, python-jose, passlib and
+# llama-index — dependencies of the multi-tenant SaaS scaffold that was scoped out
+# and now lives on the `legacy/saas-scaffold` branch. None are imported on `main`.
+#
+# There is deliberately no qdrant-client: the proxy and the indexer talk to Qdrant
+# over its REST API via httpx/requests, so the client library is not needed.
+
+# --- Cloud API proxy (cloud/api-proxy.py) -----------------------------------
+# The pure-logic modules it imports (guardrails, context_manager, query_expansion,
+# sparse_bm25) are stdlib-only by design, so they unit-test without any of this.
+fastapi>=0.104
+uvicorn[standard]>=0.24
+httpx>=0.25
+
+# --- KB indexer, graded eval, self-test (scripts/) ---------------------------
+# index_with_embeddings.py embeds chunks with the same model the embed service
+# uses, so index vectors match query vectors.
+sentence-transformers>=2.2
+requests>=2.31
+websockets>=12.0
+PyYAML>=6.0
+
+# --- Tests -------------------------------------------------------------------
+# CI installs only these two; see .github/workflows/ci.yml.
+pytest>=7.4
+pytest-asyncio>=0.21
+
+# Component-local requirements, installed on their own hosts:
+#   home/verifier-service/requirements.txt   (asrock B550 — faithfulness judge)
+#   integrations/mcp/requirements.txt        (MCP server for the OpenClaw agent)
+# The embed (8005) and rerank (8006) services on the T5810 need fastapi, uvicorn
+# and sentence-transformers, all listed above.

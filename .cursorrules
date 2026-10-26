@@ -1,0 +1,324 @@
+# Code Standards & AI Guardrails
+
+> **Scope note.** The multi-tenant SaaS this file was written for was scoped out. What runs is a
+> single-tenant portfolio RAG chat: no database, no auth, no billing, no `src/`. Rules below that
+> reference `src/`, SQLAlchemy models, Alembic migrations or tenants apply to the archived
+> scaffold (`legacy/saas-scaffold`), **not** to this codebase. The live layout is `cloud/`
+> (FastAPI proxy), `home/` (GPU-host services), `frontend/` (React), `scripts/` (indexer, eval).
+> See CLAUDE.md. Where this file and `red-lines.md` disagree, **red-lines.md wins**.
+
+**Project:** Portfolio AI (single-tenant RAG chat)
+**Framework:** psplan 5-Gate Workflow
+**Audience:** Enterprise (law firms, IT managers, consultants)
+**Scope:** Portfolio demo on owned GPU hardware
+
+---
+
+## Code Style & Quality
+
+### Imports
+- Alphabetized within groups (stdlib, third-party, local)
+- Group order: `import`, then `from X import`
+- Type imports under `if TYPE_CHECKING:` block
+- No wildcard imports
+
+### Type Hints
+- **Target: 90%+ coverage** of all public functions
+- All function parameters and return types must be annotated
+- Use `Optional[T]` for nullable, never bare `None`
+- Use `Union` sparingly; prefer concrete types or protocols
+- Validate with: `mypy --strict src/`
+
+### Naming
+- `snake_case` for functions, variables, modules
+- `PascalCase` for classes, enums, type aliases
+- `UPPER_CASE` for constants
+- Private attributes: `_leading_underscore` (single), `__dunder__` for name mangling only (rare)
+- Boolean variables: prefix with `is_`, `has_`, `can_`, `should_`
+
+### Docstrings
+- **Public functions:** 1-line docstring minimum
+- **Complex functions:** Multi-line with Args, Returns, Raises sections
+- **Why before what:** Document non-obvious decisions, invariants, gotchas
+- **No redundant docstrings:** Don't restate what the signature already says
+- Format: Google-style docstrings (Args:, Returns:, Raises:)
+
+### Comments
+- **Default: none.** Code should be self-explanatory (good names, clear structure)
+- **When to add:** Hidden invariants, workarounds for specific bugs, non-obvious complexity
+- **Never document what:** "x = 5  # set x to 5" is noise
+- **Always document why:** "# Stripe webhook may arrive before DB commit; retry with backoff"
+
+---
+
+## Security (Non-Negotiable)
+
+### Secrets & Credentials
+- 🚫 **NEVER** commit `.env` files, API keys, certificates, private keys
+- 🚫 **NEVER** hardcode secrets (use `pydantic.SecretStr` for config values)
+- 🚫 **NEVER** log secrets (passwords, tokens, API keys)
+- ✅ Use environment variables for all secrets
+- ✅ Validate secrets are loaded before startup (fail loudly if missing)
+- ✅ Rotate secrets on schedule (document in OPERATIONS.md)
+
+### Input Validation
+- ✅ Validate ALL user input (request bodies, query params, file uploads)
+- ✅ Reject oversized payloads (file uploads, knowledge base documents)
+- ✅ Validate request rate limits (Redis-backed, per-tenant, per-API-key)
+- ✅ Reject requests outside expected content-type (JSON only, no XML)
+- 🚫 **NEVER** trust user input for SQL, system calls, prompts
+
+### SQL Injection Prevention
+- ✅ Use SQLAlchemy ORM exclusively (parameterized queries)
+- ✅ Never string-format SQL
+- ✅ Use `.filter()` with `==`, `.in_()`, `.like()` — never raw SQL
+- 🚫 **NEVER** allow raw SQL from user input
+
+### Prompt Injection Prevention
+- ✅ Treat user queries as untrusted data
+- ✅ Use instruction-based system prompts (not data-driven)
+- ✅ Validate retrieval results before including in context
+- ✅ Log all user queries (audit trail)
+- 🚫 **NEVER** splice user input directly into prompts
+
+### Encryption
+- ✅ TLS/HTTPS in transit (always, no exceptions)
+- ✅ Encrypt sensitive data at rest (passwords hashed with bcrypt, sensitive fields pgcrypto)
+- ✅ API keys stored as hashes (bcrypt), plaintext never stored
+- ✅ JWT tokens include tenant_id (validate on every request)
+- 🚫 **NEVER** store plaintext passwords, API keys, or tokens
+
+### Authentication & Authorization
+- ✅ JWT tokens: HS256, 24-hour expiration, refresh endpoint
+- ✅ API keys: hashed at rest, validated on every protected endpoint
+- ✅ Row-level security: all queries filtered by current tenant
+- ✅ Admin endpoints: require JWT with admin role
+- 🚫 **NEVER** trust X-User-ID headers without JWT validation
+- 🚫 **NEVER** allow cross-tenant queries (RLS enforced at DB layer)
+
+---
+
+## Privacy & Logging
+
+### Logging — metadata only
+The chat is public and anonymous. There are no accounts, no database, and nothing to attribute
+a query to. `red-lines.md` #2 is absolute and `cloud/api-proxy.py` enforces it.
+
+- ✅ Log request metadata: `request_id`, timestamps, durations, token *counts*, chunk counts
+- ✅ Log retrieval decisions: how many candidates, how many survived the per-doc cap
+- 🚫 **NEVER** log query text or response text — not at DEBUG, not "temporarily" (red-lines.md #2)
+- 🚫 **NEVER** persist chat history server-side; it lives in the browser's localStorage
+
+### Multi-tenancy — not applicable
+The tenant isolation, RLS, API-key scoping and per-tenant billing rules that were here describe
+the SaaS scaffold that was scoped out (`legacy/saas-scaffold`; designs in `docs/archive/`). The
+running system is single-tenant by construction: one knowledge base, one Qdrant collection, no
+auth layer. Do not add `tenant_id` to anything.
+
+### Data Retention & Deletion
+- ✅ Implement hard delete (no soft deletes, no recovery after deletion)
+- ✅ Implement configurable retention policies (auto-purge old audit logs)
+- ✅ Document retention period in code (RETENTION_DAYS constant)
+- ✅ Test deletion (verify data is unrecoverable)
+- 🚫 **NEVER** keep deleted data in backups without explicit retention policy
+
+### Documentation
+- ✅ Document every security-relevant decision (why we chose this architecture)
+- ✅ Document known limitations (what this doesn't protect against)
+- ✅ Document assumptions (what we assume to be true)
+- ✅ Create COMPLIANCE.md when launching (checklist of what's auditable)
+- 🚫 **NEVER** assume reviewers will understand your security model
+
+---
+
+## Testing (80%+ Coverage Target)
+
+### Unit Tests
+- ✅ Test auth functions (token generation, validation, refresh)
+- ✅ Test validation functions (schema validation, input bounds)
+- ✅ Test business logic (billing calculations, token counting)
+- ✅ Test error paths (invalid input, edge cases, null values)
+- ✅ Use pytest fixtures for mocks + test data
+- Target: 80%+ line coverage (pytest --cov=src)
+
+### Integration Tests
+- ✅ Test API endpoints end-to-end (request → response)
+- ✅ Test database operations (CRUD, transactions)
+- ✅ Test RLS enforcement (tenant A cannot see tenant B's data)
+- ✅ Test Stripe webhook handling (with test API keys)
+- ✅ Use test database (Docker PostgreSQL, fresh per test)
+
+### E2E Tests
+- ✅ Full user journey: signup → login → query → billing
+- ✅ Multi-tenant scenarios (user A in tenant A, user B in tenant B)
+- ✅ Error recovery (what happens if inference times out?)
+- ✅ Edge cases (empty knowledge base, zero tokens, concurrent requests)
+- Use `httpx.AsyncClient` for async endpoint testing
+
+### Security Tests
+- ✅ Test RLS enforcement (direct SQL bypass fails)
+- ✅ Test JWT validation (tampered tokens rejected)
+- ✅ Test API key hashing (plaintext key ≠ stored hash)
+- ✅ Test prompt injection protection (user input sanitized)
+- ✅ Test SQL injection protection (parameterized queries, no raw SQL)
+
+### Performance Tests
+- ✅ Latency: p50 < 100ms, p99 < 500ms (first token)
+- ✅ Throughput: > 100 tokens/sec (dual A4500 with batching)
+- ✅ Concurrent users: 32–64 without queuing
+- Use `locust` for load testing (test at GATE 3)
+
+### Test Patterns
+- Use `pytest.mark.asyncio` for async tests
+- Mock external services (Stripe, vLLM) in unit tests
+- Use real database for integration tests
+- Use fixtures for reusable test data
+- Parametrize tests for multiple input variations (`@pytest.mark.parametrize`)
+
+---
+
+## Database & ORM
+
+### SQLAlchemy
+- ✅ Use async SQLAlchemy (`asyncpg` driver)
+- ✅ Use declarative base for models (sqlalchemy.orm.declarative_base)
+- ✅ Define all relationships explicitly (foreign keys, cascades)
+- ✅ Use indexes on frequently queried columns (tenant_id, user_id, created_at)
+- ✅ Use type hints on all column definitions
+- ✅ Never use raw SQL (use ORM exclusively)
+
+### Migrations (Alembic)
+- ✅ Create migration for every schema change
+- ✅ Never auto-generate migrations without review
+- ✅ Test migrations on fresh database (alembic upgrade head)
+- ✅ Document migration intent (what problem does it solve?)
+- ✅ Make migrations reversible (downgrade must work)
+
+### Row-Level Security (RLS)
+- ✅ Every table must have `tenant_id` column
+- ✅ Every query filtered by tenant_id (use get_current_tenant() middleware)
+- ✅ Never allow queries across tenants
+- ✅ Test RLS enforcement (direct SQL bypass should fail)
+- 🚫 **NEVER** skip RLS checks for "admin" operations
+
+---
+
+## Async/Concurrency
+
+### FastAPI & Uvicorn
+- ✅ All I/O is async (database, HTTP, inference)
+- ✅ Use `async def` for route handlers
+- ✅ Use `.get_db()` dependency for database sessions
+- ✅ Use `asyncio.gather()` for parallel operations
+- ✅ Set reasonable timeouts (30s max for inference, 10s for API calls)
+- 🚫 **NEVER** block event loop (no sleep, no synchronous I/O)
+
+### Concurrency Limits
+- ✅ Rate limit per tenant (100 req/sec API, 10 concurrent inferences)
+- ✅ Queue inference requests (vLLM batching, max queue size = 1000)
+- ✅ Timeout inference (30s max, return error)
+- ✅ Circuit breaker for failing services (fail fast, don't retry forever)
+
+---
+
+## Logging & Monitoring
+
+### Structured Logging
+- ✅ Use JSON logging (structured, parseable)
+- ✅ Include: timestamp, level, message, tenant_id, user_id, request_id
+- ✅ Log errors with full traceback
+- ✅ Log slow requests (> 500ms)
+- ✅ Never log sensitive data (passwords, API keys, PII)
+
+### Metrics
+- ✅ Track: latency (p50, p99), error_rate, throughput, GPU_util
+- ✅ Export to Prometheus (or simple JSON for MVP)
+- ✅ Alert on: p99 latency > 500ms, error_rate > 1%, GPU util > 90%
+- ✅ Health check endpoint: `/health` returns 200 if all systems OK
+
+### Debugging
+- ✅ Use `logging.getLogger(__name__)` in every module
+- ✅ Set log level via `LOG_LEVEL` env var (default: INFO)
+- ✅ Structured logging includes request_id (trace requests across services)
+- 🚫 **NEVER** log full request bodies (too much noise, privacy risk)
+
+---
+
+## Dependencies & Packages
+
+### Requirements
+- ✅ Pin all versions (requirements.txt, no ~=)
+- ✅ Minimize dependencies (no unused packages)
+- ✅ Prefer standard library (requests → urllib, no heavy frameworks)
+- ✅ Review security advisories monthly
+- ✅ Update critical packages immediately (security patches)
+
+### Imports
+- ✅ Only import what you use
+- ✅ Avoid circular imports (refactor if they occur)
+- ✅ Use lazy imports for heavy modules (import inside function if not always used)
+
+---
+
+## Deployment & Operations
+
+### Docker
+- ✅ Use Python 3.11-slim base image
+- ✅ Install only runtime dependencies (no dev packages)
+- ✅ Run as non-root user
+- ✅ Set reasonable resource limits
+- ✅ Health check: curl /health before marking container healthy
+
+### Configuration
+- ✅ All config via environment variables (12-factor app)
+- ✅ Validate config at startup (fail loudly if required vars missing)
+- ✅ Use .env.example (document required variables)
+- 🚫 **NEVER** commit .env (use .env.example template)
+
+### CI/CD
+- ✅ Run tests on every commit (pytest)
+- ✅ Run linting on every commit (ruff check)
+- ✅ Run type checking on every commit (mypy)
+- ✅ Build Docker image on main branch
+- ✅ Push image only if all checks pass
+
+---
+
+## Summary: Red Lines
+
+**These are non-negotiable (from red-lines.md):**
+
+1. 🚫 Never plaintext passwords, API keys, or tokens
+2. 🚫 Never log customer data or sensitive queries
+3. 🚫 Never commit secrets to git
+4. 🚫 Never trust user input (always validate)
+5. 🚫 Never allow cross-tenant queries (RLS enforced)
+6. 🚫 Never skip encryption in transit
+7. 🚫 Never deploy without passing tests
+8. 🚫 Never disable audit logging
+9. 🚫 Never store unencrypted sensitive data
+10. 🚫 Never hardcode configuration
+
+---
+
+## Validation Checklist
+
+Before submitting code for review:
+
+- [ ] `mypy --strict src/` passes (no type errors)
+- [ ] `ruff check src/` passes (no linting errors)
+- [ ] `pytest --cov=src tests/` ≥ 80% coverage
+- [ ] No hardcoded secrets (grep for "sk_", "api_key", "password")
+- [ ] All public functions have type hints
+- [ ] All public functions have docstrings
+- [ ] No raw SQL (SQLAlchemy ORM only)
+- [ ] RLS checks present in all database queries
+- [ ] Security-relevant code has comments explaining decisions
+- [ ] Tests include error paths and edge cases
+- [ ] Docker image builds without warnings
+
+---
+
+**Status:** GATE 1 Complete
+**Last Updated:** 2026-06-06
+**Next:** Use this as guardrails during GATE 2 development

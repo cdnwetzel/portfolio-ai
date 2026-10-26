@@ -1,0 +1,53 @@
+#!/sbin/openrc-run
+# Set the CPU governor to `performance` BEFORE the services that depend on it.
+#
+# WHY THIS IS A SERVICE AND NOT AN /etc/local.d SCRIPT (2026-09-04).
+#
+# Same defect as gpu-tune, found the same way. `local` declares `after *`, so it waits for
+# EVERY service in the runlevel — including vllm-qwen38, which sits in "starting" for minutes
+# while it loads FP8 weights and captures CUDA graphs. `local` never gets its turn, so nothing
+# in /etc/local.d runs at boot.
+#
+# It was masked here: the governor read `performance` during diagnosis only because `local`
+# had been started BY HAND minutes earlier. On a clean boot it stays at the shipped
+# `userspace`, which pins every thread at scaling_min (1200 MHz of 2200) forever, because
+# nothing ever sets a speed.
+#
+# This is on the chat critical path, measured 2026-08-31:
+#   embed service :8005 (bge-base, CPU-only)   24 ms  -> 45 ms
+#   Qdrant search                              1.0 ms -> 2.0 ms
+# i.e. retrieval roughly doubles in latency on every query, silently.
+
+name="cpu-governor"
+description="Pin CPU governor to performance (embed + Qdrant are CPU-bound and on the hot path)"
+
+depend() {
+    after localmount
+    before embed-service qdrant vllm-qwen38
+}
+
+start() {
+    ebegin "Setting CPU governor to performance"
+    local g count=0
+    for g in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do
+        [ -w "$g" ] || continue
+        echo performance > "$g" 2>/dev/null && count=$((count+1))
+    done
+    if [ "$count" -eq 0 ]; then
+        eend 1 "no writable cpufreq governors found"
+        return 1
+    fi
+    # Verify the RESULT rather than trusting the writes.
+    local wrong
+    wrong=$(cat /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor 2>/dev/null | grep -cv "^performance$")
+    echo "$(date -Iseconds) set ${count} cpus, non-performance remaining: ${wrong}" >> /var/log/cpu-governor.log
+    if [ "$wrong" -ne 0 ]; then
+        eend 1 "${wrong} CPUs not on performance"
+        return 1
+    fi
+    eend 0
+}
+
+stop() {
+    return 0
+}

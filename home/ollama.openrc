@@ -1,0 +1,45 @@
+#!/sbin/openrc-run
+# OpenRC service for Ollama (judge model host for the faithfulness verifier).
+# The GURU sci-ml/ollama-bin package ships only a systemd unit; this box is OpenRC,
+# so we provide our own. Mirrors the systemd unit: runs `ollama serve` as the ollama
+# user on 127.0.0.1:11434. Install to /etc/init.d/ollama (0755), rc-update add.
+
+name="Ollama"
+description="Ollama LLM server (judge model for the RAG faithfulness verifier)"
+
+command="/usr/bin/ollama"
+command_args="serve"
+command_user="ollama:ollama"
+command_background="yes"
+supervisor="supervise-daemon"
+pidfile="/run/ollama.pid"
+respawn_delay=3
+respawn_max=5
+respawn_period=60
+output_log="/var/log/ollama.log"
+error_log="/var/log/ollama.log"
+
+# ollama serve needs a writable HOME (models land in $HOME/.ollama). The ollama
+# user's home is /var/lib/ollama. Bind the API to localhost only.
+export HOME="/var/lib/ollama"
+export OLLAMA_HOST="127.0.0.1:11434"
+# Ollama's built-in default context is 4096, and it silently TRUNCATES longer prompts.
+# The verifier sends up to ~10k-token judge prompts (15 evidence chunks) and requests
+# num_ctx=16384 per call; the eval harness (scripts/eval_graded.py) hits the OpenAI-compatible
+# endpoint, which can't pass num_ctx, so it would fall back to 4096. When those two windows
+# differ, ollama reloads the model between them (~60s cold load) — a reload that exceeded the
+# eval's judge timeout and failed 17/34 rows in one run. Pinning the server default to 16384
+# makes both callers resolve to the same runner: no reload thrash, no silent truncation.
+# The 14B-q4_K_M model (~9.2 GB) + a 16384 KV cache fits the RTX 5060 Ti's 16 GB
+# (Tier 2 upgrade; was 7B + 12288 on the 3060 Ti's 8 GB).
+export OLLAMA_CONTEXT_LENGTH="16384"
+
+depend() {
+    need net
+    after bootmisc
+}
+
+start_pre() {
+    checkpath -d -m 0750 -o ollama:ollama /var/lib/ollama
+    checkpath -f -m 0644 -o ollama:ollama /var/log/ollama.log
+}

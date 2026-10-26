@@ -1,0 +1,61 @@
+#!/sbin/openrc-run
+# Faithfulness verifier service (verifier-faithfulness-layer.md).
+# Target: the spare Ryzen 9 5950X / RTX 3060 Ti box (NOT the T5810).
+# Install to /etc/init.d/verifier-service (root-owned, 0755)
+# Enable:  rc-update add verifier-service default
+# Needs a judge model reachable at JUDGE_URL (default: local Ollama :11434).
+# On a systemd box, use the equivalent unit (see README) instead.
+
+name="Faithfulness Verifier"
+description="Out-of-band claim-level faithfulness judge for the portfolio RAG chat (port 8007)"
+
+supervisor="supervise-daemon"
+command="/home/user/miniforge3/bin/python3"
+command_args="/opt/verifier-service/verifier.py"
+pidfile="/run/verifier-service.pid"
+command_user="user:user"
+: "${VERIFIER_LOG:=/var/log/verifier-service.log}"
+output_log="${VERIFIER_LOG}"
+error_log="${VERIFIER_LOG}"
+
+# Respawn/logging discipline — set from failures observed 2026-08-29/30:
+#   * respawn_max=0 (UNLIMITED). A bounded cap does not "give up gracefully", it
+#     LATCHES THE SERVICE OFF permanently after a transient squeeze. qdrant hit
+#     exactly this (its unit records "respawn_max exceeded -> service latched off")
+#     and rerank-service hit it too. Both were fixed in isolation; the lesson had
+#     not propagated here.
+#   * output_log/error_log. Without them a crash leaves NOTHING behind — the
+#     rerank-service outage was undiagnosable for precisely this reason, and the
+#     vLLM investigation lost time to an OpenRC log that had been empty since Aug 23
+#     while the real process logged somewhere undeclared.
+#   * respawn_delay=15, not 5. With unlimited respawns, 5s hammers a hard-failing
+#     service ~12x/min and floods the log it now writes.
+#
+# The verifier is fully fail-open — chat is unaffected if it dies — so its failure
+# is SILENT by design. That makes logging more important here, not less: a latched-off
+# verifier looks exactly like a verifier with nothing to flag.
+respawn_delay=15
+respawn_max=0
+
+# Config (override in /etc/conf.d/verifier-service):
+#   VERIFIER_BIND=<asrock-lan-ip>   # THIS box's LAN IP — bind here (not 0.0.0.0) so the
+#                              # T5810 tunnel reaches 8007 without exposing it LAN-wide.
+#   JUDGE_BACKEND=ollama
+#   JUDGE_MODEL=qwen2.5:7b-instruct-q4_K_M
+#   THRESHOLD=0.8
+#   DB_PATH=/home/user/verifier/verdicts.db
+
+# Bind address for uvicorn. Localhost-only by default; conf.d overrides to the LAN IP on
+# the asrock box. Exported so supervise-daemon passes it into verifier.py's environment.
+: "${VERIFIER_BIND:=127.0.0.1}"
+export VERIFIER_BIND
+
+depend() {
+    need localmount net
+    after bootmisc
+}
+
+start_pre() {
+    checkpath -d -m 0755 -o user:user /opt/verifier-service
+    checkpath -f -m 0644 -o user:user "${VERIFIER_LOG}"
+}

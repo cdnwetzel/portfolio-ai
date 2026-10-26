@@ -1,0 +1,89 @@
+[
+  {
+    "name": "faithful_fully_covered",
+    "query": "What GPUs does Chris run?",
+    "answer": "Chris runs two NVIDIA RTX A4500 GPUs connected with NVLink. [source: infrastructure]",
+    "chunks": [
+      {"title": "AI Portfolio System", "source": "infrastructure",
+       "content": "The system runs on a Dell Precision T5810 with two RTX A4500 20 GB GPUs connected via NVLink (40 GB aggregate), tensor-parallel."}
+    ],
+    "expected": {"verdict_type": "judged", "flagged": false}
+  },
+  {
+    "name": "hallucinated_unsupported_claim",
+    "query": "What GPUs does Chris run?",
+    "answer": "Chris runs four NVIDIA H100 GPUs in a custom liquid-cooled rack. [source: infrastructure]",
+    "chunks": [
+      {"title": "AI Portfolio System", "source": "infrastructure",
+       "content": "The system runs on a Dell Precision T5810 with two RTX A4500 20 GB GPUs connected via NVLink."}
+    ],
+    "expected": {"verdict_type": "judged", "flagged": true}
+  },
+  {
+    "name": "contradicted_claim",
+    "query": "What inference engine serves the model?",
+    "answer": "The model is served with Ollama on a single GPU. [source: infrastructure]",
+    "chunks": [
+      {"title": "AI Portfolio System", "source": "infrastructure",
+       "content": "The model is served with vLLM 0.14.0, tensor-parallel across two A4500 GPUs."}
+    ],
+    "expected": {"verdict_type": "judged", "flagged": true}
+  },
+  {
+    "name": "refusal_not_scored",
+    "query": "What is Chris's blood type?",
+    "answer": "I don't have that documented in my knowledge base.",
+    "chunks": [],
+    "expected": {"verdict_type": "refusal", "flagged": false}
+  },
+  {
+    "name": "paraphrase_still_supported",
+    "query": "How is the home server reached from the cloud?",
+    "answer": "The public VPS talks to the home machine over an encrypted SSH tunnel. [source: infrastructure]",
+    "chunks": [
+      {"title": "AI Portfolio System", "source": "infrastructure",
+       "content": "Backend services bind to localhost on the T5810; the cloud server reaches them only through an SSH reverse tunnel with key-based authentication."}
+    ],
+    "expected": {"verdict_type": "judged", "flagged": false}
+  },
+  {
+    "name": "category_swap_vram_as_storage",
+    "query": "Tell me about the GPU home lab setup",
+    "answer": "The two RTX A4500 GPUs each have 20 GB of GDDR6 memory and 40 GB of storage. [source: infrastructure]",
+    "chunks": [
+      {"title": "Homelab T5810", "source": "infrastructure",
+       "content": "2x NVIDIA RTX A4500, 20 GB GDDR6 VRAM per card (40 GB aggregate across the pair). This is video memory (VRAM), not disk storage; the A4500 has no onboard storage."}
+    ],
+    "expected": {"verdict_type": "judged", "flagged": true}
+  },
+  {
+    "name": "role_swap_cpu_as_gpu",
+    "query": "What hardware runs the verifier?",
+    "answer": "It leverages both the NVIDIA and AMD GPUs on the asrock box. [source: infrastructure]",
+    "chunks": [
+      {"title": "Homelab T5810", "source": "infrastructure",
+       "content": "The asrock B550 verifier node has an AMD Ryzen 9 5950X CPU (16C/32T) and a single NVIDIA RTX 3060 Ti GPU. The Ryzen 9 is a CPU, not a GPU."}
+    ],
+    "expected": {"verdict_type": "judged", "flagged": true}
+  },
+  {
+    "name": "true_crossmachine_fact_with_evidence",
+    "query": "What runs the out-of-band verification?",
+    "answer": "The asrock box has an AMD Ryzen 9 5950X and a single RTX 3060 Ti, and it runs the out-of-band faithfulness verification. [source: infrastructure]",
+    "chunks": [
+      {"title": "Homelab T5810", "source": "infrastructure",
+       "content": "asrock B550 verifier node: AMD Ryzen 9 5950X (16C/32T), 64 GB RAM, a single RTX 3060 Ti (8 GB). Runs the out-of-band faithfulness verifier."}
+    ],
+    "expected": {"verdict_type": "judged", "flagged": false}
+  },
+  {
+    "name": "compound_claim_split_one_false",
+    "query": "What's inside the verifier box?",
+    "answer": "The asrock B550 pairs a 16-core Ryzen 9 5950X with an AMD Radeon RX 6800 GPU to run the judge. [source: infrastructure]",
+    "chunks": [
+      {"title": "Homelab T5810", "source": "infrastructure",
+       "content": "asrock B550 verifier node: AMD Ryzen 9 5950X (16C/32T), 64 GB RAM, a single NVIDIA RTX 3060 Ti (8 GB). The only GPU in this box is the NVIDIA 3060 Ti; there is no AMD or Radeon GPU."}
+    ],
+    "expected": {"verdict_type": "judged", "flagged": true}
+  }
+]

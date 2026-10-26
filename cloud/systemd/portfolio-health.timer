@@ -1,0 +1,11 @@
+[Unit]
+Description=Run the Portfolio AI deep health probe every 5 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+# Don't stack runs if one is slow (the E2E query can take tens of seconds).
+AccuracySec=15s
+
+[Install]
+WantedBy=timers.target

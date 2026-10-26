@@ -1,0 +1,742 @@
+# Defect Ledger
+
+**Purpose:** Track known defects and regressions discovered during development.  
+**This is the source of truth for continuous improvement priorities.**  
+**Policy:** Once fixed, move to CLOSED section with date and commit hash.
+
+---
+
+## OPEN DEFECTS (Priority Order)
+
+### 18. The 14B judge scored a correct, fully-supported answer 1/5 — LOW, but it is the metric everything else is graded by
+**Found 2026-09-14.** In the k=3 graded eval, `What was the payback period for the AVD migration?`
+scored **grounding 1, faithfulness 1** with the judge's note *"No cost savings per user or total
+costs shown."* That note is **false**. Verified directly against the evidence the judge received:
+slot 5 of 5 contains `$200k`, `155/user` and `32.5k`. The answer itself was correct (~6 months,
+$200k upfront, $32.5k/month) and the deterministic checks all passed — `expect_match: True`,
+`forbid_hit: None`, `kind_pass: True`, `refused: False`.
+
+The same question scored **5/5 twice** in the pre-MTP baselines (`baseline-postfix`,
+`baseline-forbidfix`), both noted "Fully supported by the sources."
+
+**This one row is the entire score delta:** 4.75 − 4/44 = 4.659 ≈ the 4.66 that was measured.
+Every other row held.
+
+**Three hypotheses were raised and the first two were measured WRONG.** Recording them because the
+wrong ones cost more time than the right one:
+
+1. *A forbid collision* — the golden set forbids `"5 month"`, which is a substring of `"10.5
+   months"` elsewhere in the corpus. Plausible, and wrong: `forbid_hit` was `None`.
+2. *Retrieval dilution from the same-day reindex* — the corpus grew 101 → 109 chunks and two
+   irrelevant "Professional Context" chunks now occupy evidence slots 2 and 3. This was argued
+   fairly confidently and is **also wrong**: a parallel-collection A/B (`documents_pre` rebuilt
+   from commit 9b45867 vs live `documents`) returned **identical recall, 34/36 both arms, delta 0
+   questions**. The reindex did not degrade retrieval.
+3. *Judge error* — what survives. Evidence ordering did change, which plausibly provoked it, but
+   "the ordering changed" is not "retrieval got worse", and only the second would have mattered.
+
+**Why it is LOW and not ignored.** It is one row, it is not a user-visible defect, and the answer
+a visitor sees is correct. But the graded eval is the instrument every other change on this project
+is judged by, and a 5 → 1 swing on a correct, supported answer is not a ±1 ladder wobble. It bounds
+how much any single-row movement in a graded eval can be trusted — including movements that get
+read as regressions.
+
+**Do NOT "fix" this by tuning the judge prompt against this one row.** That is fitting the
+instrument to the sample. The useful follow-up is the one the plan already names: a continuous,
+paired metric with a bootstrap CI, where a single judge misfire cannot move the headline.
+
+**Related:** the same class as `How old is Chris?` scoring 1 because the judge's evidence lacked
+the server-facts block (fixed in `b23a88b`) — there the judge was right about its evidence and the
+evidence was wrong; here the evidence was right and the judge was wrong.
+
+### 17. P0 — Context compression silently corrupts the evidence the generator sees
+**Found 2026-09-13.** The VPS routes every chat turn through the Headroom compressor and the
+generator is given the **compressed** text. At production scale it removes 44.9% of tokens by
+deleting short "low-information" words — which on a factual corpus are the facts.
+
+Measured on the real `SYSTEM_PREFIX` + the real retrieved chunks for
+"What specific models are running on the AI Portfolio Chat system?" (2,982 → 1,643 tokens):
+
+| token | before | after |
+|---|---|---|
+| `"Ti"` | 8 | **2** |
+| the word `"two"` | 6 | **4** |
+| `"16 GB"` | 2 | **1** |
+| `RTX 5060 Ti` | 3 | **1** |
+| bare `RTX 5060` (a device that does not exist here) | 0 | **2** |
+
+Verbatim damage:
+```
+BEFORE  on the **RTX 5060 Ti 16 GB** in the asrock B550
+AFTER   on **RTX 5060 16 in B550
+BEFORE  That is the complete GPU inventory: two A4500s and one 5060 Ti.
+AFTER   inventory: A4500s one 5060 Ti.
+```
+
+**It also mangles the GROUNDING RULES themselves.** The compressed system prompt reads:
+> `GROUNDING (mandatory answer): fact state ONLY knowledge shown No outside knowledge, no
+> hallucination. don't documented information, don't documented in knowledge base.`
+
+The instruction *"If I don't have documented information, I say: 'I don't have that documented
+in my knowledge base.'"* is reduced to fragments. The `SYSTEM_SUFFIX` FOLLOWUPS scaffold does
+not survive intact either.
+
+**Production impact, measured against live traffic-shaped queries:**
+
+| context | answers naming a nonexistent `RTX 5060` |
+|---|---|
+| uncompressed (direct to vLLM, production sampling) | **0 / 16** |
+| compressed (live site) | **12 / 18 (67%)** |
+
+6/6 on two separate phrasings. One answer also fabricated a fourth GPU —
+"two RTX A4500s, one RTX 5060, and one RTX 5060 Ti" — a downstream consequence of the name
+being split and the count word deleted.
+
+**The model was not hallucinating. It was faithfully reproducing corrupted evidence.**
+
+**What this retroactively explains.**
+- `docs/claims.md`: *"'Grounded' ≠ 'correct' — two arithmetic errors passed every control."*
+  A compressor that deletes the word **"two"** produces arithmetic errors by construction.
+- `cloud/api-proxy.py`'s comment claims *"47% real savings, full answer detail preserved"*.
+  **Falsified.**
+- `PROMPT_VERSION` hashes the **uncompressed** prompt, so every quality figure attributed to a
+  prompt version was measuring a prompt the model never received.
+- The verifier is sent **uncompressed** `evidence_docs` while the generator saw compressed
+  text, so the judge grades answers against evidence the generator never had. A
+  compression-induced error can look "unsupported" for the wrong reason, or pass as a
+  near-paraphrase.
+- Nothing in the eval suite could see this: every harness reads `/api/retrieve` (uncompressed)
+  or the final answer, never the text actually handed to the generator.
+
+**Why it went unnoticed for so long.**
+`plans/open-items-2026-08-29.md:18` recorded *"Compress :8788 | Listening, no /health |
+`COMPRESS_URL` set in unit; undocumented"* on **2026-08-29** — spotted, filed as a
+documentation gap, never assessed as a risk. Meanwhile `DEPLOYMENT.md:62` states
+*"optional; `COMPRESS_URL` unset = disabled"*, and the repo's `cloud/systemd/` copies contain
+no `COMPRESS` at all. It lived only in
+`/etc/systemd/system/api-proxy.service.d/headroom.conf` — out-of-repo config, the loss vector
+CLAUDE.md already names from closed defect #5.
+
+**Fix:** disable it. Compression buys nothing on this path — `MAX_CONTEXT_TOKENS` is 14,384 and
+this query's prompt is ~2,982 tokens, so the budget was never tight; tokens are free on owned
+hardware; it adds **~1,017 ms** mean latency (`:8788/stats`); and it rewrites the prefix that
+prefix caching depends on.
+
+```
+# on the VPS
+mv /etc/systemd/system/api-proxy.service.d/headroom.conf{,.disabled-20260913}
+systemctl daemon-reload && systemctl restart api-proxy.service
+```
+
+**Status: FIXED 2026-09-13, verified.** `headroom.conf` renamed to
+`headroom.conf.disabled-20260913-042628` on the VPS, `daemon-reload` + `restart api-proxy`.
+`COMPRESS_URL` confirmed absent from the live process environment; service active; `/health` 200.
+
+**Verification — the same probe, same three phrasings, before and after:**
+
+| | answers naming a nonexistent `RTX 5060` |
+|---|---|
+| compression ON | **12 / 18 (67%)** — 6/6 on two phrasings |
+| compression OFF | **0 / 18 (0%)** |
+
+The compressor's own call counter stayed frozen at 3735 across all 18 post-fix generations,
+independently confirming the proxy no longer calls it.
+
+**Exposure window: 2026-06-22 to 2026-09-13, ~3 months.** `headroom.conf` mtime is
+2026-06-22 03:53. The journal shows its first minutes as
+`Headroom compress failed (ReadTimeout); falling back to uncompressed` at 03:48–03:50 — it was
+failing *safe* at the 3 s default, and was then given `COMPRESS_TIMEOUT=15` until it succeeded.
+It was tuned into working rather than questioned.
+
+**What that invalidates, and what it does not.**
+
+| measured through the proxy — ran on corrupted context | measured directly — unaffected |
+|---|---|
+| every `eval_graded.py` grounding figure since 2026-06-22: 4.41, 4.82, 4.594, 4.656, 4.78, 4.48, 4.59, 4.69 | `compare_retrieval.py` (reads Qdrant/embed/rerank directly) — **20/20 vs 19/20 stands** |
+| `consistency_battery.py` 7/7 | `exp_probe.py`, `bench-vllm.sh` (direct to vLLM :8007) |
+| `repeat_sample.py`'s 150-generation run | the reranker head/tail truncation probe |
+| the verifier's live faithfulness figures, including hybrid's 0.58 → 0.82 | |
+
+**This reopens the retrieval A/Bs, on evidence.** CLAUDE.md requires "a hypothesis about what
+the pipeline is actually missing" before revisiting them. The hypothesis is now concrete: ~45%
+of the retrieved evidence was deleted between retrieval and generation. The 2026-09-01
+conclusion that "candidates 6-8 add tokens, not evidence" is specifically suspect, because a
+larger prompt feeds a compressor that removes a roughly fixed *fraction* — so the added
+evidence was partly shredded before the generator could use it. The A/B **deltas** are not void
+(both arms were compressed) but "more retrieval does not help" and "more retrieval does not help
+while 45% of it is being destroyed" are different findings, and only the second was tested.
+Re-run against a clean pipeline before treating any of it as settled.
+
+**Follow-ups this implies.**
+1. Track the drop-in in `cloud/systemd/` so it can never again be live-but-untracked.
+2. Correct `DEPLOYMENT.md:62` and `cloud/api-proxy.py`'s "detail preserved" comment.
+3. Add a harness that inspects the text **actually sent to the generator**, not `/api/retrieve`.
+   Every existing gate was blind to this by construction.
+4. If compression is ever reconsidered, it must be gated on device-name and numeric integrity,
+   not on `saved_pct`.
+
+---
+
+### 16. SAP Case Study Says "5 Warehouses" But Lists 6 — CLOSED 2026-09-02
+**Was:** `sap_business_one_integration.md` stated **"5 warehouses spanning 4 continents,
+6 regions"** (lines 8 and 24) while enumerating **six** sites: NYC, Miami, London, Athens,
+Singapore, Sydney.
+
+**Resolved by Chris: 6 is correct — the enumerated list wins.** Independent corroboration
+was sitting in the same sentence: "6 regions", i.e. one region per site.
+
+Both occurrences corrected. The document is now self-consistent: header says 6 warehouses /
+4 continents / 6 regions, and the site list sums to 6 across 4 continents.
+
+**Why it was escalated rather than fixed silently.** Either the count was wrong or one
+listed city was not a warehouse, and only Chris knew which. The two arithmetic errors fixed
+the same day (AVD and SAP payback) were *derivable* from figures already in the document;
+this one was not, and choosing a number to make the text self-consistent would have been
+inventing a fact about a real client engagement.
+
+**It very likely caused a production defect.** An answer opened with "a distribution company
+operating across **five continents**" and then correctly said "5 warehouses across 4
+continents" two lines later. A source pairing a 5 and a 4 in one sentence, with a list
+supporting neither cleanly, is exactly the shape that invites that conflation — so fixing
+the source should remove the conflation rather than paper over it.
+
+Pinned by a golden-set entry that forbids "5 warehouses" and "five continents".
+**Discovered by:** Claude, 2026-09-02, sweeping the case studies for derived figures.
+**Resolved by:** Chris.
+
+### 15. Generator Mangles the Client's Product Name to "SAP One" — OPEN, LOW
+**Status:** OPEN. Two KB fixes attempted; **neither worked.** Recorded as a known limit
+rather than left looking solved.
+**Severity:** LOW — a naming slip, not a wrong fact about the engagement. It is a client's
+product name on a portfolio, so it is not nothing.
+
+**Symptom:** answers say **"SAP One"**, e.g. *"Chris integrated **SAP One** (also referred
+to as SAP B1)"*. That string appears nowhere in the knowledge base; the case study says
+"SAP Business One" six times and bare "SAP" five times. The correct chunk **is** retrieved.
+The model is compressing the name on its own.
+
+**Attempt 1 — add the correct forms, with an explanation. BACKFIRED.** The line added was:
+
+> the system is **SAP Business One**, commonly abbreviated **SAP B1**. (Recorded because
+> answers were shortening it to "SAP One", which is not a product name...)
+
+The next answer said: *"The text notes that 'SAP One' and 'SAP B1' are two different
+products."* **Writing the wrong form into the KB in order to deny it created the entity.**
+This is exactly the "there is no such thing as a 14B reranker" mistake, repeated — and
+repeated in the same session in which that lesson was being cited. The rule is not "avoid
+bare negations", it is stronger: **never write the wrong string into the corpus at all.**
+A retrieval system has no concept of a quoted counter-example; every string in a chunk is
+a fact about the world.
+
+**Attempt 2 — positive only.** The line is now *"the system is SAP Business One. Its only
+standard abbreviation is SAP B1."* with no mention of the wrong form anywhere in the KB.
+This **improved** things — "SAP B1" now appears correctly — but the model still emits
+"SAP One" alongside it across three phrasings.
+
+**Deliberately NOT in the deploy gate.** `forbid_substrings` became a hard gate on
+2026-09-02, and it should carry only release blockers: a retired GPU presented as current,
+a fabricated VRAM figure, a wrong payback period. Adding a cosmetic entry is how a gate
+turns into noise people learn to bypass — the same failure as the alert channel in #8.
+
+**If revisited:** the remaining lever is the system prompt, which would change
+`PROMPT_VERSION` and need a re-baseline. That is a lot of machinery for one product name;
+worth folding into the P1.5 prompt reword rather than doing alone.
+**Discovered by:** the golden-set entry added 2026-09-02, which caught it on the first run.
+
+### 14. A Changelog Chunk Reads as Current Inventory — KB FIXED 2026-09-02, NEEDS REINDEX
+**Status:** KB corrected in git; **NOT live until `./scripts/reindex_kb.sh` runs**
+**Severity:** HIGH for a portfolio site — it advertises hardware that does not exist
+**Found by:** Chris, live query "What has Chris built?", 2026-09-02
+
+**Symptom.** The answer listed the system's models as *"Qwen2.5-14B-Instruct (on RTX 5060
+16 GB), Qwen2.5-7B (on RTX 3060 Ti), and Qwen3.8-27B-FP8"* — presenting a **retired GPU and a
+retired model as current hardware**, alongside a stale "35-question golden-set eval (mean
+grounding 4.48/5)".
+
+**The model did not hallucinate any of it.** Every element traced to
+`knowledge_base/infrastructure/current_work_2026.md`, which is written as a *changelog*:
+
+> "the out-of-band faithfulness judge moved **from Qwen2.5-7B (RTX 3060 Ti) to**
+> Qwen2.5-14B-Instruct on a new RTX 5060 Ti 16 GB"
+
+Retrieval worked perfectly. The corpus was the problem.
+
+**Root cause — worth generalizing.** *A "moved from A to B" sentence, retrieved as a chunk
+without its framing, reads as "the system has A and B."* Chunking strips the narrative
+context that made the tense unambiguous, so the "from" side of every migration becomes a
+present-tense fact. Any KB doc written as a history log carries this hazard on **every**
+transition sentence it contains.
+
+This is a corpus-shape defect, and it is the *inverse* of the surface-form heuristic family
+(#5, #6, DEFECT #13): there the code was too clever about a question's form; here the KB is
+insufficiently explicit about a statement's tense.
+
+**Also stale in the same doc, and corrected:**
+
+| Claim | Was | Now |
+|---|---|---|
+| WebSocket rate limit | "1 concurrent connection per IP" | **2** (`api-proxy.py:198`) — 1 is the bug from #7 that surfaced as "Connection lost" |
+| Golden set | 35 questions, mean grounding 4.48/5 | **42 questions, 4.59/5** measured 2026-09-01 |
+| Time-to-first-token | ~5.6 s | **1-2 s** on the current Qwen3.8-27B config |
+
+**Resolution applied to the KB:**
+1. A **"What is running RIGHT NOW"** section at the top of the doc, stating the complete GPU
+   inventory positively — two A4500s and one 5060 Ti — before any history appears.
+2. The changelog section explicitly labelled as history, with retired items named as retired
+   *in the same sentence* so a chunk cannot lose the framing.
+3. The stale numbers corrected, each pointing at what superseded it and why.
+
+Note the phrasing follows the lesson from the earlier "there is no 14B reranker" mistake:
+**lead with the positive fact, and let the negation only clarify it** — never ship a bare
+negation into the KB.
+
+### How it compounds across a conversation (observed 2026-09-02, second live test)
+
+A follow-up chain showed this is worse than a single wrong sentence. Once the false fact
+entered turn 1, it **propagated and hardened**:
+
+1. *"What specific models are running?"* → listed **"Qwen2.5-7B: Runs on an RTX 3060 Ti and
+   serves as the out-of-band faithfulness verifier."** The retired model is now assigned a
+   *role* it never had.
+2. *"How does the out-of-band faithfulness verifier work?"* → a full, confident architectural
+   explanation built on it: *"The verifier runs on a separate GPU (RTX 3060 Ti) using the
+   Qwen2.5-7B model."*
+3. The **follow-up chips then manufactured questions about the nonexistent component** —
+   *"What is the context window size for the Qwen2.5-7B verifier?"*, *"How does the verifier
+   handle answers that exceed its processing capacity?"*
+
+**The most damaging part is step 3's answer.** The system replied *"The knowledge base does
+not specify the context window size for the Qwen2.5-7B verifier."* That is the grounding
+refusal — normally the safest behaviour in the system — and here it **actively corroborates
+the false premise.** "We don't have that detail about the 7B verifier" reads as confirmation
+that a 7B verifier exists and is merely under-documented. A refusal that accepts the
+question's premise is not a safe answer; it is a confident one.
+
+**Two mechanisms worth separating:**
+- **Premise inheritance.** Nothing re-checks a follow-up's presupposition against retrieval.
+  The chips are generated from the *previous answer*, so a wrong answer generates questions
+  that can only be answered wrongly, and the conversation cannot self-correct.
+- **A real KB contradiction went unflagged.** `ai_portfolio_system.md` (lines 40, 230)
+  correctly said Qwen2.5-14B-Instruct on the RTX 5060 Ti, while `current_work_2026.md` said
+  7B on a 3060 Ti. The system prompt explicitly instructs: *"When sources conflict: 'My
+  knowledge base has conflicting information on this.'"* It did not. It picked one — the
+  wrong one — and presented it without hedging. **The conflict rule did not fire on a real
+  conflict**, which means it is not currently load-bearing and should not be counted as a
+  control.
+
+**Also found in the chain:** a *third* golden-set figure — "~30-question" — in
+`ai_portfolio_system.md:232`, alongside the "35-question" in `current_work_2026.md` and the
+actual 42. Three different numbers for the same artifact across two documents. Both corrected
+to 42 / mean grounding 4.59, each with a line saying older figures are superseded baselines.
+Also corrected there: the judge's independence rationale still justified itself against
+"the 14B-Coder that wrote the answer", which stopped being the answerer in August.
+
+**Not yet verified, and this is the part that matters:** per this repo's own rule, *"add it to
+the KB" is not a fix — verify it retrieves.* Requires `./scripts/reindex_kb.sh`
+(**authorization needed**), then re-asking several phrasings — "what has Chris built", "what
+models run this system", "what GPUs does this use" — and confirming no 3060 Ti or 7B appears.
+
+### 1. SAP Business One — RETITLED 2026-09-02: hallucination is gone, a 5/4 conflation remains
+**Status:** OPEN but **downgraded HIGH → LOW**. The original premise no longer holds.
+**Original claim (2026-07-28):** "response invents non-KB details", "speculative fluff"
+instead of using the rank-1 chunk.
+
+**Re-verified live 2026-09-02** against the current model (Qwen3.8-27B, not the 14B that was
+serving when this was written). Every distinctive specific in the answer traces to
+`knowledge_base/case_studies/sap_business_one_integration.md`:
+
+| Claim in the answer | In the KB? |
+|---|---|
+| `idx_inventory_warehouse_sku`, `idx_wmssync_status` | yes — verbatim |
+| Athens / Singapore / Sydney / Produmex | yes |
+| "8 months" timeline | yes, line 12 |
+| "8s to 0.8s (10x)" | yes, line 77 |
+| "99%+ inventory accuracy" | yes, line 15 |
+| "200+ users" | yes |
+
+**The model is now using the chunk, not inventing around it.** Two graded evals the same
+night scored it g=4 / faithfulness=5 in both arms.
+
+**What actually remains, and it is small:** the opening sentence says the company operates
+"across five continents". The KB says **5 warehouses spanning 4 continents** — the answer
+conflates the two, then *contradicts itself* two lines later with the correct "5 warehouses
+across 4 continents". A number-swap in a summary sentence, not fabrication.
+
+**Note on the judge's read:** it scored g=4 with "lacks specific details from case study" on
+an answer dense with case-study specifics. The judge only sees the chunks handed to it, so an
+answer drawing on a chunk outside that evidence slice gets under-scored. Worth remembering
+before trusting a single judge note over the source text.
+
+**Fix required:** nothing urgent. If touched, the lever is the case study's own summary line,
+not the prompt — line 5 pairs "5 warehouses" and "4 continents" in one sentence, which is
+exactly the shape that invites the conflation.
+**Discovered by:** Kimi (2026-07-28). **Re-verified and downgraded by:** Claude, 2026-09-02.
+
+### 3. Verdict Window: Silent Drop Risk
+**Status:** STOPGAP FIX  
+**Severity:** MEDIUM (silent data loss if judge latency grows)  
+**Discovery:** During Tier 2 deployment (2026-07-29)  
+**Issue:** `VERDICT_WINDOW_MS = 25000` (25s) is a hardcoded timeout for receiving judge verdicts  
+**Risk:** If judge latency grows beyond 25s (e.g., asrock under load, cold load stack up), verdicts silently drop  
+**Current latency:** Mean 16.6s (n=10), max 56.6s (cold load). Room exists, but not guaranteed.  
+**Fix required:**
+- [ ] Option A (easy): Raise VERDICT_WINDOW_MS to 30–35s (temporary)
+- [ ] Option B (right): Late-arriving verdict redesign (2.4 Option B from Kimi's earlier plan)
+  - Instead of closing socket after 25s, accept verdicts that arrive up to N seconds after done message
+  - UI shows "checking..." → "verdict received" (late patch) instead of no verdict
+
+**Discovered by:** Kimi (Tier 2, noted as stopgap)  
+**Last reviewed:** 2026-08-05 (accepted as stopgap during deployment rush)
+
+---
+
+### 4. Verdicts.db Backups and the Weekly Digest Never Run — CONFIRMED WORSE 2026-09-02
+**Status:** OPEN. **Severity raised** — this is not "no backup configured", it is "configured
+and silently never executing", which is worse because it reads as done.
+
+**Measured on the asrock 2026-09-02:**
+
+| | |
+|---|---|
+| live DB | `/home/user/verifier/verdicts.db`, 1.66 MB, mtime today |
+| backups directory | `/home/user/verifier/backups/` |
+| backups in it | **exactly one**, `verdicts-20260806T011520Z.db`, **2026-08-06** — 27 days stale |
+| **cron daemon on the asrock** | **none installed** (`cronie` and `dcron` both absent) |
+| root crontab / `/etc/cron.d` entries | none |
+| VPS timers or cron for either job | none |
+
+So the single backup was a manual run the day it was set up, and nothing has run since.
+`weekly_verifier_digest.sh` sits next to the DB and is **also** unscheduled — so the
+"weekly digest with silence alerts" is not running either.
+
+**This makes two claims in CLAUDE.md overstated.** Tier 7 is described as complete with
+"verdicts.db backups, weekly digest with silence alerts". Neither is scheduled anywhere.
+
+**Fix required:**
+- [ ] Install a cron daemon on the asrock (or an OpenRC-friendly timer) — there is currently
+      no mechanism to run *any* periodic job on that box
+- [ ] Schedule the backup, and **verify by checking the directory a day later**, not by
+      checking that the crontab line exists
+- [ ] Schedule `weekly_verifier_digest.sh` likewise
+- [ ] Correct the Tier 7 claim in CLAUDE.md
+
+**Same shape as the outages this repo already learned from:** a thing that looks configured,
+fails silently, and is believed because a document says so. An unverified schedule is a
+belief, not a control.
+**Discovered by:** Claude, 2026-09-02, checking the ledger's own open items on the box.
+
+### 8. Alert delivery, not alert generation
+**Status:** OPEN — **code side done, the remaining step is human verification**
+**Severity:** HIGH — this is why a two-day outage went unnoticed
+**Issue:** the monitor did its job. It detected the 2026-08-26 vLLM outage and paged
+`[urgent] Portfolio AI DOWN — outage signature` on **Aug 27 and Aug 28**. Nothing happened.
+**Cause:** the routine daily heartbeat landed on the **same ntfy topic** as urgent pages. A
+channel that pings you daily with "all green" trains you to ignore it, so the one message
+that mattered looked like the ninety that didn't.
+
+**Shipped 2026-08-31:** severity separated onto two topics — `NTFY_CRITICAL_URL`
+(`cwdotcom-critical-…`) carries DOWN/recovered transitions only, while the daily heartbeat
+stays on `NTFY_URL`. The critical topic is silent unless something is wrong, which is the
+whole point of it.
+
+**Still open, and it is not a code task:** *confirm the critical topic actually reaches a
+device that notifies you.* Delivery has never been verified end to end on a phone. Until it
+has, this defect is not closed — the original failure was not detection and not routing, it
+was that a page nobody sees is the same as no page.
+
+**Do not** respond to this by adding more probes. Detection is not the failure.
+**Discovered by:** Claude (2026-08-31, correcting an earlier wrong claim in this ledger that
+monitoring was blind)
+
+---
+
+## CLOSED DEFECTS
+
+### 2. Judge Timeout Wrapper: Infrastructure Debt — CLOSED 2026-09-02 (verified on the box)
+**Was:** the judge's timeout handling lived in a wrapper script under `/tmp` — critical-path
+behaviour in a directory that does not survive a reboot.
+**Verified resolved:** `/etc/init.d/verifier-service` runs
+`/home/user/miniforge3/bin/python3 /opt/verifier-service/verifier.py` directly — no wrapper,
+nothing in `/tmp`. The timeout is a first-class setting in the service code
+(`JUDGE_TIMEOUT`, default 120 s, `verifier.py:72`), applied to the httpx client at
+`verifier.py:155`. The unit is supervised with `respawn_max=0` and an `output_log`.
+**Checked by:** Claude, 2026-09-02, reading the live unit and source rather than the docs.
+
+### 13. Eval Harness Cried Wolf About Judge Independence — CLOSED 2026-09-01
+**Was:** every graded-eval run printed
+`⚠ WARNING: judge model looks like the 14B answerer — echo bias. Use a DIFFERENT model.`
+The check was `"14b" in judge_model`, which was correct only while the answerer actually
+**was** Qwen2.5-Coder-14B. Since the generator moved to **Qwen3.8-27B-FP8**, the 14B-Instruct
+judge is genuinely independent — so the warning fired on every run and was always wrong.
+
+**Why it is worth a ledger entry rather than a shrug:** this is the *fifth* instance of the
+house pattern — **a heuristic keyed on a surface form that silently goes stale.** The others
+were the router default, the "favorite language" rule, the education retrieval miss, and
+`max_tokens` set by question word count. It also has a second cost specific to warnings: a
+warning that cannot be acted on trains the operator to ignore warnings, so the next one — a
+*real* echo-bias run — reads exactly like the noise.
+
+It never corrupted a score. The judge was independent throughout; only the harness was wrong
+about it.
+
+**Resolution:** `judge_echo_risk()` now compares the judge against the **actual served
+model**, read live from the proxy's `/api/system-info` (which reports the server-pinned
+`MODEL_ID`), instead of a hardcoded string. Models are swapped behind labrouter without the
+VPS changing, so reading the served model is the only version of this check that stays true
+across a model change. It **fails closed**: if `/api/system-info` cannot be read, it warns
+that independence is UNVERIFIED rather than staying silent.
+
+Five cases tested, deliberately including the historical one — a 14B judge against a 14B
+answerer must *still* warn, so the fix tightens the check rather than deleting it — and the
+unknown-answerer case. On a clean run it now prints the positive confirmation
+`judge ... vs answerer ... — independent, no echo-bias risk`, which is worth more than
+silence: it shows the check ran.
+**Discovered by:** Claude, 2026-09-01, while re-baselining the graded eval after the UPS
+replacement unblocked sustained GPU load.
+
+
+
+### 11. Answers Appeared Cut Off — Prompt Scaffold Leak — CLOSED 2026-09-01
+**Was:** answers ended with a dangling `**Mandatory`, reading as truncation.
+**It was not truncation** — the reply was 838 tokens against a 2048 cap. The model
+sometimes reproduces the system prompt's own `MANDATORY OUTPUT — append this after every
+answer:` heading immediately before the FOLLOWUPS block. The client strips from
+`FOLLOWUPS:` onward, so anything the model wrote *before* that marker survived into the
+visible answer. Also a small prompt leak: internal instruction text reaching a visitor.
+**Resolution:** `stripTrailingScaffold()` in `useChat.js`, applied on both the
+FOLLOWUPS and no-FOLLOWUPS paths. Deliberately conservative — a trailing line is dropped
+only if it lacks terminal punctuation AND is either pure markdown decoration or carries
+scaffold wording. A real closing sentence always ends in punctuation and is never touched.
+Six cases tested including "must keep" negatives.
+**Not fixed at the prompt level on purpose (at the time):** rewording `SYSTEM_PREFIX`
+changes `PROMPT_VERSION` and needs a graded-eval re-baseline, which costs sustained GPU
+the box could not spend while on an undersized UPS.
+
+**UNBLOCKED 2026-09-01** — the UPS is replaced and sustained eval load is affordable
+again. The client-side strip stays regardless (defence in depth: the model can echo
+scaffold wording no prompt edit fully prevents), but the root cause is worth removing:
+the literal string `MANDATORY OUTPUT — append this after every answer:` reads like a
+header the model is *supposed* to emit, which is precisely why it sometimes emits it.
+Phrasing the same requirement as an instruction rather than a shouty template heading
+deletes the string the model was copying. Requires a deploy + re-baseline, so it is a
+proposal, not a silent change.
+
+### 12. Proxy Finished Generations Nobody Was Waiting For — CLOSED 2026-09-01
+**Was:** 1,456 log lines in 24 h of `Cannot call "send" once a close message has been
+sent`. When a visitor pressed Stop, hit New chat, or navigated away, the send failed, the
+error was logged, **and the loop continued** — so the proxy kept pulling tokens from vLLM
+and the GPUs kept generating an answer that could never be delivered.
+**Why it mattered more than the log noise:** on a box with a ~2-3 % duty cycle that
+exceeds its UPS during every burst, finishing abandoned work is real waste — it extends
+exactly the window in which an outage would cause corruption.
+**Resolution:** a `ClientGone` exception raised from the chunk loop, which exits the
+`async with _http.stream(...)` block and closes the upstream connection so vLLM stops.
+The caller skips the `done` frame and the verifier (judging an undelivered answer wastes
+the judge's GPU too) and leaves the receive loop, which releases the IP's rate-limit slot
+— important, because holding it would 429 the visitor's next question as
+"Connection lost" (defect #7).
+**Detector tested** against the real Starlette strings and against genuine failures
+("Connection reset by peer", "vLLM HTTP 500") so a broad match cannot silently
+reclassify a real error as a user leaving.
+
+### 7. labrouter Was Not Supervised — CLOSED 2026-08-31
+**Was:** `/etc/init.d/labrouter` set `command_background="yes"` with **no `supervisor=` line**,
+so start-stop-daemon launched uvicorn and then nothing watched it — the process ran as PPID 1
+and `respawn_max=5` was inert. labrouter is the front door for cwdotcom: the VPS tunnel forwards
+`:8004` and nothing else routes that traffic, so a crash meant generation stopped with no
+recovery. The most externally visible component in the lab had the weakest supervision.
+**Resolution:** `supervisor="supervise-daemon"`, `respawn_max=0`, `respawn_delay=15`. Also found
+that `restart_delay` was never a supervise-daemon key — the correct name is `respawn_delay`, so
+the old backoff did nothing even in intent.
+**Second fix, easy to miss:** under supervise-daemon the pidfile holds the SUPERVISOR's pid, not
+uvicorn's, so the existing `reload()` (`start-stop-daemon --signal HUP --pidfile`) would have
+SIGHUPed the wrong process and silently done nothing. `reload()` now resolves the child by
+parentage. Same trap that made an earlier respawn test kill a supervisor instead of its child.
+**Verified by test:** SIGKILL the child → respawned and healthy in ~20 s; `rc-service labrouter
+reload` reaches the child and the service stays up; live site returns 5 sources streaming
+(`ttft_ms=1928`); aggregator 7/7 green including E2E.
+**Where it lives:** `/etc/init.d/labrouter` on the T5810 — the lab lane, NOT this repo. It is
+deliberately not vendored here; a copy would drift, which is the failure mode this week's doc
+work exists to stop. Backup: `/root/init.d-labrouter.bak-20260831`.
+
+### 9. Answers Truncated Mid-Word — CLOSED 2026-08-31 (b6efc2e)
+**Was:** `estimate_answer_length()` scaled the generation cap by the QUESTION's word count
+(≤5 words → 256 tokens). "What has Chris built?" is four words, so the most important question
+a visitor can ask was cut off mid-word at ~279 tokens.
+**Root cause was the premise, not the thresholds.** Its goal was "short questions get short
+answers to avoid verbose responses", but `max_tokens` does not make a model concise — it makes
+it stop mid-sentence. Brevity is a prompt concern; the cap only decides where the cut lands.
+**Resolution:** flat `DEFAULT_ANSWER_TOKENS=2048`. Verified live: the same question now
+returns 569 tokens ending cleanly, while "What GPU?" self-terminates at 192 — proving a
+generous cap costs nothing, because the model stops on its own.
+**Lesson — third instance this week of one pattern:** a heuristic keyed on *surface form*,
+silently wrong on the highest-value input. See also #6 (router default deflecting a third of
+the golden set) and #5 (favourite-language). When a rule keys on question shape rather than
+meaning, test it against the questions that matter most.
+
+### 10. Supervision Gaps Across the Fleet — CLOSED 2026-08-31 (1c3fc6e, and 2026-08-30)
+**Was:** four incidents in one week shared a root cause — critical-path processes that nothing
+supervised, failing silently. vLLM ran unsupervised from a **deleted** installation for four
+days; the reranker was stopped and retrieval silently degraded to cosine; `embed-service` and
+`verifier-service` both carried `respawn_max=5` and wrote **no logs**.
+**Why `respawn_max=N` is wrong here:** it does not "give up gracefully", it latches the service
+OFF permanently after a transient squeeze. qdrant hit this (its unit still records
+"respawn_max exceeded → service latched off"), then rerank-service, then these two. Fixed in
+isolation each time; the lesson never propagated.
+**Resolution:** `respawn_max=0` + `output_log`/`error_log` on embed, verifier, rerank and the
+new `vllm-qwen38` unit. vLLM additionally needed an **orphan reaper**: its TP workers are
+separate processes that survive a SIGKILL of the API server and hold ~19 GB VRAM each, so every
+respawn found a full card and refused — the service supervised itself into a permanent outage.
+Proven by SIGKILL → self-heal in 225 s.
+**Still open:** labrouter (#7).
+
+### 5. "Favorite Language" Answers Neither Way — CLOSED 2026-08-29 (0cf8af1)
+**Was:** `"What is Chris's favorite programming language?"` scored g=1, "neither cleanly
+refused nor substantive". The 2026-08-19 entry guessed at two causes and named the wrong
+one first — it supposed a KB gap. There was no gap.
+**Actual root cause (found 2026-08-29 when the answer got worse, not better):** the fact
+was present AND indexed but **unrankable**. `"Favorite languages: Python and SQL"` sat at
+`RESUME.md:49` inside the "Automation & Scripting" list, so the chunk's dominant topic was
+tooling. For the natural phrasing the resume did not appear in the top-5 at all (best
+score 0.0587, all unrelated docs) and the model lifted **"Bash"** from a tangential
+sysadmin chunk and asserted it as a preference — Bash IS in the KB, as a scripting tool.
+So between 08-19 and 08-29 this silently escalated from waffling to confidently wrong.
+**Fix:** a Preferences section high in `RESUME.md` (placed AFTER Education so as not to
+displace that fix) + a `favorite/favourite/preferred/prefers/preference/go-to` alias
+group. Retrieval: absent from top-5 → **rank 1 at 0.9591**.
+**Verification:** graded eval `[ok] refuse_ok g=3` (was `[FAIL] g=1`); consistency battery
+probe 5/5 forbidding "favorite … is bash/powershell".
+**Lesson — third instance of one pattern.** Education, T5810 storage, and now this: the
+fact was in the KB every time, and every time the failure was that it could not rank.
+"Add it to the KB" is not a fix; **verify it retrieves for the phrasing users actually
+type.** Section placement within a merged chunk is a retrieval lever, not cosmetics.
+
+### 6. WATCH: Grounding 4.80 → 4.70 — CLOSED 2026-08-29, SUPERSEDED
+Never resolved on its own terms and no longer resolvable: the model changed underneath it,
+voiding both numbers. The watch item asked whether 4.70 was noise or a chunk-boundary
+effect; the new baseline is 4.78 with zero review warnings, so whatever it was is not
+present now. Do not re-open — re-measure against the baseline above instead.
+
+### 6. Router Default Deflected a Third of the Golden Set — CLOSED 2026-08-19 (4565c8b)
+**Severity:** HIGH (user-facing; the site refused to describe the person it exists to describe)
+**Issue:** `classify_query()` defaulted to `off_topic`, making the router a grounding gate it
+could never be — the on-topic keyword list had no entry for "chris", so
+`"what can you tell me about chris"` got a canned redirect. **13 of 40 golden-set `grounded`
+questions classified off_topic**, including "Summarize Chris's professional background" and
+"How can I contact Chris professionally?".
+**Why it went unseen:** `compare_retrieval.py` (the source of the "20/20" figure in CLAUDE.md)
+measures retrieval only and never invokes the router. `eval_graded.py` asks via `/ws/chat` but
+grades evidence via `/api/retrieve`, so the router's deflection never showed as a retrieval miss.
+**Resolution:** Default is now `on_topic`; redirects come from an explicit off-topic list.
+Grounding stays on api-proxy's `RAG_MIN_SCORE` guardrail, where it always belonged. Adversarial
+probes remain caught upstream by `is_prompt_extraction` (verified). Added `tests/test_query_router.py`
+— the module had no test coverage at all.
+**Verification:** graded eval 30 grounded / mean 4.80 (baseline 4.82), 0 safety hard-fails,
+0 transport errors; self-test 3/3.
+**Lesson:** a retrieval-level metric cannot see a routing-level bug. The "20/20" number was
+true and irrelevant. Measure the path the user actually takes.
+
+### 7. Verdict Window 429'd the User's Own Next Turn — CLOSED 2026-08-19 (4565c8b)
+**Severity:** HIGH (presented as "Connection lost" with the question silently unanswered)
+**Issue:** The client armed `VERDICT_WINDOW_MS` (25s) after every `done` to await a faithfulness
+verdict. Four paths (guardrail, meta, off-topic, not-documented) never run the verifier, and
+`should_verify()` gating skips others — so the socket was held the full window for a verdict that
+could never arrive. `ConnectionRateLimiter(max_concurrent_per_ip=1)` then rejected the user's own
+follow-up with a 429 **before `accept()`**, which the browser surfaces as an opaque close (1006).
+**Presentation:** intermittent and typing-speed dependent — read the answer slowly and the next
+turn works; fire off two questions quickly and both vanish. This misdirected diagnosis toward an
+"empty-retrieval branch that crashes," which does not exist.
+**Evidence:** 8 logged `rate limit: rejected duplicate /ws/chat connection` entries from a single
+IP, clustered in bursts seconds apart, matching every observed failure 1:1.
+**Resolution:** `done` now carries `verify`; the client only waits when a verdict is actually
+coming, and closes a superseded socket before opening the next. Limiter raised to 2 to absorb
+handoff overlap (still trips a scripted loop immediately).
+**Verification:** scripted repro of all three failing pairs — including holding the first socket
+open exactly as the old client did — passes; 0 rejections and 0 errors post-deploy.
+**Lesson:** a client that waits for a message the server may never send needs the server to say
+so. Relates to open defect #3 (verdict window), which this partially de-risks.
+
+### 8. Canned Paths Were Dead Ends — CLOSED 2026-08-19 (4565c8b)
+**Severity:** MEDIUM (worst-case first impression for a new visitor)
+**Issue:** Every canned path returned a refusal with nothing to click. Suggestion chips are parsed
+from a `FOLLOWUPS` block in the answer, and the canned strings had none — so a visitor asking
+"what can I ask?" was told no and handed a blank slate.
+**Also:** `meta_keywords` lacked "what do you know" / "what am I supposed to do", so visitors asking
+the chat for help were told they were off-topic.
+**Resolution:** All three canned responses carry a `FOLLOWUPS` block (no client change needed —
+the existing parser renders them), with chips spanning distinct corpus domains rather than three
+flavours of the same question. Meta keyword list extended.
+**Credit:** the "the answer to 'what can I ask?' is in the doc titles" framing came from a parallel
+CC session; its causal diagnosis was wrong but the product instinct was right.
+
+### 1. SAP Business One: Generation Hallucination — CLOSED 2026-08-06
+**Resolution:** Fixed incidentally by the Tier 4 persona prompt rewrite (commit 5586ad5).
+**Verification (Kimi, 2026-08-06):** Two consecutive live queries returned grounded answers
+(Produmex WMS, multi-region specifics from the case study); zero rule-#6 speculation markers
+("likely", "could include", "not provided"). Deterministic pre-Tier-4, absent post-Tier-4.
+**Lesson:** the defect sat unowned for 9 days (T2.3 → convergence doc) — the ledger exists
+so that doesn't happen again.
+
+### 5. Verifier Wiring Outage (VERIFIER_HOST + VERIFIER_URL) — CLOSED 2026-08-06
+**Severity:** HIGH while live — the verifier was dark ~4 days with zero verdicts recorded
+(last row 2026-08-01 18:00), and nothing alerted.
+**Root cause (two breaks, both from runbook-era redeploys):**
+1. `/etc/default/portfolio-ai-tunnel` (VPS) had no `VERIFIER_HOST` — the tunnel unit's
+   `-L 127.0.0.1:8007:${VERIFIER_HOST}:8007` expanded empty; 8007 listened but dead-ended.
+2. No systemd drop-in set `VERIFIER_URL` for api-proxy — `_fire_verify` no-ops without it.
+**Fix (Kimi, 2026-08-06):** added `VERIFIER_HOST=192.0.2.115` (env file backed up first),
+restarted tunnel — 8007 health OK; added `api-proxy.service.d/verifier.conf` with
+`VERIFIER_URL=http://127.0.0.1:8007`, restarted proxy. E2E proof: live chat → verdict row
+with request_id landed in verdicts.db (faithfulness 1.0, latency 22.2s).
+**Lesson:** redeploys must preserve out-of-repo config. The tunnel env file and the proxy
+drop-ins are invisible to git — DEPLOYMENT.md now lists them as required state to verify.
+Also: "zero verdicts in N days" should itself be an alert condition (Tier 7 candidate).
+
+---
+
+## HOW THIS LEDGER DRIVES CONTINUOUS IMPROVEMENT
+
+### Weekly Flagged-Queue Review (15 minutes)
+1. Query verdicts.db for answers flagged by the 14B judge in the last 7 days
+2. Pick the 5–10 worst offenders (lowest confidence or most content-free)
+3. For each: decide
+   - **KB gap:** Missing or wrong doc → queue for Tier 6 KB expansion
+   - **Prompt gap:** System prompt rule violated → adjust prompt or fine-grain chunk
+   - **Judge error:** Judge is wrong → document as false positive for future eval calibration
+
+4. Log decision and move on
+
+### Monthly Ops Review (1 hour, includes this ledger)
+1. Review open defects above
+2. Check if any are resolved (move to CLOSED with date/commit)
+3. If defect is aging >2 weeks without action: escalate priority or document decision to defer
+4. Add any new defects discovered during the month
+
+### Example: SAP Defect Closure
+```
+// Week 1: Flagged-queue review discovers SAP query returned speculative text
+// Week 2: Investigation finds chunk IS being passed; model is just ignoring grounding rule
+// Action: Strengthen system prompt clause #6 (grounding requirement)
+// Test: Run SAP query in prod, verify response uses the rank-1 chunk
+// Commit: "fix: strengthen grounding clause for SAP Business One answers"
+// Ledger update: Move SAP to CLOSED, cite commit hash, log lesson learned
+```
+
+---
+
+## Privacy Note (Red-line #2 Compliance)
+
+This ledger is safe because:
+- ✅ No query content stored (only verdict metadata)
+- ✅ Defects are categorized (KB gap, prompt gap, judge error) without text details
+- ✅ Learning happens through verdict scores, not query logs
+- ✅ If a defect needs examples, they come from the golden set (curated, stable), not production queries
+
+This is why "mine query logs for trends" doesn't work here — and why the verifier's flagged-queue review is the real loop that's both legal and effective.
+
+---
+
+**Last Updated:** 2026-09-01  
+**Owner:** Claude (reviews weekly), Kimi (discovers during tests)  
+**Next Review:** 2026-08-26 (weekly flagged-queue)  
+**Next Full Review:** 2026-09-05 (monthly ops review)

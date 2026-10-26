@@ -1,0 +1,120 @@
+# Portfolio AI — dev.cwetzel.com
+
+[![CI](https://github.com/cdnwetzel/portfolio-ai/actions/workflows/ci.yml/badge.svg)](https://github.com/cdnwetzel/portfolio-ai/actions/workflows/ci.yml)
+
+A full-stack AI chat built on personal GPU hardware. Not a wrapper around OpenAI — Qwen 14B runs on two RTX A4500 GPUs in my home office via vLLM tensor parallelism. Every answer is grounded in a RAG knowledge base of documented work: case studies, infrastructure write-ups, LinkedIn posts, resume.
+
+**Live:** https://dev.cwetzel.com
+
+---
+
+## Architecture
+
+```
+Browser
+  ↓ HTTPS / WSS
+cwetzel.com (Ubuntu VPS)
+  ├─ Apache — SSL termination, static React build, WSS proxy
+  └─ FastAPI api-proxy (port 8000)
+       ├─ RAG: embed query → Qdrant search (top-15) → rerank (top-5) → inject context
+       └─ Stream: vLLM WebSocket → browser
+            ↓ SSH tunnel
+T5810 Home Server (Gentoo Linux)
+  ├─ labrouter :8004 — contract port; routes to vLLM backends (:8007 Qwen3.8-27B-FP8, TP=2, 32K)
+  ├─ Qdrant — vector DB, 768-dim cosine similarity, port 6333
+  ├─ bge-base-en-v1.5 — CPU embeddings (768-d), port 8005
+  └─ bge-reranker-base — CPU cross-encoder reranker, port 8006
+            ↓ same tunnel, routed over the home LAN
+asrock B550 (Gentoo Linux)
+  └─ Qwen2.5-14B-Instruct via Ollama — faithfulness verifier on an RTX 5060 Ti, port 8007
+```
+
+**Key properties:**
+- RAG-grounded responses — model cites sources, says "I don't have that documented" when KB doesn't cover a topic
+- Streaming via WebSocket — tokens appear as generated, no polling
+- Follow-up suggestion chips — model appends a `FOLLOWUPS:[...]` block; frontend parses and strips it, shows as clickable chips
+- Context management — 4K char per-prompt cap, 24K char sliding window history
+- Out-of-band faithfulness check — a separate 14B-Instruct judge on a second machine grades whether each answer's claims are grounded in the retrieved context; fails open, so chat is unaffected if it's down
+- Regression-gated — a graded eval over a golden question set (`scripts/eval_graded.py`) runs before deploy, and a deterministic guardrail refuses prompt-extraction attempts before they reach the LLM
+- Zero cloud GPU cost — owned A4500 NVLink pair handles inference
+
+---
+
+## Stack
+
+| Layer | Technology |
+|---|---|
+| Frontend | React 18 + Vite + Tailwind CSS |
+| Edge proxy | FastAPI + Uvicorn (Python) |
+| LLM serving | vLLM 0.14.0 |
+| Model | Qwen2.5-Coder 14B Instruct (+ pscode LoRA) |
+| Vector DB | Qdrant (dense cosine, 768-d) |
+| Embeddings | BAAI/bge-base-en-v1.5 (768-d, CPU) |
+| Reranker | BAAI/bge-reranker-base (CPU cross-encoder) |
+| Faithfulness verifier | Qwen2.5-14B-Instruct via Ollama (RTX 5060 Ti, separate host) |
+| Inference hardware | Dell Precision T5810, 2× NVIDIA RTX A4500 (NVLink) |
+| OS | Gentoo Linux (custom kernel, OpenRC) |
+| Networking | SSH tunnel (VPS → home) |
+
+---
+
+## Project Layout
+
+```
+cloud/          FastAPI proxy (api-proxy.py) — deployed to VPS
+frontend/       React + Vite app — built and rsync'd to /var/www/dev.cwetzel.com/
+scripts/        KB indexer (index_with_embeddings.py), one-off tools
+knowledge_base/
+  RESUME.md
+  case_studies/   9 project write-ups (AVD, SAP, SOC2, DR, VMware, AI iterations, ...)
+  posts/          Top LinkedIn posts (by impressions)
+  infrastructure/ T5810 homelab, this AI system
+plans/          Design documents and implementation plans
+```
+
+---
+
+## Running Locally
+
+You need vLLM, Qdrant, an embedding service, and a reranker running. The proxy expects them on localhost ports 8004 (labrouter, which fronts vLLM), 6333, 8005, and 8016 respectively (same as the SSH tunnel forwards in production). The reranker is optional — the proxy fails open to cosine top-5 if it is unreachable.
+
+```bash
+# Frontend dev server
+cd frontend
+npm install
+npm run dev   # http://localhost:5173 — proxies /ws and /api to localhost:8000
+
+# API proxy
+pip install fastapi uvicorn httpx
+uvicorn cloud.api-proxy:app --host 127.0.0.1 --port 8000
+
+# Index KB into Qdrant (run on whatever machine hosts Qdrant)
+python scripts/index_with_embeddings.py
+```
+
+---
+
+## Deployment
+
+One script builds the frontend, ships it plus every proxy module, restarts the service, and gates
+on a live self-test — deploying the proxy by hand risks leaving its helper modules stale:
+
+```bash
+./cloud/deploy.sh
+```
+
+---
+
+## About
+
+Built by Chris Wetzel — infrastructure engineer, 26 years enterprise IT, currently IT Manager at a law firm in NJ. The T5810 running inference in my home office is the same machine I use for Gentoo kernel experiments and the same one I write about on LinkedIn.
+
+- **Website:** https://cwetzel.com
+- **LinkedIn:** https://linkedin.com/in/chris-wetzel
+- **Email:** chris@cwetzel.com
+
+---
+
+## License
+
+[MIT](LICENSE) © 2026 Chris Wetzel

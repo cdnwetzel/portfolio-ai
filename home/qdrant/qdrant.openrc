@@ -1,0 +1,61 @@
+#!/sbin/openrc-run
+# OpenRC service for Qdrant (vector DB for the portfolio RAG chat) on the T5810.
+# Install to /etc/init.d/qdrant (0755), rc-update add qdrant default.
+#
+# WHY THIS FILE EXISTS — the 2026-06-14 outage postmortem:
+# The previous hand-written unit did two things wrong that latched Qdrant OFF and
+# made every chat query answer "I don't have that documented in my knowledge base":
+#   1. It put a shell redirect INSIDE command_args:
+#        command_args="--config-path .../config.yaml >> /var/log/qdrant.log 2>&1"
+#      supervise-daemon passes that verbatim as argv — the ">>", "/var/log/qdrant.log",
+#      "2>&1" became bogus positional args, not a redirect. Use output_log/error_log.
+#   2. It never gave the daemon an effective CWD, so supervise-daemon ran it from "/".
+#      Qdrant's startup cleanup of its RELATIVE ./snapshots/tmp then resolved against
+#      "/", hit a stale ROOT-owned /snapshots dir → PermissionDenied → crash-loop →
+#      respawn_max exceeded → service latched off.
+# Fixes below: output_log/error_log for logging, directory= for a real --chdir CWD,
+# and start_pre checkpath so the chris-owned data dirs always exist before start.
+# config.yaml already sets ABSOLUTE storage/snapshots/temp paths; the CWD fix stops
+# any RELATIVE path from ever escaping to "/".
+
+name="Qdrant"
+description="Qdrant vector database (RAG retrieval for the portfolio AI chat)"
+
+command="/usr/local/bin/qdrant"
+command_args="--config-path /home/user/qdrant-data/config.yaml"
+command_user="user:user"
+supervisor="supervise-daemon"
+pidfile="/run/qdrant.pid"
+
+# CWD for the daemon. supervise-daemon honors this as --chdir, so any relative path
+# Qdrant touches (e.g. its snapshots temp cleanup) resolves UNDER the chris-owned data
+# dir, never against "/". This is the core fix for the 2026-06-14 outage.
+directory="/home/user/qdrant-data"
+
+# Correct logging mechanism (NOT a redirect inside command_args).
+output_log="/var/log/qdrant.log"
+error_log="/var/log/qdrant.log"
+
+# Respawn tuning: a one-off transient error self-heals, but a genuine crash-loop still
+# latches OFF on purpose (max 8 respawns / 120s). That latch is intentional — it stops
+# thrashing the box and is exactly the signal the health monitor (scripts/health_aggregate.py)
+# pages a human on. Do NOT make this respawn infinitely; a silent restart loop hid the
+# original outage.
+respawn_delay=5
+respawn_max=8
+respawn_period=120
+
+depend() {
+    need net
+    after bootmisc
+}
+
+start_pre() {
+    # Guarantee the data dirs exist and are chris-owned before start (defense-in-depth
+    # replacing the old raw mkdir/chown). Paths match config.yaml's absolute storage_path
+    # and snapshots_path. With the CWD fix above, the stale root-owned /snapshots can no
+    # longer be recreated.
+    checkpath -d -o user:user /home/user/qdrant-data/storage
+    checkpath -d -o user:user /home/user/qdrant-data/snapshots
+    checkpath -f -m 0644 -o user:user /var/log/qdrant.log
+}

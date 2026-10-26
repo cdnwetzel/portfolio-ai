@@ -1,0 +1,13 @@
+[Unit]
+Description=Portfolio AI monitor-of-monitor alert (fires when the health probe itself crashes)
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/default/portfolio-health
+# The health probe pages via ntfy on its own for service outages. THIS unit only runs
+# when the probe process crashed before it could do that (OnFailure= in
+# portfolio-health.service), so it sends a distinct "the monitor itself is broken" push.
+# Uses curl directly (no python) so it works even if the python env is what broke.
+ExecStart=/bin/sh -c 'curl -s -H "Title: Portfolio AI monitor crashed" -H "Priority: high" -H "Tags: warning" -d "health_aggregate.py failed to run on the VPS - check: journalctl -u portfolio-health.service -n 50" "$NTFY_URL" || true'
+StandardOutput=journal
+StandardError=journal
