@@ -2,7 +2,7 @@
 
 A single-tenant **portfolio RAG chat** at [dev.cwetzel.com](https://dev.cwetzel.com): a React
 frontend and a FastAPI proxy on an Ubuntu VPS, talking over an SSH tunnel to a **labrouter**
-front-end that fans out to vLLM backends (**Qwen3.8-27B-FP8**, 32K context), Qdrant and a CPU
+front-end that fans out to vLLM backends (**Qwen3.8-27B-FP8**, 48K context), Qdrant and a CPU
 embedder on the T5810 in a home office, plus a GPU reranker and a faithfulness verifier on the
 asrock B550.
 
@@ -28,8 +28,8 @@ model beneath it have since changed. All tiers live:
 1. Credibility gates (6/6 passed), 2. 14B judge on RTX 5060 Ti (9/9 fixtures), 3. GPU reranker
 (15.8x faster), 4. First-person voice & query routing, 5. UX polish (stop button, textarea, 
 auto-scroll, sources readability), 6. KB expansion (indexer post-loading
-bug fixed), 7. Ops maturity (incident runbook, deploy-stamped version endpoint; **verdicts.db backups
-and the weekly digest were written but are NOT scheduled — see DEFECT_LEDGER #4**). Self-test gate passing. Health monitoring active.
+bug fixed), 7. Ops maturity (incident runbook, deploy-stamped version endpoint; verdicts.db backups and the weekly
+digest — scheduled since 2026-10-03 from the T5810's crontab, see DEFECT_LEDGER #4). Self-test gate passing. Health monitoring active.
 Continuous improvement: weekly flagged-queue review + defect ledger (DEFECT_LEDGER.md).
 
 ## Core Architecture
@@ -47,7 +47,7 @@ T5810 Home Server / precision-t5810 (Gentoo/OpenRC) — 2x RTX A4500 NVLink, 256
 │  │  this and only this for generation. Models are swapped BEHIND it, so changing a
 │  │  model never touches the VPS. Never bind a model directly on 8004.
 │  └─ routes to vLLM backend slots:
-│     ├─ :8007 — Qwen3.8-27B-FP8, 32K ctx, TP=2  ← what cwdotcom uses (MODEL_ID)
+│     ├─ :8007 — Qwen3.8-27B-FP8, 48K ctx, TP=2  ← what cwdotcom uses (MODEL_ID)
 │     ├─ :8008 — Qwen3.6-35B-A3B-FP8   (slot defined; not running)
 │     └─ :8009 — pscode-14b            (slot defined; not running)
 ├─ Qdrant (port 6333) — dense 768-d cosine. Live counts: `/api/system-info`, which reads
@@ -188,7 +188,7 @@ same doc. **`RAG_MAX_PER_DOC` is now 2** (env-overridable), which gives 20/20 at
   documented" rather than inventing, and the UI shows the exact source chunks it used.
 - **Owned GPU inference** — vLLM on 2x A4500s with tensor parallelism. Zero cloud GPU cost.
 - **Edge/compute split** — cloud frontend for latency, home GPUs for compute, joined by one SSH tunnel.
-- **Out-of-band faithfulness verification** — an independent 14B-Instruct judge on a separate machine grades
+- **Out-of-band faithfulness verification** — a separate 14B-Instruct judge (a different model from the answerer, though also Qwen) on a separate machine grades
   whether an answer's claims are grounded, without ever blocking the response.
 - **Per-message telemetry** — time-to-first-token, decode throughput and total latency under each
   answer (metadata only, never content).
@@ -202,9 +202,12 @@ same doc. **`RAG_MAX_PER_DOC` is now 2** (env-overridable), which gives 20/20 at
   Two things worth knowing. The E2E probe **works** — it caught the 2026-08-26 vLLM outage and
   paged `[urgent] Portfolio AI DOWN` on Aug 27 and Aug 28 with the message "outage signature". The
   gap was that nobody acted on it, and that it ran only once a day because the 5-min unit was
-  launched with `--no-smoke`. Detection latency is now ≤30 min. **A "30-minute T5810 canary" is
-  documented in a few places and does not exist** — not in any runlevel, no cron entry. Do not
-  count it as coverage.
+  launched with `--no-smoke`. Detection latency is now ≤30 min. The **30-minute T5810 canary
+  exists** — `scripts/selftest-canary.sh` in chris's crontab on the T5810, every 30 min, logging
+  to `~/portfolio-selftest.log` and paging via `/etc/portfolio-canary.env` on transitions. Its
+  log shows 48 runs/day continuously since at least 2026-08-20. This file said from 2026-08-31
+  to 2026-11-01 that it did not exist; that check was wrong (it most likely looked at the wrong
+  user's crontab). Verify a schedule by reading its output, not by looking for its config.
 
 ## Directory Structure
 
@@ -238,7 +241,7 @@ cwdotcom/
 
 | Layer | Technology | Purpose |
 |-------|-----------|---------|
-| **GPU inference** | vLLM 0.27.1 + Qwen3.8-27B-FP8 (32K ctx) | LLM serving on 2x A4500s (T5810), behind labrouter :8004 |
+| **GPU inference** | vLLM 0.27.1 + Qwen3.8-27B-FP8 (48K ctx) | LLM serving on 2x A4500s (T5810), behind labrouter :8004 |
 | **API framework** | FastAPI + Uvicorn | Async Python proxy (cloud server) |
 | **Vector DB** | Qdrant | Dense cosine retrieval, top-15 candidates |
 | **Embeddings** | BAAI/bge-base-en-v1.5 (768-d) | Query/document → vector (CPU, port 8005) |
@@ -279,7 +282,10 @@ VLLM_SERVED_NAME=qwen3.8-27b     # labrouter routes to this id; the proxy pins t
 VLLM_PORT=8007                   # backend slot. NEVER 8004 — unit and launcher refuse it.
 VLLM_TP=2
 VLLM_UTIL=0.93                   # 0.95 OOMs on this box
-VLLM_CTX=32768
+VLLM_CTX=49152                   # 48K since 2026-10-03 19:41 (32768 before; 65536 was tried
+                                 # that evening and dropped). KV 77,877 tokens = 1.58x one
+                                 # full-length request. The proxy still budgets only
+                                 # MAX_CONTEXT_TOKENS of it for the prompt.
 
 # *** DO NOT CHANGE THESE THREE WITHOUT RE-BENCHMARKING — they are the 4.4x. ***
 # Measured: eager 6.2 tok/s -> CUDA graphs on 27.7 tok/s
@@ -306,7 +312,9 @@ CUDAHOSTCXX=/usr/bin/g++-14      # Gentoo ships gcc 15; CUDA hard-fails above 14
 # --enable-prefix-caching       # LIVE and DEPLOYED in the launcher's argv (2026-09-13).
 #   Verified from live sources, not files: flag in /proc/<pid>/cmdline,
 #   enable_prefix_caching=True resolved, conf.d's VLLM_EXTRA_ARGS slot EMPTY, repo launcher
-#   byte-identical to /opt. It had been live accidentally since 2026-09-12 23:32 via the
+#   byte-identical to /opt *at the time*. It drifted (d6ddd12 was never installed) and was
+#   re-installed 2026-11-01 21:10 via 10-install-service-files.sh: md5 matches the repo again,
+#   argv unchanged, bench 78.9/78.9/78.8 tok/s. It had been live accidentally since 2026-09-12 23:32 via the
 #   experiment slot (a `prefix` run that was never reverted); it now runs through the
 #   documented channel and the slot is free for the ngram experiment.
 #   The clean-pipeline re-gate it was being held for happened, accidentally but
@@ -369,6 +377,11 @@ CUDAHOSTCXX=/usr/bin/g++-14      # Gentoo ships gcc 15; CUDA hard-fails above 14
 #   ran 24.3 tok/s, below baseline's 33.8. It wins here because the site's answers are mostly
 #   structured explanations, which draft well. k=2 (64.6 tok/s, 39.0 ms/step) is the documented
 #   fallback if that ever stops being true.
+#   k=4 TRIED 2026-11-01 and it DOES NOT BOOT at 49,152 ctx: KV left 1.98 GiB vs 2.09 GiB needed
+#   for one full-length request (k=3 leaves 3.18). It crash-looped and, because the harness
+#   blocked inside `rc-service restart`, took the site down ~15 min. The harness now aborts on
+#   init failure, reverts on Ctrl-C and kills orphaned supervisors (tests/test_tuning_guards.py).
+#   Retrying needs a shorter context (~46K), i.e. giving back the 48K. Not retried.
 #   PROMOTED 2026-09-14 into the launcher's permanent argv (depth from VLLM_SPEC_K, default 3),
 #   the same channel --enable-prefix-caching uses. Experiment slot is EMPTY again. Verified from
 #   live sources: --speculative-config in /proc/<pid>/cmdline, speculative_config=
@@ -404,7 +417,8 @@ RERANK_PORT=8006
 
 # Faithfulness verifier (Tier 2: 14B-Instruct judge, RTX 5060 Ti)
 VERIFIER_PORT=8007
-JUDGE_MODEL=qwen2.5:14b-instruct-q4_k_m  # independent variant of the 14B-Coder (echo-bias mitigation)
+JUDGE_MODEL=qwen2.5:14b-instruct-q4_k_m  # different model/size from the Qwen3.8-27B answerer, SAME Qwen
+                                         # family: reduces echo bias, does not eliminate it
 JUDGE_NUM_CTX=16384                      # ollama defaults to 4096 and truncates silently
 OLLAMA_CONTEXT_LENGTH=16384              # lockstep with JUDGE_NUM_CTX (ollama-side window)
 JUDGE_KEEP_ALIVE=30m                     # ollama evicts idle models after 5m
@@ -540,6 +554,34 @@ worth remembering:
   validity; those 3 rows simply could never show a difference. Also fixed the same day: the
   context-window item still expected `"16"` from the 14B/16K era, which nothing true contains
   (the model has served 32,768 since 2026-08-26) and which `"16 GB"` satisfied by accident.
+
+- **2026-11-01** — Reconciled three claims against live output. (1) **Context is 49,152, not
+  32,768**: changed on the box 2026-10-03 19:41 (65,536 was tried that evening and dropped),
+  with no doc, KB, repo conf.d or `/api/system-info` update, so the public panel still showed
+  32768. Fixed in the docs, repo conf.d, launcher default, the proxy's `MODEL_CONTEXT_TOKENS`
+  default, three KB files and the golden-set expect. Deployed (a400d32) and
+  reindexed the same night, authorized; the live site now answers "49,152". (2) **The T5810 canary exists** and has run every 30 min since at least
+  2026-08-20. This file had said it didn't. (3) **DEFECT_LEDGER #4 is resolved**: backups and
+  the digest run from the T5810's crontab. Also: the repo launcher had drifted ahead of `/opt`
+  (d6ddd12 never installed); installed the same night, along with the deploy and reindex.
+
+- **2026-11-04** — Corrected the KB where the live site was repeating KB text that was wrong
+  (battery of 14 questions x 3, 2026-11-01). The tunnel is **VPS-initiated `ssh -L`**, not a
+  reverse tunnel; the judge is the **same Qwen family** as the answerer; **8004 is labrouter**,
+  vLLM is 8007; fresh-chat decode is **~70 tok/s**, not ~47; prefix caching shortens TTFT and does
+  not speed up decode; the reranker runs on the asrock's 5060 Ti. **`PROFESSIONAL_CONTEXT.md` is no
+  longer indexed** (archived to `docs/archive/`): a SaaS-planning note whose "repos likely contain
+  Terraform, Ansible" the site stated as fact 3/3. Added `case_studies/major_projects_overview.md`
+  so broad project questions stop blending AVD with P2V. 2026-11-07: `RESUME.md` now carries the
+  full work history, volunteer roles and LinkedIn-only items from cwetzel.com and the public
+  LinkedIn profile (it had 2 of 6 jobs), plus 4 recent posts. **Open:** the AVD/SAP case studies
+  carry specifics found on neither source (plan §6). Guards: `tests/test_kb_content.py`.
+  Plan, evidence and before/after protocol: `plans/kb-answer-quality-fixes-2026-11.md`.
+  **Status: reindexed 2026-11-07** (authorized): 39 docs / 110 chunks, 0 context-doc chunks.
+  `./scripts/reindex_kb.sh` cannot run from the T5810 itself (it SSHes to root@jump.example.net
+  and there is no root key), so the indexer was run directly with the same arguments. The VPS
+  drop-in `api-proxy.service.d/system-info.conf` now says KB_DOC_COUNT=39; it is a hand-set
+  number, so update it on every reindex that changes the doc count.
 
 **When you change the system, change the docs in the same commit.** A wrong doc is worse than a
 missing one: it is confidently wrong, and it survives long after the person who knew better moved on.

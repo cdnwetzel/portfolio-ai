@@ -188,17 +188,11 @@ def load_documents(kb_path: str) -> List[Dict]:
             })
             logger.info(f"✓ Loaded resume")
 
-    # Load PROFESSIONAL_CONTEXT
-    prof_context = kb_dir.parent / "PROFESSIONAL_CONTEXT.md"
-    if prof_context.exists():
-        with open(prof_context) as f:
-            docs.append({
-                "id": "professional_context",
-                "title": "Professional Context & Positioning",
-                "content": f.read(),
-                "source": "context",
-            })
-            logger.info(f"✓ Loaded professional context")
+    # PROFESSIONAL_CONTEXT.md is deliberately NOT indexed (removed 2026-11-04). It was a
+    # June 2026 SaaS-planning note (personas, pricing, "GATE 1"), not a description of Chris's
+    # work, and it carried speculation phrased as fact -- "Your GitHub repos likely contain:
+    # Infrastructure as Code (Terraform, Ansible)" -- which the site then repeated as his
+    # skills, 3/3. Every true fact in it is also in RESUME.md. It now lives in docs/archive/.
 
     return docs
 

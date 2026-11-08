@@ -125,7 +125,7 @@ experiment: [`plans/ups-sizing-2026-09-01.md`](plans/ups-sizing-2026-09-01.md).
 | Service | Port | Status | Usage |
 |---------|------|--------|-------|
 | labrouter | 8004 | ✅ Running | contract port; fronts the vLLM slots. supervise-daemon, respawn_max=0 (2026-08-31) |
-| vllm-qwen38 | 8007 | ✅ Running | Qwen3.8-27B-FP8, 32K ctx, TP=2, CUDA graphs (~29 tok/s) |
+| vllm-qwen38 | 8007 | ✅ Running | Qwen3.8-27B-FP8, 48K ctx, TP=2, CUDA graphs + MTP k=3 (~76-78 tok/s; ~33 = MTP lost) |
 | Qdrant | 6333 | ✅ Running | Vector DB — `home/qdrant/qdrant.openrc` (IaC) |
 | embed-service | 8005 | ✅ Running | BAAI/bge-base-en-v1.5, 768-d (CPU) |
 | rerank-service | 8006 | ✅ Running | bge-reranker-base (CPU) |
@@ -202,7 +202,7 @@ second, public-path vantage.
 | `portfolio-health-heartbeat.timer` | VPS | daily 12:00 UTC | full run **incl. E2E WS query**; sends one "all green" ntfy/day so silence never means "monitor dead"; feeds healthchecks.io |
 | `portfolio-health-alert.service` | VPS | `OnFailure=` | monitor-of-monitor: pages if the probe process itself crashes |
 | healthchecks.io ping | external | on every green run | dead-man's switch — alerts if the VPS/monitor stops pinging |
-| ~~`scripts/selftest-canary.sh` (cron)~~ | T5810 | **NOT INSTALLED** | verified 2026-08-31: not in any runlevel, no cron entry. Do not count as coverage. |
+| `scripts/selftest-canary.sh` (chris's crontab) | T5810 | every 30 min | public-path self-test against `wss://dev.cwetzel.com`; log `~/portfolio-selftest.log`. Running continuously since at least 2026-08-20 — the 2026-08-31 "NOT INSTALLED" entry here was wrong (corrected 2026-11-01). |
 | E2E smoke inside `health_aggregate.py` | VPS | every 30 min (`SMOKE_INTERVAL_SEC`) | real WS query; this is what actually caught the 2026-08-26 outage |
 
 **Alert channel:** ntfy.sh push to a private topic. Config (not in the repo):

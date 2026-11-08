@@ -1,6 +1,8 @@
 # Security Hardening & Continuous Testing: Operational Controls
 
-**Role:** Chris Wetzel — designed and ran these security-hardening operations.
+**Role:** Chris Wetzel — designed and ran these security-hardening operations for clients in **regulated industries**: mortgage, title and real estate firms, medical and dental practices (doctors and endodontists), law firms, pharmaceutical companies, and social work and family services organizations — and for RedEye's own SOC 2 Type II program (2022).
+
+This page describes the controls and the testing and corrective-action discipline. It does not record specific incidents, findings or dates.
 
 ## Overview
 
@@ -11,7 +13,7 @@ Security hardening is not a one-time configuration. It's an **operational discip
 - **Corrective action workflows** (find issue → fix → verify → document)
 - **Principle of least privilege** (every access, every port, every setting justified)
 
-This framework applies across compliance regimes: SOC2 Type II, PCI DSS 4.0, HIPAA, NIST 171, FINRA. The controls overlap; the philosophy is unified.
+Chris has supported **compliance audits for NIST (DoD), FINRA, HIPAA, PCI and SOC 2**. The same controls carry across all of them and across the regulated industries above. The requirements overlap; the discipline is the same.
 
 ## Core Hardening Controls
 
@@ -41,19 +43,6 @@ This framework applies across compliance regimes: SOC2 Type II, PCI DSS 4.0, HIP
 - HSTS header presence (browser developer tools)
 - Certificate renewal logs (evidence of proactive renewal before expiration)
 
-**Common finding in testing:**
-```
-Vulnerability: TLS 1.0 still enabled on legacy system
-Root cause: System was installed in 2015, not updated
-Corrective action:
-  1. Assessed risk: Is this system exposed to untrusted networks? (Yes)
-  2. Evaluated options: Upgrade OS? Disable TLS 1.0 and require external access via proxy?
-  3. Decision: Deploy reverse proxy (nginx) in front of legacy system
-  4. Proxy terminates TLS 1.2, forwards to legacy system on internal network
-  5. Tested: External scan shows TLS 1.2 only, internal communication unaffected
-  6. Verified: In next month's pen test, no weak TLS detected
-```
-
 ### Certificate Management & Currency
 
 **Control:** All certificates are valid, current, and monitored
@@ -64,29 +53,6 @@ Corrective action:
 - Renewal: initiated before expiration (usually 60-90 days out)
 - Verification: new certificate tested in staging before production deployment
 - Documentation: renewal logs showing old cert → new cert transition
-
-**Example timeline:**
-```
-Certificate for api.example.com
-Issued: 2024-01-15, Expires: 2025-01-14 (1-year validity)
-
-2024-10-15 (90 days before expiration): Automated alert "cert expires in 90 days"
-  → Check: Renewal policy allows 60 days, so we're in window
-  → Renewal requested from CA
-
-2024-12-15 (30 days before expiration): Alert "cert expires in 30 days"
-  → Verify: New certificate received? Yes
-  → Test: New cert deployed to staging, validated with SSL Labs
-  → Schedule: Production deployment for 2024-12-20 (off-peak window)
-
-2024-12-20: Production certificate update
-  → Deploy new certificate to load balancer
-  → Verify: Traffic flows without SSL errors
-  → Confirm: Certificate chain is complete and valid
-  → Log: "Certificate updated: api.example.com, old cert 2024-01-15, new cert 2025-01-14"
-
-2025-01-15: Old certificate expires (no impact, already replaced)
-```
 
 ### Exposed Management Interfaces
 
@@ -104,24 +70,6 @@ Issued: 2024-01-15, Expires: 2025-01-14 (1-year validity)
 3. **Move to non-standard ports:** Change from 8080 → 18523 (less discoverable)
 4. **Require authentication:** All interfaces require MFA-enabled credentials
 5. **Use reverse proxy:** Put admin interfaces behind a proxy that adds additional authentication layer
-
-**Example finding:**
-```
-Vulnerability: VMware ESXi management interface (port 443) exposed to internet
-- Port 443 is accessible from any IP
-- Default credentials tested (not changed from installation)
-- Vulnerable version 6.5 (exploit available)
-
-Corrective action:
-  1. Updated ESXi to version 7.0 (out of support, tested first)
-  2. Changed default administrator password to 25-character random
-  3. Added firewall rule: Allow port 443 only from an internal bastion host
-  4. Disabled all other admin services (SSH, etc.) on internet side
-  5. Enabled vCenter audit logging for all admin access
-  6. Tested: External scan shows port 443 closed from internet, admin access only from bastion
-
-Ongoing: Monthly scan of management interfaces from external perspective
-```
 
 ### Access Control Lists (ACLs) & Network Address Translation (NAT)
 
@@ -141,23 +89,6 @@ Ongoing: Monthly scan of management interfaces from external perspective
 3. **Port cleanup:** Remove unused port mappings
 4. **Documentation:** Every rule has a "why" (client ID, service, approval date)
 
-**Example ACL audit:**
-```
-Firewall review, Q2 2024
-
-Rule: Allow <external IP> (external) → <internal host> (internal) port 3389 (RDP)
-Purpose: Support client XYZ remote access (VPN tunnel)
-Status: Client updated to use VPN → remove rule? 
-Investigation: Client still has legacy RDP access configured, not in use
-Decision: Remove rule (client should use VPN)
-Approval: manager@msp.com
-Documented: ACL audit log, change ticket CHG-3847
-
-Before cleanup: 214 rules (many redundant, some conflicting)
-After audit: 127 rules (rules with clear purpose, less management overhead)
-Benefit: Faster rulebase evaluation, fewer conflicts, clearer security posture
-```
-
 ### Default Credentials Removal
 
 **Control:** No default passwords remain in any system
@@ -174,21 +105,6 @@ Benefit: Faster rulebase evaluation, fewer conflicts, clearer security posture
 3. **Change:** For accounts that can't be disabled, change password to 25-character random
 4. **Verification:** Attempt login with default credential (should fail)
 5. **Documentation:** Maintain list of changed accounts (for troubleshooting, resets)
-
-**Example:**
-```
-System: Windows Domain Controller
-Default account: Administrator (username "Administrator")
-Action: Account remains (required for domain), password changed
-Old password: [default per Windows]
-New password: <25-character random value>
-Changed by: security@msp.com
-Changed date: 2024-03-15
-Verified: Attempted login with default password → "Access Denied"
-Stored in: Credential vault (HashiCorp Vault, encrypted)
-Access to vault: 5 admins (principle of least privilege)
-Vault access logged: All retrievals tracked and audited
-```
 
 ### HSTS (HTTP Strict Transport Security)
 
@@ -236,28 +152,6 @@ Vault access logged: All retrievals tracked and audited
 - Reviewed by humans regularly
 - Integrated with incident response
 
-**Example logging architecture:**
-```
-Source systems → syslog/rsyslog → Central ELK Stack → Alerting → SOC review
-
-1. Web server logs HTTP requests → syslog → ELK
-   ELK parses and indexes: timestamp, user, action, resource, result
-   Alert: 10 failed logins from same IP in 5 minutes → block IP + notify security
-
-2. Firewall logs dropped packets → syslog → ELK
-   ELK correlates: Is this a port scan? Is this a known attacker?
-   Alert: 100+ packets dropped to port 22 from external IP → review, possibly block
-
-3. Vulnerability scanner finds issue → logged in scanner + ELK
-   Alert: Critical vulnerability detected on server X → create ticket, assign to ops
-
-4. Monthly review: Security team searches logs for:
-   - Brute force attempts (failed logins from same IP)
-   - Insider threats (unusual access patterns)
-   - Unpatched systems (requests to deprecated TLS versions)
-   - Compliance violations (access without approval)
-```
-
 ### Principle of Least Privilege
 
 **Control:** Every access is the minimum necessary to do the job
@@ -279,36 +173,6 @@ Source systems → syslog/rsyslog → Central ELK Stack → Alerting → SOC rev
    - Example: DBA needs to modify production database
    - Request via ticket system, approval required, access granted for 1 hour, logged, access revoked
 
-**Example:**
-```
-Support technician (user: support1@msp.com) needs access to:
-- Read support tickets for their assigned clients
-- View client configuration details (to help troubleshoot)
-- Reset user passwords (with client approval)
-- NOT access: Billing, other clients' data, financial records
-
-Role: "Support Tech - Limited"
-Permissions:
-  - Ticketing system: Read-only on assigned tickets
-  - Knowledge base: Read-only
-  - Client portal: View assigned client systems
-  - AD: Can reset password in own domain only
-  - Database: No direct access (uses web portal)
-  - SSH: No access
-
-Review (quarterly):
-  Q2 2024: Support1 still assigned 3 clients? Yes, permissions correct
-  Q3 2024: Support1 reassigned to 5 clients → role adjusted, test access
-  Q4 2024: Support1 promoted to senior support → move to "Support Tech - Full" role
-
-If someone needs temporary elevated access:
-  - Ticket: "Need to access client ABC database to debug connection issue"
-  - Approval: Manager approves, scope limited to "client ABC database, read-only, 4 hours"
-  - Grant: Temporary elevated access via PAM system, logged with timestamp
-  - Verify: Can access? Yes, log shows "admin access: 2024-06-20 14:00-18:00"
-  - Revoke: Automatic after 4 hours, logged
-```
-
 ## Continuous Testing Framework
 
 ### Monthly Internal Penetration Testing
@@ -328,54 +192,6 @@ If someone needs temporary elevated access:
 4. **Results reviewed:** Security team assigns severity (critical, high, medium, low)
 5. **Corrective actions assigned:** Who fixes what, by when?
 6. **Remediation verified:** Next month's test checks if issue is fixed
-
-**Example findings:**
-
-```
-Month 1 (Application Layer):
-Finding: SQL injection in customer search form
-Impact: Attacker can read all customer data
-Severity: CRITICAL
-Corrective action: 
-  - Parameterized queries for all database access
-  - Input validation on all forms
-  - Rate limiting on search endpoint
-Deadline: 2 weeks
-Verification: Month 2 test confirms vulnerability patched
-
-Month 2 (Network Layer):
-Finding: Port 8080 open on web server (debug HTTP server)
-Impact: Exposed internals if compromised
-Severity: MEDIUM
-Corrective action:
-  - Disabled debug HTTP server in production
-  - Closed port 8080 in firewall
-  - Verified in staging that application works without it
-Deadline: 1 week
-Verification: Port scan shows 8080 closed
-
-Month 3 (Infrastructure):
-Finding: Weak SSH cipher suite allows weak key exchange
-Impact: Potential eavesdropping on SSH sessions
-Severity: HIGH
-Corrective action:
-  - Disabled weak ciphers on all SSH servers
-  - Enabled only curve25519 (modern, strong)
-  - Tested SSH access from client machines (confirmed working)
-Deadline: 1 week
-Verification: SSH scan shows no weak ciphers
-
-Month 4 (Access Controls):
-Finding: User account in deactivated state but still has firewall access
-Impact: Former employee could potentially regain network access if password recovered
-Severity: MEDIUM
-Corrective action:
-  - Automated off-boarding process: disable account, remove from all groups, close firewall rules
-  - Quarterly review of deactivated accounts vs firewall rules
-  - Revoked any orphaned rules
-Deadline: 1 week
-Verification: Quarterly review includes this check going forward
-```
 
 ### External Penetration Testing Cadence
 
@@ -403,7 +219,7 @@ When a vulnerability is found (internal or external test):
 ```
 1. **Detection & Documentation**
    - Tester reports finding (screenshot, steps, proof of vulnerability)
-   - Finding entered in tracking system with unique ID (VULN-2847)
+   - Finding entered in a tracking system with a unique ID
    - Severity assigned (critical, high, medium, low)
 
 2. **Triage & Assignment**
@@ -432,22 +248,13 @@ When a vulnerability is found (internal or external test):
    - Tester re-tests vulnerability in next test cycle
    - Confirms: Vulnerability is gone? Attack vector no longer works?
    - If not fixed, escalate and re-assign
-   - If fixed, mark VULN-2847 as resolved
+   - If fixed, mark the finding resolved
 
 6. **Closeout & Learning**
    - Document: What was the vulnerability? Why did it happen?
    - Process improvement: Can we prevent this in future? (e.g., automated scanning, code review)
    - Log for audit: Evidence that vulnerability was detected and corrected within required timeframe
 
-Example timeline:
-  VULN-2847 (Weak TLS cipher) detected: 2024-06-15
-  Assigned to: network admin, deadline 2024-06-22 (HIGH severity, 1 week)
-  Root cause: Server installed in 2019, TLS config never updated
-  Fix: Disabled weak ciphers, enabled TLS 1.3
-  Tested: 2024-06-21 in staging
-  Deployed: 2024-06-21 22:00 UTC (change window)
-  Verified: 2024-07-15 (next month's test confirmed fixed)
-  Resolved: 2024-07-15, audit log shows "corrected within SLA"
 ```
 
 ## Why This Matters
@@ -459,8 +266,8 @@ This approach:
 - **Documents compliance** (logs prove testing happened, issues were fixed)
 - **Scales with organization** (automated where possible, disciplined manual processes where not)
 - **Builds customer trust** ("We have regular testing and corrective procedures")
-- **Meets regulatory requirements** (SOC2, HIPAA, PCI DSS, NIST 171 all require this)
+- **Meets regulatory requirements** (NIST/DoD, FINRA, HIPAA, PCI and SOC 2 all require evidence of this)
 
 ---
 
-*This document synthesizes operational security practices: hardening controls (TLS, certificates, ACLs, defaults), active patching, continuous internal testing, external testing cadence, and corrective action workflows. Applies across SOC2 Type II, PCI DSS, HIPAA, NIST 171, and FINRA compliance frameworks.*
+*This document synthesizes operational security practices: hardening controls (TLS, certificates, ACLs, defaults), active patching, continuous internal testing, external testing cadence, and corrective action workflows. Applied for clients in regulated industries, in audits for NIST (DoD), FINRA, HIPAA, PCI and SOC 2.*

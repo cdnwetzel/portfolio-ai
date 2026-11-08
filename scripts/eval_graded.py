@@ -47,7 +47,7 @@ from pathlib import Path
 sys.path.insert(0, os.path.dirname(__file__))
 from run_diagnostic_battery import ask, BATTERY
 from selftest import FALLBACK_MARKERS, PHONE_RE, PROMPT_LEAK_MARKERS, MIN_GROUNDED_CHARS
-from expectations import any_fact_present, forbid_hit as forbid_hit_fn
+from expectations import any_fact_present, forbid_hit as forbid_hit_fn, strip_followups
 
 # The generator is given a server-computed facts block (today's date, Chris's age) that is NOT in
 # any KB chunk, and api-proxy.py:948 appends the same block to the VERIFIER's evidence so a
@@ -127,7 +127,9 @@ def load_golden(path: str):
 
 def programmatic_signals(item: dict, result: dict) -> dict:
     """Model-free signals derivable from the answer text alone."""
-    answer = (result.get("answer") or "").strip()
+    # The FOLLOWUPS chip block is three suggested QUESTIONS, not claims: a chip must neither
+    # satisfy an expect nor trip a forbid (2026-11-08; see expectations.strip_followups).
+    answer = strip_followups(result.get("answer") or "").strip()
     low = answer.lower()
     kind = item["kind"]
 
@@ -295,7 +297,7 @@ def judge_scores(item: dict, result: dict, chunks: list, judge_url: str, judge_m
     silently fall back to programmatic scoring — 23/35 rows in the 2026-07-27 14B eval run."""
     src_text = build_evidence(chunks, evidence_chars)
     user = JUDGE_TEMPLATE.format(question=item["q"], sources=src_text,
-                                 answer=(result.get("answer") or "")[:4000])
+                                 answer=strip_followups(result.get("answer") or "")[:4000])
     payload = {
         "model": judge_model,
         "messages": [{"role": "system", "content": JUDGE_SYSTEM},
@@ -488,7 +490,10 @@ def main():
         if warn:
             print(f"⚠ WARNING: {warn}")
         elif answerer:
-            print(f"  judge {args.judge_model} vs answerer {answerer} — independent, no echo-bias risk")
+            # Different model and size, so not self-grading -- but _family() is coarse and
+            # both of today's models are Qwen. Say what the check proves, not more.
+            print(f"  judge {args.judge_model} vs answerer {answerer} — different model and size "
+                  f"(not self-grading); same-vendor lineage is not checked")
 
     mode = f"judge={args.judge_model}" if args.judge_url else "programmatic-only"
     print(f"Graded eval against {args.url}  ({len(items)} items, {mode})\n")

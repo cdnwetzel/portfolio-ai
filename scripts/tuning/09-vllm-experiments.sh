@@ -254,13 +254,75 @@ wait_ready() {
     echo " TIMEOUT after ${w}s"; return 1
 }
 
+# --- service control that cannot strand the site (added 2026-11-01) ------------------
+# What happened on the mtp4 run: k=4 left 1.98 GiB of KV for a 2.09 GiB requirement, so the
+# engine died at init ("To serve at least one request ... KV cache is needed") within ~2 min,
+# deterministically, on every respawn. But `rc-service restart` BLOCKS for up to
+# VLLM_READY_WAIT (1800s in conf.d) waiting for /health, so the harness never reached its own
+# READY_WAIT or its auto-revert. The operator Ctrl-C'd it; with no trap, that left the files
+# changed AND an orphaned supervise-daemon still respawning k=4 from its inherited env, while
+# OpenRC reported "stopped" -- so `revert`'s start failed with "already running". ~15 min down.
+#
+# Fixes: (1) svc_cycle runs rc-service in the background and watches writer.log for an init
+# failure, aborting in seconds instead of waiting 30 min; (2) hard_stop kills an orphaned
+# supervisor + engine and zaps OpenRC state before any start; (3) a trap reverts on Ctrl-C.
+INIT_FAIL_RE='Engine core initialization failed|KV cache is needed, which is larger than|FATAL: '
+
+hard_stop() {
+    timeout 120 rc-service vllm-qwen38 stop 2>&1 | sed 's/^/    /'
+    local sd
+    sd=$(pgrep -f 'supervise-daemon vllm-qwen38' || true)
+    if [ -n "$sd" ]; then
+        echo "    orphaned supervise-daemon still alive ($sd) -- killing it"
+        kill $sd 2>/dev/null; sleep 5; kill -9 $sd 2>/dev/null || true
+    fi
+    pkill -f 'bin/vllm serv[e] ' 2>/dev/null || true
+    sleep 3
+    for _w in $(pgrep -f 'VLLM::' 2>/dev/null); do kill -9 "$_w" 2>/dev/null || true; done
+    rc-service vllm-qwen38 zap >/dev/null 2>&1 || true
+}
+
+# svc_cycle <start|restart>: returns 0 if rc-service reported success, 3 on a detected init
+# failure (after hard_stop), 4 on timeout (after hard_stop).
+svc_cycle() {
+    local action="$1" log="${VLLM_WRITER_LOG:-/var/log/qwen38/writer.log}" mark out rc_pid w=0
+    mark=$(wc -l < "$log" 2>/dev/null || echo 0)
+    out=$(mktemp)
+    rc-service vllm-qwen38 "$action" > "$out" 2>&1 &
+    rc_pid=$!
+    while kill -0 "$rc_pid" 2>/dev/null; do
+        if tail -n +"$((mark + 1))" "$log" 2>/dev/null | grep -qaE "$INIT_FAIL_RE"; then
+            sed 's/^/    /' "$out"
+            echo "    !! engine init FAILED -- root cause from writer.log:"
+            tail -n +"$((mark + 1))" "$log" | grep -aE "$INIT_FAIL_RE|ValueError" | tail -3 | cut -c1-240 | sed 's/^/       /'
+            kill "$rc_pid" 2>/dev/null; hard_stop; rm -f "$out"; return 3
+        fi
+        if [ "$w" -ge "$((READY_WAIT + 120))" ]; then
+            sed 's/^/    /' "$out"; echo "    !! rc-service $action still blocked after ${w}s"
+            kill "$rc_pid" 2>/dev/null; hard_stop; rm -f "$out"; return 4
+        fi
+        sleep 5; w=$((w + 5))
+    done
+    wait "$rc_pid"; local rc=$?
+    sed 's/^/    /' "$out"; rm -f "$out"
+    return $rc
+}
+
+REVERTING=0
 revert() {
+    [ "$REVERTING" = 1 ] && return; REVERTING=1
+    trap - INT TERM HUP
     banner "REVERT — restoring original launcher and conf"
     [ -f "$BAKDIR/start-qwen38.sh.orig" ] && cp -a "$BAKDIR/start-qwen38.sh.orig" "$LAUNCHER" && echo "  launcher restored"
     [ -f "$BAKDIR/vllm-qwen38.orig" ]     && cp -a "$BAKDIR/vllm-qwen38.orig"     "$CONF"     && echo "  conf restored"
-    _op=$(pgrep -f "bin/vllm serve" | head -1)
-    rc-service vllm-qwen38 restart 2>&1 | sed 's/^/    /'
-    wait_ready "$_op" && echo "  reverted and serving" || echo "  !! DID NOT COME BACK — check /var/log/qwen38/writer.log"
+    # Always stop hard first: a supervisor started under the experiment keeps the experiment's
+    # env on every respawn, whatever the files on disk now say.
+    hard_stop
+    if svc_cycle start && wait_ready ""; then
+        echo "  reverted and serving"
+    else
+        echo "  !! DID NOT COME BACK — check /var/log/qwen38/writer.log"
+    fi
 }
 [ "$EXP" = "revert" ] && { revert; exit 0; }
 
@@ -354,7 +416,24 @@ case "$EXP" in
     ngram-gpu) EXTRA="'--speculative-config' '{\"method\":\"ngram_gpu\",\"num_speculative_tokens\":4,\"prompt_lookup_min\":2,\"prompt_lookup_max\":4}'"
               SIZES="[1,2,4,5,8,10,15,20]"; SPEC_K=4 ;;
 
-    *) echo "usage: $0 {baseline|prefix|ngram|both|mtp|mtp2|ngram-g|ngram-g2|ngram-gpu|revert|rebaseline}"; exit 1 ;;
+    # MTP k=4 (added 2026-11-01). Evidence: club-3090 discussion #1024 -- vLLM 0.27.1, 2x 3090
+    # TP=2, Qwen3.8-27B W4A8: n=3 -> n=4 gave +15% narrative / +25% code, n=5-6 flat. Our own
+    # k=2 -> k=3 extrapolation predicts ~+10-13% on the bench. Ceiling: vllm#63593 reports MTP
+    # output diverging from target-only on Qwen3.8-27B at K>=5, so 4 is as deep as this goes.
+    # Cost side: every step pays for the 4th draft whether accepted or not (~+2.7 ms/step if the
+    # k=2 -> k=3 increment holds), so badly-drafted text gets SLOWER. Promote only if it beats
+    # k=3 on real site turns AND passes the 50-generation quality gate -- not on the bench alone.
+    # Also note vllm#49918 (open, all versions): a prompt of exactly 1+k = 5 tokens is
+    # misclassified as uniform decode -> garbage. cwdotcom can't send one (system prefix).
+    # RESULT 2026-11-01: DOES NOT BOOT at max-model-len 49152 / util 0.93. Engine init:
+    # "2.09 GiB KV cache is needed, which is larger than the available KV cache memory (1.98 GiB)"
+    # (k=3 leaves 3.18 GiB). The 4th draft slot plus 8 capture sizes cost ~1.2 GiB. To test it at
+    # all, run with a shorter context (~46K fits by proportion; not measured), which trades away
+    # the 48K the site now advertises. Not retried.
+    mtp4)     EXTRA="'--speculative-config' '{\"method\":\"mtp\",\"num_speculative_tokens\":4}'"
+              SIZES="[1,2,4,5,8,10,15,20]"; SPEC_K=4 ;;   # query_len 5 -> multiples of 5, to 4*5=20
+
+    *) echo "usage: $0 {baseline|prefix|ngram|both|mtp|mtp2|mtp4|ngram-g|ngram-g2|ngram-gpu|revert|rebaseline}"; exit 1 ;;
 esac
 
 banner "EXPERIMENT: $EXP — $(date)"
@@ -400,8 +479,8 @@ esac
 
 echo; echo "--- restarting vLLM (the site is down for this window) ---"
 OLDPID=$(pgrep -f "bin/vllm serve" | head -1); echo "  pid before: ${OLDPID:-none}"
-rc-service vllm-qwen38 restart 2>&1 | sed 's/^/    /'
-if ! wait_ready "$OLDPID"; then
+trap 'echo; echo "!! interrupted — AUTO-REVERTING"; revert; exit 130' INT TERM HUP
+if ! svc_cycle restart || ! wait_ready "$OLDPID"; then
     echo "!! engine did not come back — AUTO-REVERTING"; revert; exit 2
 fi
 
@@ -465,7 +544,7 @@ echo; echo "--- decode throughput (CONTENTION-GATED) ---"
 "$(dirname "$0")/bench_quiet.sh" 3 || echo "    ^^ row's decode number is INVALID — re-run quiet"
 
 echo; echo "--- workload probes (TTFT + repeat-prefix + quoting) ---"
-python3 ${OPHOME}/tuning/exp_probe.py 2>&1 | sed 's/^/  /'
+python3 "$(dirname "$0")/exp_probe.py" 2>&1 | sed 's/^/  /'
 
 if [ -n "$SPEC_K" ]; then
 echo; echo "--- speculative acceptance (the yield side; the probes above are the cost side) ---"

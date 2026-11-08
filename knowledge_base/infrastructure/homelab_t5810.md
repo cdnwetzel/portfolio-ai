@@ -95,8 +95,9 @@ holds about 11.7 GB. Two separate models, two separate ports, two separate jobs.
   - `rerank-service` (port 8006) running **`bge-reranker-base`** — a small cross-encoder,
     about 1.3 GB of VRAM. It ranks retrieved chunks. It is not a large language model.
   - `verifier-service` (port 8007) running **Qwen2.5-14B-Instruct** via Ollama as an
-    *independent* faithfulness judge — about 11.7 GB of VRAM, and a different model family
-    from the one that writes answers, to avoid self-grading bias. The 14B parameter count
+    separate faithfulness judge — about 11.7 GB of VRAM. It is a different model, generation and
+    size from the Qwen3.8-27B that writes answers, but from the **same Qwen family**, so it
+    reduces self-grading bias rather than eliminating it. The 14B parameter count
     belongs to this judge.
   The judge runs on the **RTX 5060 Ti** (GPU). After every answer, the
   cloud proxy fire-and-forgets the answer + its retrieved chunks here; the judge scores whether
@@ -117,7 +118,7 @@ on the **asrock B550 (Ryzen 9 + RTX 5060 Ti)** — two distinct GPU boxes, one h
 - **vLLM version:** 0.27.1
 - **Port:** 8007 — a *backend slot*, not the port callers use. See labrouter below.
 - **Tensor Parallel:** both A4500s, TP=2 over the NVLink bridge
-- **Context window:** **32,768 tokens**
+- **Context window:** **49,152 tokens** (48K; raised from 32,768 on 2026-10-03)
 - **GPU memory utilization:** 0.93 (0.95 OOMs on this box)
 - **CUDA graphs:** **ENABLED** — this is the single biggest performance decision on the box.
   See "GPU tuning" below. An older revision of this page said `enforce_eager=1`; that was the
@@ -131,8 +132,9 @@ on the **asrock B550 (Ryzen 9 + RTX 5060 Ti)** — two distinct GPU boxes, one h
 
 ### GPU tuning — where the throughput comes from
 Measured on this hardware, not inherited defaults:
-- **~47 tokens/sec** generation on the 27B for a fresh question, **~60-75** on follow-up turns
-  in a conversation, and 77 on a synthetic single-stream benchmark (measured 2026-09-14). Two
+- **~70 tokens/sec** generation on the 27B for a fresh question in a new chat (median of 12
+  site turns, 2026-11-01), and ~79 on a synthetic single-stream benchmark. Prefix caching
+  shortens the time to first token on follow-up turns; it does not affect generation speed. Two
   separate changes produced that, and they are worth keeping apart rather than multiplied
   together into one headline number:
   - **CUDA graphs, 2026-08:** ~6 → ~28 tokens/sec, a **~4.4x** improvement that came from
@@ -182,7 +184,7 @@ The T5810 is made accessible to the internet via a persistent SSH tunnel from th
 ```
 User Browser → HTTPS → cwetzel.com (Ubuntu VPS)
   Cloud: Apache (SSL/WSS) + FastAPI api-proxy (port 8000)
-    ↓ SSH Tunnel (reverse forward)
+    ↓ SSH tunnel, opened by the VPS (local forwards, ssh -L)
   T5810: labrouter (8004) -> vLLM backends, Qdrant (6333), Embeddings (8005)
     ↓ tunnel also forwards :8007 → asrock verifier (home LAN)
 ```

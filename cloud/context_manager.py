@@ -53,7 +53,7 @@ MAX_CONTEXT_TOKENS = int(os.getenv("MAX_CONTEXT_TOKENS", "14384"))
 # Generation cap for every answer. A ceiling, not a target — see
 # estimate_answer_length() for why scaling this by question length truncated the
 # site's most important question mid-word. Raise via env if answers ever hit it;
-# the served model allows 32768 total, so there is ample headroom above this.
+# the served model allows 49152 total, so there is ample headroom above this.
 DEFAULT_ANSWER_TOKENS = int(os.getenv("DEFAULT_ANSWER_TOKENS", "2048"))
 RESERVE_RESPONSE_TOKENS = int(os.getenv("RESERVE_RESPONSE_TOKENS", "2048"))
 

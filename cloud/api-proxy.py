@@ -289,7 +289,7 @@ async def system_info():
         # backend. Defaults track MODEL_ID / MAX_CONTEXT_TOKENS so this stays honest
         # even if the env is never set.
         "model": os.environ.get("MODEL_DISPLAY_NAME", "Qwen3.8-27B-FP8"),
-        "context_tokens": int(os.environ.get("MODEL_CONTEXT_TOKENS", "32768")),
+        "context_tokens": int(os.environ.get("MODEL_CONTEXT_TOKENS", "49152")),
         "deployed_at": _DEPLOYED_AT,
         "deployed_sha": os.environ.get("DEPLOY_GIT_SHA", "unknown"),
         "prompt_version": PROMPT_VERSION,

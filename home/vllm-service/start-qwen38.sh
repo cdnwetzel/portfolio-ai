@@ -39,7 +39,7 @@ set -euo pipefail
 unset VLLM_PORT
 : "${VLLM_TP:=2}"
 : "${VLLM_UTIL:=0.93}"
-: "${VLLM_CTX:=32768}"
+: "${VLLM_CTX:=49152}"
 : "${VLLM_SEQS:=4}"
 : "${VLLM_GDN:=triton}"
 : "${VLLM_TOOLPARSER:=qwen3_coder}"

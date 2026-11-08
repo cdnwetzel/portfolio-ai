@@ -61,6 +61,7 @@ def _run(extra: str, sizes: str, seqs: str = "4"):
 
 
 MTP2 = "'--speculative-config' '{\"method\":\"mtp\",\"num_speculative_tokens\":2}'"
+MTP4 = "'--speculative-config' '{\"method\":\"mtp\",\"num_speculative_tokens\":4}'"
 NGRAM4 = ("'--speculative-config' '{\"method\":\"ngram\",\"num_speculative_tokens\":4,"
           "\"prompt_lookup_min\":2,\"prompt_lookup_max\":4}'")
 
@@ -83,6 +84,7 @@ def test_slot_overrides_depth_and_launcher_emits_nothing():
 
 @pytest.mark.parametrize("extra,sizes,depth", [
     (MTP2, "[1,2,3,4,6,8,9,12]", 2),          # mtp2 mode
+    (MTP4, "[1,2,4,5,8,10,15,20]", 4),      # mtp4 mode
     (NGRAM4, "[1,2,4,5,8,10,15,20]", 4),      # ngram-g mode
 ])
 def test_every_harness_mode_still_boots(extra, sizes, depth):

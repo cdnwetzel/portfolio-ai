@@ -1,6 +1,6 @@
 # Current Work — 2026
 
-**What Chris is working on in 2026, beyond the day job (IT Manager, Portnoy Schneck LLC).**
+**What Chris is working on in 2026, beyond the day job (Director of Legal Technology — the firm's IT manager — at Portnoy Schneck LLC).**
 
 ## The Portfolio AI Chat (this system)
 
@@ -11,7 +11,7 @@ running entirely on owned hardware. Live at dev.cwetzel.com.
 
 State this, not the history below, when asked what the system runs or what hardware it uses.
 
-- **Answerer:** **Qwen3.8-27B-FP8**, 32K context, served by vLLM across **2x RTX A4500**
+- **Answerer:** **Qwen3.8-27B-FP8**, 48K context, served by vLLM across **2x RTX A4500**
   (NVLink) in the T5810.
 - **Faithfulness judge:** **Qwen2.5-14B-Instruct** on the **RTX 5060 Ti 16 GB** in the asrock
   B550.

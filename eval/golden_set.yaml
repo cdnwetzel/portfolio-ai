@@ -84,7 +84,9 @@
   # which adds that the proxy budgets 14,384 of it for the prompt). Nothing true contains "16",
   # so the expect was satisfied only by "16 GB" elsewhere in the context -- a token match, not
   # a claim match. One fact, three spellings.
-  expect_substrings: [["32,768", "32768", "32k"]]
+  # 2026-11-01: the server moved to 49,152 on 2026-10-03; KB and this expect changed together.
+  # Ships with a reindex -- until the KB is reindexed, the live answer still says 32,768.
+  expect_substrings: [["49,152", "49152", "48k"]]
   # The retired value. Not forbidding a bare "16": it fires on "16 GB" and on the judge's
   # own 16,384-token window, which is the false-positive class repeat_sample.py documents.
   forbid_substrings: ["16,384 token", "16k context", "16,384-token"]
@@ -313,33 +315,43 @@
   kind: grounded
   forbid_substrings: ["i only know chris wetzel's professional work"]
 
-# Arithmetic that was wrong in the KB itself: $155 x 210 was written as $39k/month
-# (actually $32.5k) giving a ~5-month payback (actually ~6). Nothing in the system could
-# catch this — the answer was faithfully grounded to a wrong source.
+# 2026-11-07: both PAYBACK items were briefly RETIRED as unsourced, then restored below once
+# Chris confirmed the figures. Both tested figures from case studies generated on 2026-06-06 (2377081) that no
+# source Chris maintains contains; he confirmed the real project that day and the generated
+# studies were archived (docs/archive/generated-case-studies-2026-06/). Keeping them would have
+# rewarded the site for repeating invented numbers. Replaced one-for-one by confirmed facts
+# below, so the set stays at 54 items -- but rows are not the same rows, so compare graded
+# runs ROW BY ROW on the unchanged items, not mean to mean.
+# Restored 2026-11-07 after Chris confirmed the figures (~$200k, ~$155/user/month, ~6 months).
 - q: "What was the payback period for the AVD migration?"
   kind: grounded
   expect_substrings: ["6 month"]
   forbid_substrings: ["5 month", "39k", "$39"]
+# Restored 2026-11-07 after Chris confirmed the SAP figures.
 - q: "What was the payback period on the SAP Business One integration?"
   kind: grounded
-  # ~10.5 months, after the labour rate was made consistent at $100/h on both sides
-  # (2026-09-02). The forbid list carries the two WRONG values this has had, which is the
-  # durable part — the expect is deliberately loose about phrasing.
-  # Alternatives, not two facts: the KB says "~10.5 months", which does not contain
-  # "10 month", so ALL-semantics could never score this row.
   expect_substrings: [["10.5 month", "10 month"]]
   forbid_substrings: ["1 month payback", "payback: 1 month", "11 month"]
+- q: "Was Chris the SAP consultant on the SAP Business One project?"
+  kind: grounded
+  # He deployed SAP B1 into the AVD environment (add-ons, handheld scanners); the client's SAP
+  # consultant did the SAP work. Chris, 2026-11-07.
+  expect_substrings: [["not the SAP consultant", "wasn't the SAP consultant", "was not the SAP consultant", "deployed"]]
+- q: "What kind of company was the Azure Virtual Desktop and SAP Business One client?"
+  kind: grounded
+  expect_substrings: [["maritime", "offshore"]]
+  forbid_substrings: ["financial services", "financial firm"]
+- q: "What was the AVD migration moving users off of?"
+  kind: grounded
+  # Citrix on Windows Server 2012 -- Chris confirmed both 2026-11-07.
+  expect_substrings: [["Windows Server 2012", "Citrix"]]
 
-# DEFECT #16 (2026-09-02): the case study said "5 warehouses" twice while enumerating six
-# sites (NYC, Miami, London, Athens, Singapore, Sydney). Chris confirmed 6 is correct — the
-# "6 regions" in the same sentence corroborates it, one region per site. A source pairing a
-# 5 and a 4 in one sentence is likely what produced the observed "operating across five
-# continents" opener, so this is pinned rather than trusted to stay fixed.
+# DEFECT #16 (2026-09-02): Chris confirmed 6 warehouses. 2026-11-07: he confirmed the list as it
+# stood AT THE TIME OF THE PROJECT -- NYC, Miami, London, Athens, Singapore, Sydney (4
+# continents). The client's present-day hubs differ and are deliberately not in the KB. Both
+# spellings accepted (the word-vs-digit trap in repeat_sample.py).
 - q: "How many warehouses were in the SAP Business One WMS integration?"
   kind: grounded
-  # Alternatives, and claim-shaped: a bare "6" also matches "2026" and "16 GB". The KB
-  # writes "6 warehouses"; the model is known to write "six warehouses" (the word-vs-digit
-  # trap recorded in repeat_sample.py), so both spellings are accepted.
   expect_substrings: [["6 warehouse", "six warehouse"]]
   forbid_substrings: ["5 warehouses", "five warehouses", "five continents"]
 
@@ -353,8 +365,15 @@
 - q: "What is the GPU power cap on the T5810?"
   kind: grounded
   expect_substrings: ["165"]
-  forbid_substrings: ["capped at 130", "130 w per card", "1200 mhz"]
+  # 2026-11-08: sentence-scoped and history-exempt, so "it was capped at 130 W under the old
+  # mining profile; it is 165 W now" passes. A subset of expectations.POWER_HISTORY_FRAMES.
+  forbid_substrings:
+    - {match: "capped at 130", unless: ["retired", "replac", "no longer", "former", "previous", "earlier", "removed", "used to", "was capped", "were capped", "raised", "originally", "up from", "from 130", "mining", "before", "had been", "increased", "lifted"]}
+    - {match: "130 w per card", unless: ["retired", "replac", "no longer", "former", "previous", "earlier", "removed", "used to", "was capped", "were capped", "raised", "originally", "up from", "from 130", "mining", "before", "had been", "increased", "lifted"]}
+    - {match: "1200 mhz", unless: ["retired", "replac", "no longer", "former", "previous", "earlier", "removed", "used to", "was capped", "were capped", "raised", "originally", "up from", "from 130", "mining", "before", "had been", "increased", "lifted"]}
 - q: "Tell me about the GPU home lab setup"
   kind: grounded
   expect_substrings: ["A4500", "T5810"]
-  forbid_substrings: ["capped at 130", "130 w per card"]
+  forbid_substrings:
+    - {match: "capped at 130", unless: ["retired", "replac", "no longer", "former", "previous", "earlier", "removed", "used to", "was capped", "were capped", "raised", "originally", "up from", "from 130", "mining", "before", "had been", "increased", "lifted"]}
+    - {match: "130 w per card", unless: ["retired", "replac", "no longer", "former", "previous", "earlier", "removed", "used to", "was capped", "were capped", "raised", "originally", "up from", "from 130", "mining", "before", "had been", "increased", "lifted"]}

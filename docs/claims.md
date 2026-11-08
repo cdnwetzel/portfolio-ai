@@ -13,7 +13,7 @@ third is the one that makes the first two worth believing.
 
 | Claim | Evidence | Verified |
 |---|---|---|
-| Qwen3.8-27B-FP8 on 2× RTX A4500 (NVLink, TP=2), 32K context | `/api/system-info`, `/v1/models` | 2026-09-04 |
+| Qwen3.8-27B-FP8 on 2× RTX A4500 (NVLink, TP=2), 48K context (49,152; 32K until 2026-10-03) | `/api/system-info`, `/v1/models` | 2026-09-04 |
 | **77.2 tok/s** single-stream generation (synthetic bench) | `bench-vllm.sh 8007 3`, three runs, contention-gated | 2026-09-14 |
 | **~47 tok/s** median on a real cold site turn; **60–75** on warm follow-ups | proxy `done`-frame telemetry, 12 gated turns | 2026-09-14 |
 | **+128% from MTP speculative decoding** (33.8 → 77.2), acceptance 3.27 tok/step | `plans/vllm-flag-experiments-2026-09-12.md` | 2026-09-14 |

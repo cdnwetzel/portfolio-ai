@@ -2,7 +2,7 @@
 
 ## At a Glance
 
-Portfolio AI (dev.cwetzel.com) is a self-hosted, full-stack Retrieval-Augmented Generation platform serving a personalized digital twin of my work. It runs on a secure, low-latency hybrid-cloud topology: **Apache** on an edge VPS terminates SSL/WSS and proxies traffic through an encrypted **SSH reverse tunnel** to a bare-metal **Gentoo Linux** home server — zero cloud compute cost. Inference is served by **vLLM** running **Qwen3.8-27B-FP8** with **tensor parallelism across an NVLink-bridged dual RTX A4500** GPU array. A custom **FastAPI** backend manages a 24K-character sliding-window context history, streams tokens over **WebSocket**, and grounds every response in a **Qdrant** vector database — **bge-base-en-v1.5 (768-d) cosine retrieval, reranked by a bge-reranker-base cross-encoder on a second GPU** — with an out-of-band faithfulness verifier independently scoring each answer's grounding.
+Portfolio AI (dev.cwetzel.com) is a self-hosted, full-stack Retrieval-Augmented Generation platform serving a personalized digital twin of my work. It runs on a secure, low-latency hybrid-cloud topology: **Apache** on an edge VPS terminates SSL/WSS and proxies traffic through an encrypted **SSH tunnel that the VPS opens** to a bare-metal **Gentoo Linux** home server (ordinary local port forwards, `ssh -L`) — zero cloud compute cost. Inference is served by **vLLM** running **Qwen3.8-27B-FP8** with **tensor parallelism across an NVLink-bridged dual RTX A4500** GPU array. A custom **FastAPI** backend manages a 24K-character sliding-window context history, streams tokens over **WebSocket**, and grounds every response in a **Qdrant** vector database — **bge-base-en-v1.5 (768-d) cosine retrieval, reranked by a bge-reranker-base cross-encoder** running on a *separate machine*, the asrock B550's RTX 5060 Ti — with an out-of-band faithfulness verifier on that same separate machine independently scoring each answer's grounding.
 
 ---
 
@@ -23,7 +23,7 @@ If you're talking to this AI right now, you're using this system. The repo conta
 Yes. The full source is public at **https://github.com/cdnwetzel/portfolio-ai** — the FastAPI
 proxy, the React frontend, the RAG pipeline, the Qdrant indexing scripts, the evaluation harness
 and the vLLM service configuration. If you are talking to this AI right now, you are using the
-code in that repository.
+code in that repository. It is published as periodic snapshots of the private working repository — the latest on 2026-11-08 — with private network details replaced by documentation addresses, so the live system can be a few changes ahead of it.
 
 ---
 
@@ -38,7 +38,7 @@ code in that repository.
 | Embeddings | BAAI/bge-base-en-v1.5 (768-d) | T5810 home server (CPU) |
 | Reranker | bge-reranker-base (cross-encoder) | asrock B550 (RTX 5060 Ti, GPU) |
 | Faithfulness verifier | Qwen2.5-14B-Instruct (Ollama, RTX 5060 Ti) | asrock B550 home server |
-| Tunnel | SSH reverse forward (VPS → T5810 → asrock) | VPS ↔ home LAN |
+| Tunnel | SSH local port forwards (`ssh -L`), opened by the VPS (VPS → T5810 → asrock) | VPS ↔ home LAN |
 
 ### Why this system uses two home machines (and which does what)
 
@@ -52,7 +52,8 @@ Two GPU boxes, split by **what competes for VRAM**, not by "inference vs retriev
 - **asrock B550** — the two jobs that *would* have competed for A4500 VRAM: the
   **bge-reranker-base** cross-encoder and the **Qwen2.5-14B-Instruct** faithfulness judge.
   Together they hold about 13 GB, which is 13 GB the answerer would have lost. Putting the
-  judge on separate hardware also keeps it genuinely independent of the model it grades.
+  judge on separate hardware also keeps it a separate model and process from the one it grades
+  (it is still from the same Qwen family, so it is independent in model, not in lineage).
 
 **The common way to get this backwards is to say the asrock "handles retrieval".** It does
 not: Qdrant and the embedder — the retrieval core — are on the T5810. The asrock runs the
@@ -89,7 +90,7 @@ The knowledge base (indexed into Qdrant) includes:
 - Case studies: SAP B1 global deployment, AVD 200-user migration, SOC2 Type II, disaster recovery
 - Resume and professional context
 - Infrastructure write-ups: T5810 homelab, this AI system
-- Project docs: pxx (aider orchestrator), gentoo-machines (fleet config)
+- Project docs: pxx (local-first coding-agent runtime), gentoo-machines (fleet config)
 
 Documents are chunked structure-aware — split on markdown section boundaries (merging small sections, splitting long ones to ~400 words) so each chunk is a coherent semantic unit — then embedded (dense, 768-d) and stored as vectors.
 
@@ -143,7 +144,7 @@ The threat model is intentionally small — scoping decisions remove most classi
 - **No user data, no PII.** The knowledge base holds only public portfolio content — resume, case studies, LinkedIn posts, infrastructure write-ups. There are no visitor accounts, no customer records, no personal data collected.
 - **No authentication needed.** The chat serves read-only public information about my career. Nothing a visitor does writes to a database, so there are no logins, passwords, or user records to protect.
 - **Queries are not logged or stored.** The proxy logs only metadata — retrieval counts, timing, grounding status — never the content of a visitor's question or the model's response. Per-session chat history lives in the browser's localStorage only; nothing is persisted server-side.
-- **Backend isolation.** labrouter (8004, fronting the vLLM backends), Qdrant (6333) and the embedding service (8005) bind to localhost on the T5810 and have no internet-facing ports. The public VPS reaches them only over an SSH tunnel with key-based auth.
+- **Backend isolation.** On the T5810, labrouter (8004, fronting the vLLM backends) and the embedding service (8005) listen on localhost only; Qdrant (6333) and the vLLM backend (8007) also listen on the home LAN. None of them is reachable from the internet — checked from outside on 2026-11-07, the only open port on the home connection is SSH (22). The public VPS reaches the services only over an SSH tunnel with key-based auth.
 - **Transport security.** All browser traffic is HTTPS/WSS with Let's Encrypt certificates, terminated at Apache on the VPS; the VPS↔home link is SSH-encrypted.
 - **Bounded inputs.** Inference requests are capped at a maximum prompt length to prevent resource-exhaustion abuse.
 
@@ -186,22 +187,25 @@ Comparable cloud GPU inference (2× A4500 equivalent) would cost $3-5/hour. At m
 | GPU layout | 2× NVIDIA RTX A4500 20 GB, NVLink (40 GB aggregate) |
 | Tensor parallelism | 2-way across the A4500 pair |
 | Quantization | FP8 weights (~29 GB across 40 GB aggregate VRAM) |
-| Context window | 32,768 tokens served (proxy budgets 14,384 for the prompt) |
+| Context window | 49,152 tokens served (proxy budgets 14,384 for the prompt) |
 | Reserved response budget | 2,048 tokens |
 | Temperature | 0.2 |
 | Top-p | 0.7 |
 | Presence penalty | 0.0 (penalties punish re-using retrieved wording, which causes paraphrase drift on a factual task) |
 
-### Speed (measured 2026-09-14)
+### Speed (measured 2026-11-01)
 
 Generation speed depends on what is being generated, so it is quoted three ways rather than
 collapsed into one number:
 
-- **A fresh question in a new chat: ~47 tokens/sec** (median of 12 measured turns, range 36–58).
-- **Follow-up turns in an ongoing conversation: ~60–75 tokens/sec.** The conversation's shared
-  prefix is already cached, so less work is repeated.
-- **Synthetic single-stream benchmark: 77 tokens/sec.** This is a ceiling, not an experience —
+- **A fresh question in a new chat: ~70 tokens/sec** (median of 12 measured site turns on
+  2026-11-01, range 42–74; a 42-turn battery the same night gave a median of 68).
+- **Synthetic single-stream benchmark: ~79 tokens/sec.** This is a ceiling, not an experience —
   the benchmark prompt is repetitive and unusually easy to predict.
+- **Prefix caching shortens the wait, not the generation.** On a follow-up turn the earlier
+  part of the conversation is not re-processed, which shortens the time to the first token.
+  It does not affect how fast tokens are generated once the answer starts — that is set by how
+  predictable the text is (see "Speculative decoding" below).
 
 The spread is not measurement noise. It tracks how *predictable* the text is: answers with
 headings and repeated structure generate faster than short conversational prose, because the
@@ -269,15 +273,15 @@ clock lock are both gone**; the live values are the table above.
 
 ## Ports & Services
 
-Home-server services bind to the LAN/localhost only. The public VPS reaches them through a single SSH reverse tunnel that terminates on the T5810; the T5810 in turn reaches the asrock box over the home LAN.
+Home-server services bind to the LAN/localhost only. The public VPS reaches them through a single SSH tunnel that the VPS opens to the T5810 (ordinary local port forwards, `ssh -L`); the T5810 in turn reaches the asrock box over the home LAN.
 
 | Service | Port | Host | Role | Fallback if unavailable |
 |---|---|---|---|---|
 | FastAPI proxy | 8000 | VPS | WebSocket/API entry, RAG orchestration | None — chat stops |
-| vLLM | 8004 | T5810 | LLM inference | None — chat stops |
+| labrouter → vLLM | 8004 (labrouter) → 8007 (vLLM) | T5810 | LLM inference. The VPS only ever talks to labrouter on 8004; vLLM itself listens on 8007 | None — chat stops |
 | Qdrant | 6333 | T5810 | Dense vector (cosine) search | None — chat stops |
 | Embedding service | 8005 | T5810 | `bge-base-en-v1.5` query/document embeddings | None — chat stops |
-| bge-reranker-base | 8006 | asrock B550 (GPU) | Cross-encoder reranking of the top-15 candidates | Cosine order, one chunk per source doc |
+| bge-reranker-base | 8006 | asrock B550 (GPU) | Cross-encoder reranking of the top-15 candidates | Cosine order, at most two chunks per source doc |
 | Faithfulness verifier | 8007 | asrock B550 | Out-of-band claim-level faithfulness scoring | Chat unaffected — verdicts pause (fail-open) |
 | SSH tunnel | 8004/6333/8005 to T5810; 8016→asrock:8006, 8007→asrock | VPS → T5810 (→ asrock) | Secure VPS↔home link | None — services unreachable from public internet |
 
@@ -285,7 +289,7 @@ Home-server services bind to the LAN/localhost only. The public VPS reaches them
 
 ## Reranker Fallback Behavior
 
-The proxy always retrieves 15 candidate chunks from Qdrant (dense cosine). It then asks the GPU reranker on the asrock (port 8006) to re-score all 15 and return the best ones. If the reranker is unreachable, returns a non-200 status, or times out, the proxy fails open: it uses the original cosine order, applies the per-source-doc cap (max one chunk per document), and returns the top 5. Chat continues with slightly lower relevance precision.
+The proxy always retrieves 15 candidate chunks from Qdrant (dense cosine). It then asks the GPU reranker on the asrock (port 8006) to re-score all 15 and return the best ones. If the reranker is unreachable, returns a non-200 status, or times out, the proxy fails open: it uses the original cosine order, applies the per-source-doc cap (at most two chunks per document), and returns the top 5. Chat continues with slightly lower relevance precision.
 
 ---
 
@@ -298,15 +302,15 @@ Browser ──HTTPS/WSS──> cwetzel.com VPS (FastAPI proxy)
                           │  RAG: alias-expand → embed → Qdrant (dense) → rerank → vLLM stream
                           │  (all home services reached at 127.0.0.1 via the SSH tunnel)
                           ▼
-                  ── SSH reverse tunnel ──> T5810 (jump.example.net)
+                  ── SSH tunnel, VPS-initiated (-L) ──> T5810 (jump.example.net)
                           ├─ labrouter 8004 (-> vLLM), Qdrant 6333, embed 8005  (on the T5810)
-                          ├─ rerank 8006, judge 8007                        (on the asrock B550)
+                          ├─ tunnel forwards :8016 ──LAN──> asrock B550 :8006 (GPU reranker)
                           └─ tunnel also forwards :8007 ──LAN──> asrock B550 (verifier)
 ```
 
-**How the VPS reaches two home boxes through one tunnel.** The tunnel is a single SSH connection from the VPS that terminates on the T5810. Each forwarded port resolves its target *from the T5810's side*: ports 8004/6333/8005/8006 point at `127.0.0.1` (services on the T5810 itself), while port 8007 points at the asrock box's LAN address. So the T5810 doubles as the jump host — the VPS never needs a separate link to asrock; it rides the same tunnel, and the T5810 routes the verifier traffic across the home LAN. Nothing on either home server is exposed to the public internet.
+**How the VPS reaches two home boxes through one tunnel.** The tunnel is a single SSH connection from the VPS that terminates on the T5810. Each forwarded port resolves its target *from the T5810's side*: ports 8004/6333/8005 point at `127.0.0.1` (services on the T5810 itself), while port 8016 (the reranker, the asrock's 8006) and port 8007 (the verifier) point at the asrock box's LAN address. So the T5810 doubles as the jump host — the VPS never needs a separate link to asrock; it rides the same tunnel, and the T5810 routes the verifier traffic across the home LAN. None of these services listens on the public internet; the tunnel reaches them through the T5810's SSH daemon (key-based auth), which is the one home-side entry point.
 
-**What the verifier does.** After every answer is delivered, the proxy fire-and-forgets `(question, answer, retrieved chunks)` to the verifier on asrock. A separate judge model (Qwen2.5-14B-Instruct on the RTX 5060 Ti — deliberately a different model family and size from the Qwen3.8-27B-FP8 that writes the answers, to avoid self-grading bias) decides, per claim, whether it is **supported**, **unsupported**, or **contradicted** by the retrieved chunks, and records a faithfulness score. This is out-of-band: it never blocks, delays, or rewrites the answer, and if asrock is down the chat is completely unaffected (the verdict simply isn't recorded). It turns "the answer is grounded" from a hope into a continuously measured signal, and flags drift for review.
+**What the verifier does.** After every answer is delivered, the proxy fire-and-forgets `(question, answer, retrieved chunks)` to the verifier on asrock. A separate judge model (Qwen2.5-14B-Instruct on the RTX 5060 Ti — a different model, generation and size from the Qwen3.8-27B-FP8 that writes the answers, and on different hardware. Both come from Alibaba's **same Qwen family**, so this *reduces* self-grading bias rather than eliminating it) decides, per claim, whether it is **supported**, **unsupported**, or **contradicted** by the retrieved chunks, and records a faithfulness score. This is out-of-band: it never blocks, delays, or rewrites the answer, and if asrock is down the chat is completely unaffected (the verdict simply isn't recorded). It turns "the answer is grounded" from a hope into a continuously measured signal, and flags drift for review.
 
 **Offline evaluation.** Separately from the live verifier, a graded eval harness (`scripts/eval_graded.py`) runs a human-authored golden set through the live pipeline and scores grounding/faithfulness, with ship thresholds — the regression gate used before changes go live. The set grows as coverage improves — every production defect gets an entry so the fix is gated rather than remembered. **The current count and scores live in `eval/golden_set.yaml` and the eval output, deliberately not here:** this page has carried three different sizes over time (~30, 35, 42), each stale the moment a test was added. Ask about the *approach*, not the tally. A lightweight self-test also runs as a deploy gate and an hourly canary.
 

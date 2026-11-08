@@ -31,6 +31,19 @@ Architected a robust hybrid-cloud failover strategy capable of **instantly virtu
 
 ---
 
+## Backup Tiers: Onsite, Offsite, and a Second Offsite Copy
+
+Chris and his colleague designed and supported a range of **image-based BCDR backups**, kept in
+three places: **onsite**, **offsite**, and a **secondary offsite** copy, for **full DR
+compliance**. The onsite image gives fast local recovery; the offsite copies mean a site-wide loss
+does not take the backups with it.
+
+**Recovery time, proven:** a single-VM client could be brought back up **within 5 minutes**, either
+**onsite** on the BCDR appliance or **in the cloud**. This was demonstrated, not just planned.
+
+**Backups are tested every night, automatically:** each backup image is booted as a VM nightly to
+prove it is restorable. If a boot check fails, it is remediated **within 24 hours**.
+
 ## End-to-End Lifecycle
 
 Managed the full lifecycle of each rollout:

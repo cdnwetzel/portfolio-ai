@@ -7,6 +7,8 @@ Yes. This system is open source and the full source code is public.
 If you are talking to this AI right now, you are using the code in that repository. It is not a
 wrapper around a hosted API — the repository contains the actual running system.
 
+It is published as periodic snapshots of the private working repository — the latest on 2026-11-08 — with private network details replaced by documentation addresses, so the live system can be a few changes ahead of it.
+
 ## What is in the repository
 
 - **`cloud/`** — the FastAPI proxy that serves the chat: WebSocket streaming, the RAG

@@ -19,7 +19,7 @@ import argparse, asyncio, re, sys
 from collections import defaultdict
 sys.path.insert(0, "scripts")
 from run_diagnostic_battery import ask
-from expectations import forbid_hit
+from expectations import POWER_HISTORY_FRAMES, forbid_hit, strip_followups
 
 # (question, [(probe_label, regex), ...], [forbidden regexes])
 #
@@ -43,7 +43,8 @@ CASES = [
      [{"match": r"3060"}, {"match": r"qwen2\.5[- ]7b"}]),
     ("Tell me about the GPU home lab setup",
      [("40gb_total", r"40\s*gb"), ("165w", r"165\s*w"), ("a4500", r"a4500")],
-     [r"capped at 130", r"130\s*w per card", r"56\s*gb total"]),
+     [{"match": r"capped at 130", "unless": POWER_HISTORY_FRAMES},
+      {"match": r"130\s*w per card", "unless": POWER_HISTORY_FRAMES}, r"56\s*gb total"]),
     ("What specific models are running on the AI Portfolio Chat system?",
      [("qwen38", r"qwen3\.8"), ("judge14b", r"14b"), ("bge", r"bge")],
      # CLAIM-SHAPED (2026-09-13). As bare regexes these fired on "There is no RTX 3060 or 7B
@@ -60,7 +61,11 @@ CASES = [
      [r"56\s*gb"]),
     ("What is the GPU power cap on the T5810?",
      [("165w", r"165")],
-     [r"130\s*w", r"1200\s*mhz"]),
+     # 2026-11-08: were bare r"130\s*w" / r"1200\s*mhz" over the whole answer, which flagged
+     # a correct history line ("it was capped at 130 W before ...") and a suggestion chip.
+     # Now sentence-scoped, history-exempt, and the FOLLOWUPS block is stripped before checking.
+     [{"match": r"130\s*w", "unless": POWER_HISTORY_FRAMES},
+      {"match": r"1200\s*mhz", "unless": POWER_HISTORY_FRAMES}]),
     ("Why does this system use two separate machines?",
      [("t5810", r"t5810"), ("vram", r"vram")],
      [r"cross-compil", r"beelink"]),
@@ -111,7 +116,8 @@ async def main(url, n):
         hits = set()
         for i in range(n):
             r = await ask(url, q)
-            a = (r.get("answer") or "").lower()
+            # Chips are suggested questions, not claims (expectations.strip_followups).
+            a = strip_followups(r.get("answer") or "").lower()
             if not a or a.startswith("[connection error") or a.startswith("[error"):
                 errors.append((q, i + 1)); continue
             for label, rx in probes:

@@ -123,6 +123,14 @@ RETIREMENT_FRAMES = (
     "removed", "decommission", "legacy", "used to", "prior to", "no rtx", "not part of",
 )
 
+# The T5810 power cap moved 130 W -> 165 W when the mining profile was removed (2026-08-31).
+# "It was capped at 130 W under the old mining profile; it is now 165 W" is a correct sentence
+# that the default frames miss. Used by the 130 W / 1200 MHz rules in both harnesses.
+POWER_HISTORY_FRAMES = RETIREMENT_FRAMES + (
+    "was capped", "were capped", "was 130", "were 130", "raised", "originally", "up from",
+    "from 130", "mining", "before", "had been", "increased", "lifted",
+)
+
 _SENT_SPLIT = re.compile(r"(?<=[.!?])\s+|\n+")
 
 
@@ -164,3 +172,72 @@ def forbid_hit(entries, text: str, *, use_regex: bool = False):
             if _present(match, sent, rx) and not any(_present(u, sent, False) for u in unless):
                 return match
     return None
+
+
+# --- what counts as the answer ----------------------------------------------
+#
+# Every answer ends with a FOLLOWUPS block (cloud/api-proxy.py SYSTEM_SUFFIX): three suggested
+# QUESTIONS that the UI renders as chips. They are not claims. Until 2026-11-08 every harness
+# matched expects and forbids against the whole stream, chips included, so a chip reading
+# "How does prefix caching speed up follow-ups?" scored as the answer asserting it
+# (kb_battery F9, 2026-11-07). A chip can also satisfy an expect the answer never stated.
+# Strip the block before checking anything.
+
+_FOLLOWUPS_RE = re.compile(r"\n*\s*(?:-{3,}\s*)?FOLLOWUPS\s*:.*\Z", re.S | re.I)
+
+
+def strip_followups(text: str) -> str:
+    """The answer without its trailing FOLLOWUPS chip block (and the `---` before it)."""
+    return _FOLLOWUPS_RE.sub("", text or "").rstrip()
+
+
+# --- denial-aware "bad claim" probes -----------------------------------------
+#
+# A probe for a WRONG claim ("Terraform", "reverse tunnel", "different family") also matches
+# the CORRECT denial of it: "Chris doesn't use Terraform or Ansible", "it is not a reverse
+# tunnel". On 2026-11-07 that produced F2/F4 hits on answers that were right. The fix is
+# the forbid rule's approach, made tighter: a match is excused only when a negation appears in
+# the SAME sentence within DENIAL_WINDOW characters BEFORE it. A negation elsewhere in the
+# sentence ("The reranker runs on an A4500, which doesn't ...") excuses nothing, so a denial
+# cannot launder a wrong claim that follows it.
+
+DENIAL_WINDOW = 60
+# A negation only counts inside the same CLAUSE: "No — it's a reverse tunnel" and "It isn't on
+# the 5060; it's on an A4500" must still fail. Commas do not end a clause, so "doesn't use
+# Terraform, Ansible or Puppet" excuses all three.
+_CLAUSE_BREAK_RE = re.compile(r"[;:\u2014\u2013]|\s-{1,2}\s|\bbut\b|\bhowever\b|\binstead\b(?! of)", re.I)
+_NEGATION_RE = re.compile(
+    r"\b(?:not|never|neither|nor|without|isn't|aren't|wasn't|weren't|doesn't|don't|didn't|"
+    r"does not|do not|did not|is not|are not|rather than|instead of|none)\b"
+    r"|n't\b"
+    r"|\bno\b(?!\s*[,!.])",          # "uses no Terraform" denies; a leading "No," does not
+    re.I)
+
+
+def _denied(sentence: str, m: re.Match) -> bool:
+    before = sentence[max(0, m.start() - DENIAL_WINDOW):m.start()]
+    breaks = list(_CLAUSE_BREAK_RE.finditer(before))
+    if breaks:
+        before = before[breaks[-1].end():]
+    # A negation INSIDE the matched span also denies ("the reranker does not run on the
+    # A4500"). Span patterns must not cross a comma, so "isn't on the 5060, it's on the A4500"
+    # cannot excuse itself this way.
+    return bool(_NEGATION_RE.search(before) or _NEGATION_RE.search(m.group(0)))
+
+
+def bad_claim_hit(pattern: str, text: str) -> tuple[bool, bool]:
+    """-> (claimed, denied_only).
+
+    claimed      True when some match of `pattern` (regex, case-insensitive) is not a denial:
+                 no negation in the same clause within DENIAL_WINDOW chars before it, and none
+                 inside the match. The FOLLOWUPS chip block is ignored.
+    denied_only  True when the pattern matched but every match was a denial. Recorded so a
+                 reader can audit the exemptions rather than trust them.
+    """
+    matched = False
+    for sent in split_sentences(strip_followups(text)):
+        for m in re.finditer(pattern, sent, re.I):
+            matched = True
+            if not _denied(sent, m):
+                return True, False
+    return False, matched

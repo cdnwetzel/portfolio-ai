@@ -15,7 +15,7 @@ Designed, engineered, and maintain **gentoo-machines**, an open-source automatio
 - **Automated hardware-harvesting scripts** that profile each machine's real hardware.
 - A **19,000-symbol static kernel-config validator (`kconfig-lint.sh`)** that catches invalid or missing kernel options *before* a build, not after a failed one.
 - Auto-generation of **tuned kernel configs, Portage build parameters, and 3-phase bare-metal installation scripts** from that hardware profile.
-- A **state-saving 10-phase system-upgrade orchestration tool (`update-system.sh`)** that safely automates Portage syncs, configuration merging, and proprietary NVIDIA module rebuilds — with automated rollback when something breaks.
+- A **state-saving 10-phase system-upgrade orchestration tool (`update-system.sh`)** that safely automates Portage syncs, configuration merging, and proprietary NVIDIA module rebuilds. It can be interrupted and resumed (even across a reboot), has a dry-run mode, backs up the kernel config, and keeps the previous kernels bootable in GRUB so a bad kernel can be rolled back from the boot menu.
 
 The framework is **declarative**: each machine's hardware and the rationale for every non-obvious choice live in version control, so a build is reproducible rather than improvised. It is deployed, cross-compiled, and maintained across a **diverse bare-metal production fleet** running modern LTS kernels:
 
@@ -25,7 +25,7 @@ The framework is **declarative**: each machine's hardware and the rationale for 
 - **Resource-constrained mini-PCs** — e.g. Beelink MINI S (Jasper Lake, no AVX/AVX2)
 - plus additional profiled machines
 
-Cross-compilation is part of the design: kernels are built on the high-core-count machines (T5810 / B550) and deployed to constrained ones where native compilation would be too slow.
+Remote kernel builds are part of the design: `build-kernel-remote.sh` builds a machine's kernel on a stronger box and deploys it over SSH, so laptops and small machines don't have to compile their own (for example, the T5810 builds for the 8 GB XPS 13 9315).
 
 *(For the technical deep-dive — the scripts, per-machine configs, and lint rules — see `gentoo_machines.md`.)*
 
@@ -35,7 +35,7 @@ Cross-compilation is part of the design: kernels are built on the high-core-coun
 
 ### Distribution Expertise
 - **Gentoo Linux** — primary OS for personal infrastructure: stage3 builds, custom per-hardware kernel compilation, Portage, OpenRC, performance tuning (the gentoo-machines framework above).
-- **RHEL / CentOS / Fedora** — enterprise environments: RPM, SELinux policy, systemd.
+- **RHEL / CentOS / Fedora** — enterprise environments: RPM, SELinux (booleans and file contexts), systemd.
 - **Ubuntu / Debian** — cloud and dev infrastructure (the portfolio chat's public VPS runs Ubuntu): APT, systemd.
 
 ### Kernel Configuration & Optimization
@@ -52,7 +52,7 @@ Per-hardware kernel tuning, with each machine's `kernel_config.sh` documenting *
 - Infrastructure-as-code in **Git** — every kernel change committed with its rationale.
 
 ### Security & Compliance
-- SELinux policy for sensitive workloads; LUKS disk encryption; SSH key-based hardening; multi-zone firewalling.
+- SELinux (booleans and file contexts) for sensitive workloads; LUKS disk encryption; SSH key-based hardening; multi-zone firewalling.
 - SOC 2 Type II compliance operations (see the SOC 2 case study).
 
 ---

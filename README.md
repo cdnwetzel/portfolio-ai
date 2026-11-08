@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/cdnwetzel/portfolio-ai/actions/workflows/ci.yml/badge.svg)](https://github.com/cdnwetzel/portfolio-ai/actions/workflows/ci.yml)
 
-A full-stack AI chat built on personal GPU hardware. Not a wrapper around OpenAI — Qwen 14B runs on two RTX A4500 GPUs in my home office via vLLM tensor parallelism. Every answer is grounded in a RAG knowledge base of documented work: case studies, infrastructure write-ups, LinkedIn posts, resume.
+A full-stack AI chat built on personal GPU hardware. Not a wrapper around OpenAI — Qwen3.8-27B (FP8) runs on two RTX A4500 GPUs in my home office via vLLM tensor parallelism. Every answer is grounded in a RAG knowledge base of documented work: case studies, infrastructure write-ups, LinkedIn posts, resume.
 
 **Live:** https://dev.cwetzel.com
 
@@ -20,13 +20,13 @@ cwetzel.com (Ubuntu VPS)
        └─ Stream: vLLM WebSocket → browser
             ↓ SSH tunnel
 T5810 Home Server (Gentoo Linux)
-  ├─ labrouter :8004 — contract port; routes to vLLM backends (:8007 Qwen3.8-27B-FP8, TP=2, 32K)
+  ├─ labrouter :8004 — contract port; routes to vLLM backends (:8007 Qwen3.8-27B-FP8, TP=2, 48K)
   ├─ Qdrant — vector DB, 768-dim cosine similarity, port 6333
-  ├─ bge-base-en-v1.5 — CPU embeddings (768-d), port 8005
-  └─ bge-reranker-base — CPU cross-encoder reranker, port 8006
+  └─ bge-base-en-v1.5 — CPU embeddings (768-d), port 8005
             ↓ same tunnel, routed over the home LAN
-asrock B550 (Gentoo Linux)
-  └─ Qwen2.5-14B-Instruct via Ollama — faithfulness verifier on an RTX 5060 Ti, port 8007
+asrock B550 (Gentoo Linux) — RTX 5060 Ti 16 GB
+  ├─ bge-reranker-base — GPU cross-encoder reranker, port 8006
+  └─ Qwen2.5-14B-Instruct via Ollama — faithfulness verifier, port 8007
 ```
 
 **Key properties:**
@@ -46,11 +46,11 @@ asrock B550 (Gentoo Linux)
 |---|---|
 | Frontend | React 18 + Vite + Tailwind CSS |
 | Edge proxy | FastAPI + Uvicorn (Python) |
-| LLM serving | vLLM 0.14.0 |
-| Model | Qwen2.5-Coder 14B Instruct (+ pscode LoRA) |
+| LLM serving | vLLM 0.27.1 (CUDA graphs, MTP speculative decoding, prefix caching), behind labrouter |
+| Model | Qwen3.8-27B-FP8, 48K context, tensor parallel across 2 GPUs |
 | Vector DB | Qdrant (dense cosine, 768-d) |
 | Embeddings | BAAI/bge-base-en-v1.5 (768-d, CPU) |
-| Reranker | BAAI/bge-reranker-base (CPU cross-encoder) |
+| Reranker | BAAI/bge-reranker-base (cross-encoder, GPU on the asrock's RTX 5060 Ti) |
 | Faithfulness verifier | Qwen2.5-14B-Instruct via Ollama (RTX 5060 Ti, separate host) |
 | Inference hardware | Dell Precision T5810, 2× NVIDIA RTX A4500 (NVLink) |
 | OS | Gentoo Linux (custom kernel, OpenRC) |

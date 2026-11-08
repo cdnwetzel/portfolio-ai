@@ -39,9 +39,19 @@ The hard requirement was institutionalizing continuous, auditable security opera
 
 ---
 
+## Key controls
+
+- **Encryption of data at rest and in transit.**
+- **Logs maintained and reviewed in a SIEM tool** — collected centrally and reviewed, so the
+  audit evidence for "who did what, when" exists for the whole window.
+
 ## Outcome
 
-The program institutionalized **continuous, auditable security operations across the multi-tenant MSP ecosystem** — a repeatable, evidence-backed SOC 2 Type II posture that holds across the rolling window, not a one-time audit scramble.
+**RedEye passed its SOC 2 Type II audit** on the rolling 90-day evaluation window — Chris and a
+colleague did the work together (January – December 2022). Passing let RedEye **retain a $3 billion
+(USD) finance client** whose business depended on it, and helped RedEye retain and win many more clients.
+
+The program also institutionalized **continuous, auditable security operations across the multi-tenant MSP ecosystem** — a repeatable, evidence-backed SOC 2 Type II posture that holds across the rolling window, not a one-time audit scramble.
 
 ---
 

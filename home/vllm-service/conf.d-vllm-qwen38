@@ -22,7 +22,7 @@ VLLM_PORT=8007                 # backend slot. NEVER 8004 — labrouter owns tha
 # --- model / GPU ---------------------------------------------------------
 VLLM_TP=2                      # both A4500s, NVLink
 VLLM_UTIL=0.93                 # 0.95 OOMs on this box
-VLLM_CTX=32768                 # model max_model_len
+VLLM_CTX=49152                 # model max_model_len
 VLLM_SEQS=4
 VLLM_GDN=triton
 

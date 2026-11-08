@@ -8,6 +8,31 @@
 
 ## OPEN DEFECTS (Priority Order)
 
+### 19. The site confidently repeats wrong KB text — MEDIUM, FIXED + REINDEXED 2026-11-07, VERIFIED (see plan §7)
+**Found 2026-11-01** by a 14-question x 3 battery through the live `/ws/chat` (metadata-only
+probes, no answer text stored). The model was faithful; the *source* was wrong, which is the one
+class of error the faithfulness verifier cannot catch by design: it checks answers against the
+retrieved chunks, and these errors were in the chunks.
+
+| finding | live rate | cause |
+|---|---|---|
+| "Terraform, Ansible" as Chris's IaC tools | 3/3 | `PROFESSIONAL_CONTEXT.md` (SaaS planning note, indexed): "repos *likely* contain" |
+| "SSH reverse tunnel" | 3/3 | KB said "reverse" 4x; the unit is VPS-initiated `ssh -L` |
+| judge is "a different model family" | 3/3 | KB, 2x; both models are Qwen |
+| ~47 tok/s for a fresh question | 3/3 | stale 2026-09-14 figure; 2026-11-01 measured ~70 |
+| broad "major project" blends AVD with P2V/V2V | 2/3 | no overview doc; context-doc and résumé chunks win retrieval |
+| vLLM "on port 8004" | 2/3 | KB ports table; 8004 is labrouter |
+| reranker on an A4500 | 1/3 | KB "on a second GPU" |
+
+Fix: corrected KB text, de-indexed and archived `PROFESSIONAL_CONTEXT.md`, added
+`case_studies/major_projects_overview.md`, pinned with `tests/test_kb_content.py` (10 of 11 fail
+on the pre-fix tree). F7 ("18 years at MSPs") was a correct answer with an incomplete source:
+the KB now carries the full work history from cwetzel.com (2026-11-07). **Still open:** the
+reindex, the before/after re-measure, and a provenance question. The AVD and SAP case studies
+carry generated-era specifics that appear nowhere on cwetzel.com or LinkedIn, and three golden
+items test them (plan §6). Full record:
+`plans/kb-answer-quality-fixes-2026-11.md`.
+
 ### 18. The 14B judge scored a correct, fully-supported answer 1/5 — LOW, but it is the metric everything else is graded by
 **Found 2026-09-14.** In the k=3 graded eval, `What was the payback period for the AVD migration?`
 scored **grounding 1, faithfulness 1** with the judge's note *"No cost savings per user or total
@@ -391,7 +416,15 @@ exactly the shape that invites the conflation.
 ---
 
 ### 4. Verdicts.db Backups and the Weekly Digest Never Run — CONFIRMED WORSE 2026-09-02
-**Status:** OPEN. **Severity raised** — this is not "no backup configured", it is "configured
+**Status:** RESOLVED (verified from output 2026-11-01). Both run from chris's crontab on the
+**T5810**, which side-steps the asrock having no cron daemon: `backup_verdicts_pull.sh` daily
+06:17 snapshots `asrock:verdicts.db` into `~/verdicts-backups/` (30 daily files,
+2026-10-03 -> 2026-11-01, plus a monthly restore test: 26,288 rows), and
+`ssh asrock weekly_verifier_digest.sh` Mondays 07:23 into `digest.log` (12 runs so far).
+The digest has already done its job once: its 2026-10-26 run warned "no verdicts in 3.0d",
+a gap of roughly 2026-10-23 to 10-26. Verdicts are flowing again (latest 2026-11-02
+01:38Z). The cause of that gap was not investigated.
+**Original status:** OPEN. **Severity raised** — this is not "no backup configured", it is "configured
 and silently never executing", which is worse because it reads as done.
 
 **Measured on the asrock 2026-09-02:**

@@ -165,3 +165,60 @@ def test_installer_uses_mktemp_for_the_unit_syntax_check():
     assert "/tmp/.unit-syntax.$$" not in code
     assert "mktemp" in code
     assert "trap 'rm -f" in code
+
+
+# --- 2026-11-01: the mtp4 outage ------------------------------------------------------------
+# k=4 died at engine init in ~2 min, but `rc-service restart` blocked up to 1800s waiting for
+# /health, so the harness never reached its auto-revert; Ctrl-C then left an orphaned
+# supervise-daemon respawning the experiment. These pin the three fixes.
+
+def _svc_cycle_script(log: Path, fail_line: str | None, rc_body: str) -> str:
+    text = HARNESS.read_text(encoding="utf-8")
+    regex_line = re.search(r"^INIT_FAIL_RE=.*$", text, re.M)
+    assert regex_line, "harness no longer defines INIT_FAIL_RE"
+    writer = (f'( sleep 2; printf "%s\\n" {fail_line!r} >> "$VLLM_WRITER_LOG" ) &'
+              if fail_line else "")
+    # hard_stop and rc-service are STUBBED: the real ones would stop production vLLM.
+    return f"""
+export VLLM_WRITER_LOG={str(log)!r}
+READY_WAIT=600
+{regex_line.group(0)}
+{_extract_function(HARNESS, "svc_cycle")}
+hard_stop() {{ echo HARD_STOP_CALLED; }}
+rc-service() {{ {rc_body}; }}
+{writer}
+svc_cycle restart; echo "RC=$?"
+"""
+
+
+def test_svc_cycle_aborts_fast_on_engine_init_failure(tmp_path):
+    log = tmp_path / "writer.log"; log.write_text("old line\n")
+    fail = ("(EngineCore pid=1) ValueError: To serve at least one request with the model's max seq "
+            "len (49152), (2.09 GiB KV cache is needed, which is larger than the available KV "
+            "cache memory (1.98 GiB)")
+    p = subprocess.run(["bash", "-c", _svc_cycle_script(log, fail, "sleep 60")],
+                       capture_output=True, text=True, timeout=30)
+    assert "RC=3" in p.stdout, p.stdout + p.stderr
+    assert "HARD_STOP_CALLED" in p.stdout, "a detected init failure must hard-stop the orphan"
+
+
+def test_svc_cycle_ignores_failures_logged_before_the_restart(tmp_path):
+    log = tmp_path / "writer.log"
+    log.write_text("Engine core initialization failed (from an EARLIER boot)\n")
+    p = subprocess.run(["bash", "-c", _svc_cycle_script(log, None, "sleep 1; true")],
+                       capture_output=True, text=True, timeout=30)
+    assert "RC=0" in p.stdout, p.stdout + p.stderr
+    assert "HARD_STOP_CALLED" not in p.stdout
+
+
+def test_every_service_start_goes_through_svc_cycle():
+    code = _code_lines(HARNESS)
+    raw = re.findall(r"^\s*rc-service vllm-qwen38 (?:re)?start\b", code, re.M)
+    assert not raw, f"bare rc-service start/restart bypasses the init-failure watch: {raw}"
+
+
+def test_interrupt_triggers_revert():
+    code = _code_lines(HARNESS)
+    assert re.search(r"trap '.*revert.*' INT TERM HUP", code), "Ctrl-C must revert, not strand"
+    assert "hard_stop" in _extract_function(HARNESS, "revert"), \
+        "revert must kill a supervisor started under the experiment before restarting"

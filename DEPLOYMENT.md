@@ -28,7 +28,7 @@ cwetzel.com VPS (Ubuntu, systemd)
     ↓ SSH tunnel (initiated by the VPS; home services stay LAN-only)
 T5810 (Gentoo/OpenRC) — Xeon E5-2699v4, 256 GB ECC, 2x RTX A4500 20 GB (NVLink)
 ├─ labrouter (OpenRC)       :8004 — CONTRACT PORT the tunnel forwards; fronts vLLM
-├─ vllm-qwen38 (OpenRC)     vLLM :8007 — Qwen3.8-27B-FP8, 32K ctx, TP=2, CUDA graphs on
+├─ vllm-qwen38 (OpenRC)     vLLM :8007 — Qwen3.8-27B-FP8, 48K ctx, TP=2, CUDA graphs on
 ├─ qdrant (OpenRC)          Qdrant :6333 — dense 768-d cosine, collection `documents`
 ├─ embed-service            bge-base-en-v1.5, CPU, :8005
 └─ rerank-service           bge-reranker-base, CPU, :8006

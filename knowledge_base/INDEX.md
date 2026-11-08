@@ -27,9 +27,9 @@ knowledge_base/
 │   ├── copilot_dlp_bug_cw1226324.md         (3,853 imp)
 │   └── ... 15 more published posts
 ├── case_studies/               (detailed project write-ups) — TBD
+│   ├── major_projects_overview.md   (one-screen summary of every major project, kept distinct)
 │   ├── soc2_type_ii_compliance.md
-│   ├── avd_migration_200_users.md
-│   ├── sap_business_one_integration.md
+│   ├── avd_sap_global_distributor.md   (AVD + SAP Business One, one client; replaced the generated AVD and SAP studies 2026-11-07)
 │   ├── disaster_recovery_planning.md
 │   └── vmware_p2v_infrastructure.md
 ├── infrastructure/             (Gentoo machines, system config) — TBD
@@ -59,7 +59,7 @@ knowledge_base/
 ### 2. Resume (1 File)
 **Status:** ✅ Created  
 **Content:**
-- Current role: IT Manager @ Law Firm
+- Current role: Director of Legal Technology (the firm's IT manager) @ Portnoy Schneck LLC, a law firm
 - 26 years enterprise infrastructure
 - Detailed work history (2 employers, 13+ years each)
 - 5 major projects (SOC2, AVD, SAP, DR, VMware)
