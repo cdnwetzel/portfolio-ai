@@ -583,5 +583,32 @@ worth remembering:
   drop-in `api-proxy.service.d/system-info.conf` now says KB_DOC_COUNT=39; it is a hand-set
   number, so update it on every reindex that changes the doc count.
 
+- **2026-11-08** — Three changes.
+
+  **(1) Eval instruments stopped flagging correct answers.** `scripts/expectations.py` gained
+  `strip_followups()`, which all three harnesses and the judge's input now use, so suggestion
+  chips are not scored as claims. It also gained `bad_claim_hit()` (denial-aware wrong-claim
+  probes) and `POWER_HISTORY_FRAMES` (history-exempt 130 W rule). Six battery probes that
+  matched true sentences were tightened; `tests/test_probe_accuracy.py` checks each rule both ways.
+
+  **(2) KB.** `pxx_project.md` was rewritten from the public v2 repo: 2.9.3; 1,863 tests at the
+  default-branch head, 1,746 at the tag. `linux_sysadmin_background.md` was corrected against
+  gentoo-machines: rollback, SELinux, remote builds. Chris's first-person hindsight section went
+  into `RESUME.md`, placed **before Work History**. At the end of the file it merged into an
+  unrelated chunk past the reranker's 512-token window and still scored ~0, so simulate chunk
+  position before placing a new section. The home hostname is out of the KB. Graded eval
+  PASSED: 4.77, 47 grounded of 57. Reindexed four times (authorized); 39 docs / 110 chunks,
+  unchanged.
+
+  **(3) The public mirror is a scrubbed snapshot, never a push of `main`.** `main` has ~300
+  unscrubbed private commits. `cdnwetzel/portfolio-ai` received `c2f0f70` and `37bc9b4`, built
+  by `~/.config/cwdotcom/public_snapshot.sh <last-base>`. That script lives **outside the repo**
+  because it holds the denylist terms. It applies `git diff <base> main` onto `origin/main`,
+  re-scrubs (LAN → 192.0.2.x, hostname → placeholder, home paths, work email), drops
+  `PROFESSIONAL_CONTEXT.md` and the unconfirmed June case studies, and runs `privacy_scan.py`
+  with the denylist, gitleaks and pytest. It stops before commit/push. The full private history
+  is backed up to dated branches of the private `portfolio-ai-archive` (`main-YYYY-MM-DD`); that
+  repo's own `main` is a GitHub merge commit that is not in local history.
+
 **When you change the system, change the docs in the same commit.** A wrong doc is worse than a
 missing one: it is confidently wrong, and it survives long after the person who knew better moved on.

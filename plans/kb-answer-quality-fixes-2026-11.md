@@ -402,3 +402,40 @@ applies. The golden set is now 46 grounded / 5 refuse_ok, so the next run's grou
 review-only warning) — left for Chris: either the KB gains a "lessons" passage or the item becomes
 refuse_ok. The 3 programmatic-fallback rows (adversarial; judge omits `faithfulness`) are the same
 3 as in every run since 2026-11-01.
+
+## 9. Parked 2026-11-09 — status
+
+**Done and live (39 docs / 110 chunks):**
+- every battery defect from §1 fixed
+- eval instruments fixed (§8)
+- graded eval PASSED, 4.77 (§8b)
+- pxx rewritten from the public repo
+- Linux doc corrected against gentoo-machines
+- first-person hindsight answer (4/4 phrasings)
+- home hostname removed from the KB
+- public mirror refreshed as scrubbed snapshots (CLAUDE.md, 2026-11-08 entry)
+
+**Open, each needing Chris's approval item by item (rule: remove nothing unless a repo clearly
+disproves it):**
+1. Linux additions from the GitHub survey: arch-machines (no-initramfs kernels, IPU6,
+   kconfig-verify), Fedora 42 → RHEL 10.1, the 12-machine gentoo-machines fleet, dos4cw
+   (assembly OS; its AI-governance story).
+2. Windows / automation / AI batches, written generally and firm-safe. Some firm work is off
+   limits entirely, and the rest only in general terms; Chris decides which, per item.
+3. Chris's answers on:
+   - years in IT (KB 26, the public `titanic` README 28; June 1999 → now is ~27)
+   - 26 years of Linux specifically
+   - the "Linux-heavy" project heading
+   - vendor product names
+   - the 2013–14 employer
+4. Remaining June-generated files: `ai_portfolio_iterations.md`, `INDEX.md`,
+   `POSTS_METADATA.json`.
+5. LinkedIn reach figures (114,631 / 42,000+ vs "120,000+").
+6. Plumbing:
+   - `reindex_kb.sh` cannot run from the T5810
+   - `KB_DOC_COUNT` is hand-set on the VPS
+   - the quarterly reminder crontab
+   - optional: allowlist the VPS IP for SSH on the router
+
+The five survey inventories (2026-11-08) are kept outside the repo, because they describe
+private repos.
