@@ -208,3 +208,16 @@ def test_linux_doc_rollback_and_selinux_match_the_repo():
     assert "automated rollback" not in text
     assert "SELinux policy" not in text
     assert "Cross-compilation is part of the design" not in text
+
+
+def test_kb_does_not_name_the_home_hostname():
+    # Chris, 2026-11-08: the home connection's hostname stays out of the KB (the public repo
+    # already scrubs it). Obscurity only; the SSH hardening is the real control.
+    for p in KB.rglob("*.md"):
+        assert "jump.example.net" not in p.read_text(), p
+
+
+def test_resume_has_first_person_hindsight():
+    text = (KB / "RESUME.md").read_text()
+    assert "### What would I do differently if I started over?" in text
+    assert "my path has worked for me" in text

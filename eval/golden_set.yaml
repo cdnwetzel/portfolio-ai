@@ -211,7 +211,14 @@
   # Voice test: expects reasons reflecting Chris's values, not generic cloud-vs-on-prem debate
 - q: "What would you do differently if you started over?"
   kind: grounded
+  expect_substrings: [["home lab", "homelab"]]
   # Voice test: expects reflective, opinionated tone; should answer substantively from KB experience
+  #
+  # FIXED 2026-11-08 by the second remedy named below: RESUME.md gained Chris's own first-person
+  # "What would I do differently if I started over?" section, placed so it LEADS its chunk
+  # (at the end of the file it was merged into a BCDR chunk at word 305, past the reranker's 512-
+  # token window, and still scored ~0). Rerank 0.0031 -> 0.99; 4/4 phrasings answer live.
+  # History of the failure, kept for the lesson:
   #
   # KNOWN FAILING, and NOT a model defect (2026-09-13). The model refuses 3/3 with the documented
   # "I don't have that documented", because the question scores 0.0031 -- below verify_gate.py's
@@ -311,8 +318,13 @@
 - q: "What was the grounding score for the incumbent model in the selection evaluation?"
   kind: grounded
   forbid_substrings: ["i only know chris wetzel's professional work"]
+# 2026-11-08: was `kind: grounded`, which FAILS any answer containing a fallback marker. The KB
+# documents the tunnel but not its cipher suite, so the accurate answer is "it's an encrypted SSH
+# tunnel; the specific ciphers aren't documented" -- and that failed (judge: "Correctly notes lack
+# of specific crypto details", 4/5). The item exists to catch the router DEFLECTION, which the
+# forbid still does; refuse_ok accepts either an answer or an honest "not documented".
 - q: "What cryptography does the SSH tunnel use?"
-  kind: grounded
+  kind: refuse_ok
   forbid_substrings: ["i only know chris wetzel's professional work"]
 
 # 2026-11-07: both PAYBACK items were briefly RETIRED as unsourced, then restored below once

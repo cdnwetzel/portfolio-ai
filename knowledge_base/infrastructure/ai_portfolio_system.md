@@ -302,7 +302,7 @@ Browser ──HTTPS/WSS──> cwetzel.com VPS (FastAPI proxy)
                           │  RAG: alias-expand → embed → Qdrant (dense) → rerank → vLLM stream
                           │  (all home services reached at 127.0.0.1 via the SSH tunnel)
                           ▼
-                  ── SSH tunnel, VPS-initiated (-L) ──> T5810 (jump.example.net)
+                  ── SSH tunnel, VPS-initiated (-L) ──> T5810 (home office)
                           ├─ labrouter 8004 (-> vLLM), Qdrant 6333, embed 8005  (on the T5810)
                           ├─ tunnel forwards :8016 ──LAN──> asrock B550 :8006 (GPU reranker)
                           └─ tunnel also forwards :8007 ──LAN──> asrock B550 (verifier)

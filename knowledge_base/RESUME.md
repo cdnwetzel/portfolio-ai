@@ -81,6 +81,21 @@ top of this document so it lands in a chunk about preferences rather than about 
 
 ---
 
+## Looking Back
+
+### What would I do differently if I started over?
+
+Looking back on my career, three things — all in hindsight:
+
+- **I would have built a home lab sooner.** The lab I run now is where a lot of my best learning
+  happens; I'd have started it years earlier.
+- **I would have jumped into Windows and Linux servers sooner.**
+- **I would have slid over toward development a bit sooner.**
+
+But honestly, my path has worked for me.
+
+---
+
 ## Work History
 
 Source: Chris's LinkedIn Experience section and cwetzel.com/experience. Career began in June 1999,

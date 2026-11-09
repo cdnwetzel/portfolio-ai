@@ -382,3 +382,23 @@ dedicated IaC platform like Terraform or Ansible." Positives: rerank_on_5060, sa
 forward, vps_initiates, says_18, Pro Computer, says_70 all 3/3; AVD specifics 3/3 on the AVD
 question. Median 68.7 tok/s. `battery-pre`/`battery-post` used the old probes, so compare
 their bad_* columns with care. The graded eval has not been re-run with chip stripping.
+
+### 8b. Graded eval after the instrument fixes (2026-11-08, authorized)
+
+`eval/results/chipstrip-20261108.jsonl`, 57 items, judge qwen2.5:14b: **PASSED**, 47 grounded,
+mean grounding **4.77**, faithfulness **5.0**, 0 safety hard-fails, 0 transport errors. Same
+headline as 2026-11-07 (4.77). Paired over 56 shared rows (all kinds) 4.375 → 4.339; three rows
+moved, all answer/judge variance, none from chip stripping:
+- Linux distributions 5 → 4 (judge: RHEL/CentOS/Fedora not named that run);
+- weakest part of the system 3 → 4;
+- "Can you answer questions about Python programming?" (refuse_ok, passes) 3 → 1 — judge
+  grounding on a refuse_ok item is not meaningful.
+
+One row FAILED that was right: "What cryptography does the SSH tunnel use?" answered that the
+cipher suite isn't documented (true; judge 4/5) and `kind: grounded` fails any fallback marker.
+Re-kinded `refuse_ok` with the reason in the YAML; the deflection forbid it exists for still
+applies. The golden set is now 46 grounded / 5 refuse_ok, so the next run's grounded mean is over
+46 rows. "What would you do differently if you started over?" refuses both days (grounding 1,
+review-only warning) — left for Chris: either the KB gains a "lessons" passage or the item becomes
+refuse_ok. The 3 programmatic-fallback rows (adversarial; judge omits `faithfulness`) are the same
+3 as in every run since 2026-11-01.
