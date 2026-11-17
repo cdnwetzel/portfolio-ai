@@ -1,6 +1,7 @@
 # Demo surface — execution spec (M1 receipts · M2 status · M3 lab)
 
-Date: 2026-11-16 · Status: PARKED, spec-complete (ready to implement on revival)
+Date: 2026-11-16 · Status: **SHIPPED 2026-11-17** — M1–M3 deployed to production and verified;
+this file is the decision record, not a plan in waiting. See "Shipped" below.
 Origin: local-inference proof session; promoted from decision-plan on 2026-11-16 after
 verifying protocol assumptions against `cloud/api-proxy.py` live code.
 
@@ -209,3 +210,32 @@ Run after the build landed, before deploy:
 3. **Redaction catch:** the defensive `n_claims` fallback ("or claims") would have
    persisted the claims ARRAY (answer content) on any judge that omits the int
    count — fixed to accept ints only, regression-tested.
+
+## Shipped (2026-11-17) — what the session proved
+
+M1–M3 deployed (deploy.sh selftest green each time) and verified live: receipts
+resolve against the production judge (first verdict on disk 2026-11-17T03:34Z),
+`/api/status` shows all components ok with the model contract check, `/inside` and
+`/lab` public with nav links and live playable sims. Public snapshots ×2
+(carried the KB NVLink corrections; the twin had quoted a fabricated "NV4 bridge"
+spec verbatim until the reindex).
+
+Lessons now recorded here so they survive:
+
+1. **KB drift reaches the twin verbatim.** Sixteen NVLink claims across 8 files,
+   including a fabricated `nvidia-smi topo -m` "measurement", were stated as fact
+   by the chat until each file was corrected AND Qdrant reindexed. Doc fixes alone
+   change nothing the twin says. (Reindex during live traffic degrades gracefully —
+   the RAG guardrail returns "I don't have that documented" on an empty index
+   rather than hallucinating.)
+2. **Public snapshots are tree-copies.** Any file that exists only in the public
+   repo is deleted by the next snapshot — `.deploy.env.example` was rescued into
+   the canonical repo for exactly this reason.
+3. **The deploy-manifest guard + private CI + public PR CI caught real problems**
+   (missing scp lines; a content-leak path) at the cheapest possible moment, every
+   time. Keep all three.
+
+Remaining open threads: judge on/off invariance drill (acceptance criterion, one
+run); systemd override.conf/system-info.conf duplicate values from the unit file
+(harmless tidy); `documents_pre` Qdrant collection from an old hybrid experiment
+(delete at next maintenance window).
