@@ -75,6 +75,10 @@ export default function Landing({ onStart }) {
           <span className="text-gray-700">·</span>
           <a href={REPO_URL} target="_blank" rel="noreferrer"
              className="hover:text-white transition">View source</a>
+          <span className="text-gray-700">·</span>
+          <a href="/inside.html" className="hover:text-white transition">Inside</a>
+          <span className="text-gray-700">·</span>
+          <a href="/lab.html" className="hover:text-white transition">Lab</a>
         </div>
       </div>
 

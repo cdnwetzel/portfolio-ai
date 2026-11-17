@@ -30,7 +30,7 @@ Machines don't drift silently because changes are committed. If I rebuild the T5
 
 | Machine | Hardware | Status |
 |---|---|---|
-| **T5810** | Dell Precision, 2× RTX A4500 (NVLink), Xeon E5-2699v4 (22C/44T) | Active — AI inference (vLLM), primary GPU server |
+| **T5810** | Dell Precision, 2× RTX A4500 (PCIe; no NVLink — corrected 2026-11-16), Xeon E5-2699v4 (22C/44T) | Active — AI inference (vLLM), primary GPU server |
 | **OptiPlex 3090 SFF** | Dell OptiPlex 3090 SFF, RTX A1000 (8GB) | Active — secondary GPU workstation |
 | **ASRock B550** (AMD build) | Ryzen 9 5950X (Zen 3, 16C/32T), 64GB DDR4-3200, RTX 5060 Ti 16GB, Intel AX200 WiFi, I225-V 2.5GbE | Active — heavy compile and parallel workloads; also hosts the portfolio chat's out-of-band faithfulness verifier (Qwen2.5-14B on GPU via Ollama, port 8007), reached from the VPS through the T5810 tunnel |
 | **Dell XPS 15 9510** | Intel Core i7-11800H (Tiger Lake H), NVIDIA RTX 3050 Ti (Optimus/PRIME) | Active — dev laptop, hybrid GPU |
@@ -43,7 +43,7 @@ Machines don't drift silently because changes are committed. If I rebuild the T5
 
 All running machines use Gentoo Linux with OpenRC (not systemd). Target kernel: 6.18 LTS series.
 
-**Why OpenRC over systemd:** it's a deliberate choice, not dogma. OpenRC's dependency-based init is small, transparent, and shell-scriptable — easy to read the exact start/stop logic for a GPU inference service, tune startup ordering (e.g. NVLink precondition checks before vLLM starts), and debug without a binary journal. On single-purpose, hand-tuned machines like these, that transparency and minimalism is worth more than systemd's feature breadth. systemd is a fine default for fleets that need its ecosystem; for this homelab, OpenRC keeps the stack legible and lightweight. (The cloud VPS, by contrast, runs Ubuntu + systemd — the right tool there.)
+**Why OpenRC over systemd:** it's a deliberate choice, not dogma. OpenRC's dependency-based init is small, transparent, and shell-scriptable — easy to read the exact start/stop logic for a GPU inference service, tune startup ordering (e.g. GPU-ready precondition checks before vLLM starts), and debug without a binary journal. On single-purpose, hand-tuned machines like these, that transparency and minimalism is worth more than systemd's feature breadth. systemd is a fine default for fleets that need its ecosystem; for this homelab, OpenRC keeps the stack legible and lightweight. (The cloud VPS, by contrast, runs Ubuntu + systemd — the right tool there.)
 
 ---
 
@@ -140,8 +140,8 @@ The `tools/` directory is where most of the engineering effort lives. The tools 
 The T5810 is the most complex machine in the fleet due to the AI inference workload:
 
 - **CPU:** Intel Xeon E5-2699v4 — 22 cores / 44 threads, Broadwell-EP. At `-j44`, kernel 6.18 builds in ~5 minutes; a full `@world` update (250 packages) with `--jobs=6 --load-average=44` takes ~90 minutes. Peak RAM during Node.js/V8 compile: ~48GB.
-- **NVLink topology:** `nvidia-smi topo -m` reports `NV4` (4-link NVLink bridge) between the two A4500s — 56 GB/s per direction, 112 GB/s aggregate. Required for tensor-parallel vLLM (TP=2); without it CUDA sees two isolated GPUs.
-- **GPU history:** Originally shipped with 2× GTX 1050 Ti (Pascal). Upgraded to 2× RTX A4500 + NVLink bridge specifically to get 40GB pooled VRAM for TP=2 inference — no single card without NVLink could match that capacity at a similar price point.
+- **GPU interconnect (corrected 2026-11-16):** no NVLink on the A4500 — the pair links over PCIe Gen3 x16 (measured under load 2026-11-16). The earlier claim that `nvidia-smi topo -m` reports `NV4` between the cards was not a real measurement; the A4500 has no NVLink to report.
+- **GPU history:** originally shipped with 2× GTX 1050 Ti (Pascal). Upgraded to 2× RTX A4500 for 40 GB total VRAM across two cards — TP=2 inference shards the model across them. (Earlier "NVLink bridge / pooled VRAM" phrasing was wrong on both counts: A4500 has no NVLink, and tensor parallelism does not pool memory.)
 - **NVIDIA driver:** A4500 (Ampere) uses the current nvidia driver series. The T5810 also previously ran a GTX 1050 Ti (Pascal) — Pascal requires the 580.xx legacy branch (security patches through October 2028) because NVIDIA 590+ dropped Pascal/Maxwell/Volta entirely.
 - **Portage tmpfs:** 46GB `PORTAGE_TMPDIR` on tmpfs with a `notmpfs.conf` `package.env` override for packages (chromium, LLVM, Rust, firefox-bin) that exceed that budget.
 - **sysctl tuning:** `vm.swappiness=5`, `dirty_ratio=40`, `max_map_count=1048576`, `pid_max=131072`, `threads-max=524288` — tuned for large parallel builds and LLM inference memory patterns.
@@ -215,7 +215,7 @@ All production machines build root-path drivers (NVMe/AHCI/SATA, ext4, VFAT) as 
 
 **Hardware-aware, not one-size-fits-all.** The same `MAKEOPTS` that saturates the T5810's 44 threads would OOM-kill the Beelink on a large package. The configs reflect the actual use case of each machine.
 
-**Documentation through code.** Comments answer why, not what. `CONFIG_DRM_NOUVEAU=n` is self-documenting; the comment explaining it's required because nouveau doesn't support NVLink SLI is what matters a year later.
+**Documentation through code.** Comments answer why, not what. `CONFIG_DRM_NOUVEAU=n` is self-documenting; the comment explaining it's required because nouveau can't drive the A4500 is what matters a year later.
 
 **AI in the toolchain.** `generate-config.sh` invokes Claude CLI to synthesize hardware harvest data into kernel and Portage configuration. The pipeline uses AI where synthesis is hard (translating raw PCI IDs and ACPI tables into correct kernel symbol combinations) and keeps humans in the loop for review.
 

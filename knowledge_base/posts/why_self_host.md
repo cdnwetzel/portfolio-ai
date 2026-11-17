@@ -3,7 +3,7 @@
 I run my portfolio's AI stack — LLM inference, vector search, reranking, faithfulness
 verification — on hardware in my home office instead of renting cloud GPUs. People ask why.
 
-**Cost is the simple part.** At moderate usage, an A4500 NVLink pair pays for itself in
+**Cost is the simple part.** At moderate usage, a dual-A4500 pair pays for itself in
 months versus cloud GPU rental. After that, every query is electricity.
 
 **Control is the real part.** When I own the stack, there is no deprecation notice, no

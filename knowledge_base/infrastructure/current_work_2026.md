@@ -12,7 +12,7 @@ running entirely on owned hardware. Live at dev.cwetzel.com.
 State this, not the history below, when asked what the system runs or what hardware it uses.
 
 - **Answerer:** **Qwen3.8-27B-FP8**, 48K context, served by vLLM across **2x RTX A4500**
-  (NVLink) in the T5810.
+  (PCIe; no NVLink on the A4500 — corrected 2026-11-16) in the T5810.
 - **Faithfulness judge:** **Qwen2.5-14B-Instruct** on the **RTX 5060 Ti 16 GB** in the asrock
   B550.
 - **Reranker:** **bge-reranker-base** cross-encoder, on that same RTX 5060 Ti.
@@ -49,7 +49,7 @@ change are **no longer in use**.
 - The verifier box (asrock B550, Ryzen 9 5950X) **currently has an RTX 5060 Ti 16 GB**, which
   hosts both the 14B judge and the GPU reranker. It replaced a 3060 Ti 8 GB, which was removed
   from service in 2026 and is not part of the current system.
-- The T5810 (2× RTX A4500, NVLink) serves the answerer via vLLM at 93% VRAM. As of 2026-08-26
+- The T5810 (2× RTX A4500, PCIe — no NVLink, corrected 2026-11-16) serves the answerer via vLLM at 93% VRAM. As of 2026-08-26
   that is **Qwen3.8-27B-FP8**, which replaced the previous 14B on measured grounding and citation.
 
 ## Engineering practices this project runs on
