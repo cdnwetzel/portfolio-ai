@@ -31,7 +31,7 @@ npm install react-markdown react-syntax-highlighter
 ### 4. Build and deploy
 ```bash
 npm run build
-rsync -avz --delete frontend/dist/ root@web.example.net:/var/www/dev.cwetzel.com/
+rsync -avz --delete frontend/dist/ root@cwetzel.com:/var/www/dev.cwetzel.com/
 ```
 
 ## Files to Change

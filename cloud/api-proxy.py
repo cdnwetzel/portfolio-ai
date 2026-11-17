@@ -14,7 +14,7 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 import httpx
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from context_manager import (
     compact_history_by_tokens,
     inject_system_prompt,
@@ -32,7 +32,9 @@ from query_router import (
     classify_query, META_RESPONSE, OFF_TOPIC_RESPONSE, NOT_DOCUMENTED_RESPONSE,
 )
 from verify_gate import should_verify
-from rate_limit import ConnectionRateLimiter, client_ip_from_headers
+from rate_limit import ConnectionRateLimiter, WindowRateLimiter, client_ip_from_headers
+from receipts import VerdictStore, build_verdict_record, is_valid_request_id, verdict_state
+from status import classify_probe, probe_definitions
 import sparse_bm25
 
 logging.basicConfig(level=logging.INFO)
@@ -114,6 +116,28 @@ COMPRESS_TIMEOUT = float(os.environ.get("COMPRESS_TIMEOUT", "3.0"))
 # wants to tune aggressiveness. Defaults are conservative.
 COMPRESS_TARGET_RATIO = float(os.environ.get("COMPRESS_TARGET_RATIO", "0.5"))
 COMPRESS_PROTECT_RECENT = int(os.environ.get("COMPRESS_PROTECT_RECENT", "0"))
+
+# --- Receipts / demo surface (plans/demo-surface-plan-2026-11-16.md) ----------------
+# VERDICT_LOG: append-only JSONL log of EVERY faithfulness verdict (not just flagged
+# ones), so the receipt panel can resolve a verdict after the fact and /api/status can
+# show a 24h distribution. Unset = persistence off (records still push if the judge
+# runs). Metadata only — red-lines.md #2; see cloud/receipts.py.
+VERDICT_LOG = os.environ.get("VERDICT_LOG", "")
+# 1 = push every verdict state to the client (ok / flagged / unavailable).
+# 0 = legacy behavior: push only when flagged.
+VERDICT_PUSH_ALL = os.environ.get("VERDICT_PUSH_ALL", "1") == "1"
+VERDICTS_PER_MINUTE = int(os.environ.get("VERDICTS_PER_MINUTE", "30"))
+STATUS_PER_MINUTE = int(os.environ.get("STATUS_PER_MINUTE", "10"))
+STATUS_CACHE_SECONDS = float(os.environ.get("STATUS_CACHE_SECONDS", "5"))
+# The judge's health path for /api/status probing (its /verify contract is POST-only).
+VERIFIER_HEALTH_PATH = os.environ.get("VERIFIER_HEALTH_PATH", "/health")
+
+_verdicts = VerdictStore(VERDICT_LOG or None)
+if VERDICT_LOG and not _verdicts.enabled:
+    logger.warning(f"VERDICT_LOG configured but verdict store disabled: {VERDICT_LOG}")
+_verdict_read_limiter = WindowRateLimiter(max_requests=VERDICTS_PER_MINUTE, window_seconds=60)
+_status_limiter = WindowRateLimiter(max_requests=STATUS_PER_MINUTE, window_seconds=60)
+_status_cache: "dict" = {"at": 0.0, "payload": None}
 
 # Owner birthdate (ISO) for the server-computed age fact (server_facts_block).
 # In-code default on purpose: the repo is private, and out-of-repo config is a known
@@ -294,6 +318,91 @@ async def system_info():
         "deployed_sha": os.environ.get("DEPLOY_GIT_SHA", "unknown"),
         "prompt_version": PROMPT_VERSION,
     }
+
+async def _probe_one(probe: dict) -> dict:
+    """Probe one component for /api/status. Never raises — a component that
+    cannot be probed is "unknown" (gray), not an error (fail-open ethos)."""
+    answered = False
+    served_model = None
+    try:
+        hr = await _http.get(probe["health_url"], timeout=5.0)
+        answered = hr.status_code == 200
+    except Exception:
+        answered = False
+    if answered and probe.get("models_url"):
+        # Contract check: a health-200 serving the WRONG model id is "degraded" —
+        # the exact failure mode that blanked the site on 2026-08-29.
+        try:
+            mr = await _http.get(probe["models_url"], timeout=5.0)
+            if mr.status_code == 200:
+                ids = [m.get("id") for m in (mr.json().get("data") or [])]
+                served_model = ids[0] if ids else None
+        except Exception:
+            served_model = None
+    return {
+        "key": probe["key"], "label": probe["label"],
+        "state": classify_probe(answered, expected_model=probe.get("expected_model"),
+                                served_model=served_model),
+        **({"served_model": served_model} if served_model is not None else {}),
+    }
+
+
+async def _poll_status() -> dict:
+    """Probe every component concurrently; verdict distribution rides along when
+    the verdict log is enabled. Cached by the /api/status handler."""
+    probes = probe_definitions(VLLM_URL, MODEL_ID, QDRANT_URL, EMBED_URL, RERANK_URL,
+                               VERIFIER_URL, VERIFIER_HEALTH_PATH)
+    results = await asyncio.gather(*(_probe_one(p) for p in probes), return_exceptions=True)
+    components = [
+        r if isinstance(r, dict) else {"key": "error", "label": "probe error", "state": "unknown"}
+        for r in results
+    ]
+    if VERIFIER_URL == "":
+        # Judge intentionally not configured — a stable "off" card, not an error.
+        components.append({"key": "verifier", "label": "Faithfulness judge",
+                           "state": "off"})
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "model": MODEL_ID,
+        "components": components,
+        "verdicts_24h": _verdicts.distribution(since_hours=24) if _verdicts.enabled else None,
+    }
+
+
+@app.get("/api/verdicts/{request_id}")
+async def get_verdict(request_id: str, request: Request):
+    """Receipt fallback: fetch a verdict by request_id when the WebSocket push was
+    missed (reconnect, page reload). GET-by-UUID only — no list endpoint, no bulk
+    enumeration (see the demo-surface spec, M1.1 item 4)."""
+    client_ip = client_ip_from_headers(
+        dict(request.headers), request.client.host if request.client else None)
+    if not _verdict_read_limiter.try_acquire(client_ip):
+        raise HTTPException(status_code=429, detail="Too many requests")
+    if not is_valid_request_id(request_id):
+        raise HTTPException(status_code=404, detail="Unknown verdict")
+    record = _verdicts.get(request_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Unknown verdict")
+    return record
+
+
+@app.get("/api/status")
+async def api_status(request: Request):
+    """Component health for the /inside status page. Server-side poll with a short
+    in-process cache so the page's 30s refresh and a handful of visitors can't turn
+    into a probe flood against the home boxes through the tunnel."""
+    client_ip = client_ip_from_headers(
+        dict(request.headers), request.client.host if request.client else None)
+    if not _status_limiter.try_acquire(client_ip):
+        raise HTTPException(status_code=429, detail="Too many requests")
+    now = time.time()
+    if _status_cache["payload"] is not None and now - _status_cache["at"] < STATUS_CACHE_SECONDS:
+        return _status_cache["payload"]
+    payload = await _poll_status()
+    _status_cache["at"] = now
+    _status_cache["payload"] = payload
+    return payload
+
 
 @app.post("/api/search")
 async def search(request: Request):
@@ -614,29 +723,67 @@ async def _fire_verify(request_id: str, query: str, answer: str, evidence_docs: 
     delivered; this never blocks or alters it. A flag becomes visible, not silent."""
     if not VERIFIER_URL or _http is None:
         return
+    async def _push(frame: dict) -> None:
+        # Best-effort socket push; the client may already have closed (its own
+        # verdict window expired). A failed push is not an error — the read
+        # endpoint /api/verdicts/{id} is the fallback path.
+        if websocket is None:
+            return
+        try:
+            await websocket.send_json(frame)
+        except Exception:
+            pass
+
     try:
         chunks = [
             {"title": d.get("title", ""), "source": d.get("source", ""),
              "content": d.get("content", "")}
             for d in evidence_docs
         ]
+        t0 = time.perf_counter()
         resp = await _http.post(
             f"{VERIFIER_URL}/verify",
             json={"request_id": request_id, "query": query, "answer": answer, "chunks": chunks},
             timeout=VERIFIER_TIMEOUT,
         )
-        if websocket is not None and resp.status_code == 200:
-            verdict = resp.json()
-            if verdict.get("flagged"):
-                # metadata only (red-lines.md #2): id + score + flag, no content.
-                await websocket.send_json({
-                    "type": "verdict", "request_id": request_id, "flagged": True,
-                    "faithfulness": verdict.get("faithfulness"),
-                    "n_contradicted": verdict.get("n_contradicted"),
-                })
+        latency_ms = int((time.perf_counter() - t0) * 1000)
+        if resp.status_code != 200:
+            # Judge reachable but failing: the receipt panel distinguishes "checked,
+            # all clear" from "could not be checked" — only the former is meaningful.
+            if VERDICT_PUSH_ALL:
+                await _push({"type": "verdict", "request_id": request_id, "state": "unavailable"})
+            return
+        verdict = resp.json()
+        # Persist EVERY verdict (not just flagged ones) when VERDICT_LOG is set.
+        # Metadata only (red-lines.md #2): id + score + counts, never content.
+        record = build_verdict_record(
+            verdict, request_id=request_id, latency_ms=latency_ms,
+            model=MODEL_ID, prompt_version=PROMPT_VERSION,
+        )
+        if _verdicts.enabled:
+            _verdicts.append(record)
+        if VERDICT_PUSH_ALL:
+            await _push({
+                "type": "verdict", "request_id": request_id,
+                "state": record["state"], "flagged": record["flagged"],
+                "faithfulness": record["faithfulness"],
+                "n_contradicted": record["n_contradicted"],
+                "n_unsupported": record["n_unsupported"],
+                "n_supported": record["n_supported"],
+                "n_claims": record["n_claims"],
+            })
+        elif verdict.get("flagged"):
+            # Legacy mode: flagged-only push (the pre-receipts contract).
+            await _push({
+                "type": "verdict", "request_id": request_id, "flagged": True,
+                "faithfulness": verdict.get("faithfulness"),
+                "n_contradicted": verdict.get("n_contradicted"),
+            })
     except Exception as e:
         # red-lines.md #2: metadata only, never query/answer content.
         logger.debug(f"verifier fire-and-forget failed (non-fatal): {e!r}")
+        if VERDICT_PUSH_ALL:
+            await _push({"type": "verdict", "request_id": request_id, "state": "unavailable"})
 
 
 @app.websocket("/ws/chat")

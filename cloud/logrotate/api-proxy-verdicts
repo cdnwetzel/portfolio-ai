@@ -1,0 +1,10 @@
+# Verdict log for the per-answer receipts feature (demo surface M1).
+# Volume is ~1 JSON line per verified chat; rotation is hygiene, not necessity.
+/var/lib/api-proxy/verdicts.jsonl {
+    weekly
+    rotate 8
+    maxage 90
+    missingok
+    notifempty
+    copytruncate
+}

@@ -66,8 +66,8 @@ Per-machine config lives in `/etc/default/portfolio-ai-tunnel` on the VPS (**not
 repo — the repo carries no internal addressing):
 
 ```bash
-T5810_USER=user
-T5810_HOST=jump.example.net     # DNS, survives dynamic-IP rotation
+T5810_USER=chris
+T5810_HOST=ai.cwetzel.com     # DNS, survives Verizon dynamic-IP rotation
 VERIFIER_HOST=<asrock-lan-ip> # asrock's LAN address as resolved FROM the T5810
 ```
 
@@ -83,10 +83,6 @@ The proxy reaches every backend at `127.0.0.1` (`VLLM_URL`, `QDRANT_URL`, `EMBED
 
 Everything deploys from the repo root. **Production actions need explicit authorization** —
 CI deliberately does not deploy (`.github/workflows/ci.yml` runs offline tests only).
-
-Host names and the service user are operator-local: copy `.deploy.env.example` to
-`.deploy.env` (gitignored) and fill in `CLOUD_HOST`, `T5810_HOST` and `SVC_USER`. The
-scripts read it when present, and the service installers write the units for `SVC_USER`.
 
 ```bash
 # Code deploy: frontend build → rsync → scp proxy modules → restart → health check →

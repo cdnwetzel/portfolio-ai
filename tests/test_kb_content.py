@@ -214,7 +214,7 @@ def test_kb_does_not_name_the_home_hostname():
     # Chris, 2026-11-08: the home connection's hostname stays out of the KB (the public repo
     # already scrubs it). Obscurity only; the SSH hardening is the real control.
     for p in KB.rglob("*.md"):
-        assert "jump.example.net" not in p.read_text(), p
+        assert "ai.cwetzel.com" not in p.read_text(), p
 
 
 def test_resume_has_first_person_hindsight():

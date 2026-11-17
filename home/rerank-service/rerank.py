@@ -1,4 +1,4 @@
-#!/home/user/miniforge3/bin/python3
+#!/home/chris/miniforge3/bin/python3
 """
 Reranker service — cross-encoder for RAG precision.
 

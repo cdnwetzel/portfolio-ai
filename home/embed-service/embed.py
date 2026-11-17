@@ -1,4 +1,4 @@
-#!/home/user/miniforge3/bin/python3
+#!/home/chris/miniforge3/bin/python3
 """
 Embedding service — CPU bge-base-en-v1.5 for the RAG pipeline.
 

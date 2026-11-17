@@ -3,32 +3,27 @@
 # stale root-owned /snapshots leftover that caused the 2026-06-14 outage.
 #
 # Qdrant's binary (/usr/local/bin/qdrant) and its config.yaml (with ABSOLUTE storage/
-# snapshots/temp paths under /home/user/qdrant-data) already live on the box — this
+# snapshots/temp paths under /home/chris/qdrant-data) already live on the box — this
 # script only manages the OpenRC service unit and the one-time cleanup. It does NOT
 # touch the data/collection.
 #
 # Run from the repo root on a machine with SSH access to the T5810.
 # Usage:  ./home/setup-qdrant.sh
-# Env:    T5810_HOST (required; set it in .deploy.env)
+# Env:    T5810_HOST (default root@ai.cwetzel.com)
 set -euo pipefail
-# Operator-local host names and the service user (.deploy.env, gitignored; see .deploy.env.example)
-ENVF="$(cd "$(dirname "$0")/.." && pwd)/.deploy.env"; [ -f "$ENVF" ] && . "$ENVF"
 
-T5810="${T5810_HOST:?set T5810_HOST (see .deploy.env.example)}"
-SVC_USER="${SVC_USER:-user}"
-# The units name a generic `user`; install them for the real service user.
-localize() { SVC_USER="$SVC_USER" perl -pe 's#/home/user(?=/|\b)#/home/$ENV{SVC_USER}#g; s#\buser:user\b#$ENV{SVC_USER}:$ENV{SVC_USER}#g; s#(_USER:=)user\}#$1$ENV{SVC_USER}}#g' "$1"; }
+T5810="${T5810_HOST:-root@ai.cwetzel.com}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 
 echo "==> Installing /etc/init.d/qdrant"
-localize "${HERE}/qdrant/qdrant.openrc" | ssh "${T5810}" "cat > /tmp/qdrant.openrc"
+scp -q "${HERE}/qdrant/qdrant.openrc" "${T5810}:/tmp/qdrant.openrc"
 ssh "${T5810}" '
   set -e
   cp /tmp/qdrant.openrc /etc/init.d/qdrant && chmod 755 /etc/init.d/qdrant
   rc-update add qdrant default 2>/dev/null || true
 
   # One-time cleanup of the stale ROOT-owned /snapshots that latched Qdrant off.
-  # With the new unit CWD is /home/user/qdrant-data, so this can no longer be
+  # With the new unit CWD is /home/chris/qdrant-data, so this can no longer be
   # recreated. Only remove it if it is empty and root-owned (never touch real data).
   if [ -d /snapshots ]; then
     owner=$(stat -c %U /snapshots)
@@ -53,4 +48,4 @@ ssh "${T5810}" '
   echo -n "  collection: "; curl -sf http://127.0.0.1:6333/collections/documents | head -c 300 || echo UNREACHABLE
   echo
 '
-echo "==> Done. Qdrant unit installed; expect cwd=/home/user/qdrant-data and green collection with points_count > 0."
+echo "==> Done. Qdrant unit installed; expect cwd=/home/chris/qdrant-data and green collection with points_count > 0."

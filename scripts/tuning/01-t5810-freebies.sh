@@ -14,8 +14,7 @@
 # Rollback: sudo ./01-t5810-freebies.sh --rollback   (also undone by a reboot)
 set -uo pipefail
 
-OPHOME="/home/${SUDO_USER:-${USER:-user}}"   # the operator's home, also under sudo
-LOGDIR=${OPHOME}/tuning-logs; mkdir -p "$LOGDIR"
+LOGDIR=/home/chris/tuning-logs; mkdir -p "$LOGDIR"
 LOG="$LOGDIR/01-t5810-freebies-$(date +%Y%m%d-%H%M%S).log"
 ln -sfn "$LOG" "$LOGDIR/01-latest.log"
 exec > >(tee -a "$LOG") 2>&1

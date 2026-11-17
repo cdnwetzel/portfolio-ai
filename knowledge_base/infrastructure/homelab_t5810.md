@@ -162,7 +162,7 @@ Measured on this hardware, not inherited defaults:
 ### Qdrant Vector Database
 - **Service name:** `qdrant` (OpenRC)
 - **Port:** 6333 (LAN only)
-- **Storage:** `/home/user/qdrant-data/`
+- **Storage:** `/home/chris/qdrant-data/`
 - **Collection:** `documents` — 768-dim cosine similarity vectors
 - **Content:** ~100 chunks indexed from case studies, resume, infrastructure notes and posts
 

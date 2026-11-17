@@ -11,12 +11,10 @@
 #
 # Run from the repo root on a machine with SSH access to the VPS.
 # Usage:  ./cloud/setup-health-monitor.sh
-# Env:    CLOUD_HOST (default root@web.example.net)
+# Env:    CLOUD_HOST (default root@cwetzel.com)
 set -euo pipefail
-# Operator-local host names and the service user (.deploy.env, gitignored; see .deploy.env.example)
-ENVF="$(cd "$(dirname "$0")/.." && pwd)/.deploy.env"; [ -f "$ENVF" ] && . "$ENVF"
 
-CLOUD="${CLOUD_HOST:?set CLOUD_HOST (see .deploy.env.example)}"
+CLOUD="${CLOUD_HOST:-root@cwetzel.com}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 REPO="$(cd "${HERE}/.." && pwd)"
 DIR="/opt/portfolio-health"

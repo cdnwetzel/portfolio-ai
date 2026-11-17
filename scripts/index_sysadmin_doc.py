@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/home/chris/miniforge3/bin/python3
 """
 Index linux_sysadmin_background.md to Qdrant.
 Uses embed service on port 8005 for embeddings.

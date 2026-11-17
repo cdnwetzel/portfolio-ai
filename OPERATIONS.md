@@ -144,17 +144,17 @@ experiment: [`plans/ups-sizing-2026-09-01.md`](plans/ups-sizing-2026-09-01.md).
 
 ```bash
 # Quick status
-ssh root@web.example.net "systemctl status api-proxy apache2 portfolio-ai-tunnel"
+ssh root@cwetzel.com "systemctl status api-proxy apache2 portfolio-ai-tunnel"
 
 # Port status
-ssh root@web.example.net "ss -tlnp | grep -E ':(8000|80|443)'"
+ssh root@cwetzel.com "ss -tlnp | grep -E ':(8000|80|443)'"
 ```
 
 ### Check vLLM connectivity
 
 ```bash
 # From cwetzel.com
-ssh root@web.example.net "curl -s http://jump.example.net:8004/v1/models | head -c 100"
+ssh root@cwetzel.com "curl -s http://ai.cwetzel.com:8004/v1/models | head -c 100"
 
 # From T5810 (for debugging)
 ssh root@t5810.local "curl -s http://localhost:8004/v1/models | head -c 100"
@@ -164,20 +164,20 @@ ssh root@t5810.local "curl -s http://localhost:8004/v1/models | head -c 100"
 
 ```bash
 # Tunnel process
-ssh root@web.example.net "ps aux | grep ssh | grep -v grep | grep tunnel"
+ssh root@cwetzel.com "ps aux | grep ssh | grep -v grep | grep tunnel"
 
 # Tunnel logs (last 20 lines)
-ssh root@web.example.net "journalctl -u portfolio-ai-tunnel -n 20 --no-pager"
+ssh root@cwetzel.com "journalctl -u portfolio-ai-tunnel -n 20 --no-pager"
 ```
 
 ### Check proxy logs
 
 ```bash
 # Real-time FastAPI logs
-ssh root@web.example.net "journalctl -u api-proxy -f"
+ssh root@cwetzel.com "journalctl -u api-proxy -f"
 
 # Real-time Apache logs
-ssh root@web.example.net "tail -f /var/log/apache2/access.log"
+ssh root@cwetzel.com "tail -f /var/log/apache2/access.log"
 ```
 
 ---
@@ -227,10 +227,10 @@ second, public-path vantage.
 ./cloud/setup-health-monitor.sh
 
 # One-off manual probe (prints per-service status; exit 1 if any CRITICAL):
-ssh root@web.example.net "cd /opt/portfolio-health && python3 health_aggregate.py"
+ssh root@cwetzel.com "cd /opt/portfolio-health && python3 health_aggregate.py"
 
 # Monitor logs:
-ssh root@web.example.net "journalctl -u portfolio-health.service -n 30 --no-pager"
+ssh root@cwetzel.com "journalctl -u portfolio-health.service -n 30 --no-pager"
 
 # Install the durable Qdrant unit on the T5810 (see runbook below):
 ./home/setup-qdrant.sh
@@ -244,22 +244,22 @@ ssh root@web.example.net "journalctl -u portfolio-health.service -n 30 --no-page
 
 ```bash
 # FastAPI proxy
-ssh root@web.example.net "systemctl restart api-proxy"
+ssh root@cwetzel.com "systemctl restart api-proxy"
 
 # Apache
-ssh root@web.example.net "systemctl restart apache2"
+ssh root@cwetzel.com "systemctl restart apache2"
 
 # SSH tunnel
-ssh root@web.example.net "systemctl restart portfolio-ai-tunnel"
+ssh root@cwetzel.com "systemctl restart portfolio-ai-tunnel"
 ```
 
 ### Full stack restart (if needed)
 
 ```bash
-ssh root@web.example.net "systemctl restart portfolio-ai-tunnel api-proxy apache2"
+ssh root@cwetzel.com "systemctl restart portfolio-ai-tunnel api-proxy apache2"
 sleep 5
 # Verify
-ssh root@web.example.net "systemctl status api-proxy apache2 portfolio-ai-tunnel"
+ssh root@cwetzel.com "systemctl status api-proxy apache2 portfolio-ai-tunnel"
 ```
 
 ---
@@ -276,7 +276,7 @@ ssh root@web.example.net "systemctl status api-proxy apache2 portfolio-ai-tunnel
 
 ```bash
 # cwetzel.com (1 core, 1GB RAM)
-ssh root@web.example.net "uptime && free -h"
+ssh root@cwetzel.com "uptime && free -h"
 
 # T5810 (44 cores, lots of RAM)
 ssh root@t5810.local "uptime && nvidia-smi --query-gpu=index,memory.used,memory.total --format=csv"
@@ -285,7 +285,7 @@ ssh root@t5810.local "uptime && nvidia-smi --query-gpu=index,memory.used,memory.
 ### Tunnel health
 
 ```bash
-ssh root@web.example.net "journalctl -u portfolio-ai-tunnel --since='1 hour ago' | grep -i 'error\|fail' || echo 'No errors in last hour'"
+ssh root@cwetzel.com "journalctl -u portfolio-ai-tunnel --since='1 hour ago' | grep -i 'error\|fail' || echo 'No errors in last hour'"
 ```
 
 ---
@@ -296,24 +296,24 @@ ssh root@web.example.net "journalctl -u portfolio-ai-tunnel --since='1 hour ago'
 
 ```bash
 # Check Apache vhost
-ssh root@web.example.net "apache2ctl configtest"
-ssh root@web.example.net "ls -la /var/www/dev.cwetzel.com/"
+ssh root@cwetzel.com "apache2ctl configtest"
+ssh root@cwetzel.com "ls -la /var/www/dev.cwetzel.com/"
 
 # Check SSL cert
-ssh root@web.example.net "openssl s_client -connect dev.cwetzel.com:443 -brief"
+ssh root@cwetzel.com "openssl s_client -connect dev.cwetzel.com:443 -brief"
 ```
 
 ### Chat not responding
 
 ```bash
 # Check FastAPI health
-ssh root@web.example.net "curl -s http://127.0.0.1:8000/health"
+ssh root@cwetzel.com "curl -s http://127.0.0.1:8000/health"
 
 # Check vLLM via tunnel
-ssh root@web.example.net "curl -s -m 5 http://jump.example.net:8004/v1/models | head -c 50"
+ssh root@cwetzel.com "curl -s -m 5 http://ai.cwetzel.com:8004/v1/models | head -c 50"
 
 # Check tunnel connectivity
-ssh root@web.example.net "journalctl -u portfolio-ai-tunnel -n 5 --no-pager"
+ssh root@cwetzel.com "journalctl -u portfolio-ai-tunnel -n 5 --no-pager"
 ```
 
 ### Every query answers "I don't have that documented" (Qdrant latched off — 2026-06-14 outage class)
@@ -323,16 +323,16 @@ almost always retrieval returning empty — usually Qdrant down or serving 0 poi
 
 ```bash
 # 1. Confirm which stage is broken (from the VPS, through the tunnel):
-ssh root@web.example.net "cd /opt/portfolio-health && python3 health_aggregate.py"
+ssh root@cwetzel.com "cd /opt/portfolio-health && python3 health_aggregate.py"
 #    Look for: [CRITICAL] Qdrant unreachable  OR  points_count=0
 
 # 2. On the T5810, inspect + recover Qdrant:
-ssh root@jump.example.net "tail -n 30 /var/log/qdrant.log"     # look for PermissionDenied on ./snapshots
-ssh root@jump.example.net "rc-service qdrant status"
-ssh root@jump.example.net "rc-service qdrant zap && rc-service qdrant start"   # zap clears a crashed/latched state
+ssh root@ai.cwetzel.com "tail -n 30 /var/log/qdrant.log"     # look for PermissionDenied on ./snapshots
+ssh root@ai.cwetzel.com "rc-service qdrant status"
+ssh root@ai.cwetzel.com "rc-service qdrant zap && rc-service qdrant start"   # zap clears a crashed/latched state
 
 # 3. Verify it came back green with points:
-ssh root@jump.example.net "curl -s http://127.0.0.1:6333/collections/documents | head -c 300"
+ssh root@ai.cwetzel.com "curl -s http://127.0.0.1:6333/collections/documents | head -c 300"
 #    Expect: status:green, points_count > 0
 
 # 4. If it crash-loops on a PermissionDenied for ./snapshots/tmp, the OLD init bug is present.
@@ -343,7 +343,7 @@ ssh root@jump.example.net "curl -s http://127.0.0.1:6333/collections/documents |
 ./scripts/reindex_kb.sh
 ```
 
-The durable fix (`home/qdrant/qdrant.openrc`) sets the daemon's CWD to `/home/user/qdrant-data`
+The durable fix (`home/qdrant/qdrant.openrc`) sets the daemon's CWD to `/home/chris/qdrant-data`
 so its relative `./snapshots` cleanup can never again hit the root-owned `/snapshots`, and uses
 `output_log`/`error_log` instead of a shell redirect passed as bogus argv.
 
@@ -357,7 +357,7 @@ ssh root@t5810.local "nvidia-smi"
 ssh root@t5810.local "uptime"
 
 # Check network between cwetzel.com and T5810
-ssh root@web.example.net "ping -c 1 203.0.113.95"
+ssh root@cwetzel.com "ping -c 1 98.110.86.95"
 ```
 
 ---
@@ -416,7 +416,7 @@ This section defines what "green across the board" actually means, and how to te
 Runs every 5 minutes on VPS. **Limitation:** Can't always reach verifier via tunnel, but that doesn't mean it's broken.
 
 ```bash
-ssh root@web.example.net "journalctl -u portfolio-health.service -n 1 --no-pager | grep -E 'OK|INFO|CRITICAL'"
+ssh root@cwetzel.com "journalctl -u portfolio-health.service -n 1 --no-pager | grep -E 'OK|INFO|CRITICAL'"
 ```
 
 **What GREEN looks like:**
@@ -427,7 +427,7 @@ ssh root@web.example.net "journalctl -u portfolio-health.service -n 1 --no-pager
 - Rerank: OK ✓
 - Verifier: OK or INFO (both acceptable) ✓
 
-**Known false positive:** Verifier shows INFO="unreachable" even when working. Reason: service only listens on LAN IP (192.0.2.115), not routable via tunnel. **Ignore if E2E chat works.**
+**Known false positive:** Verifier shows INFO="unreachable" even when working. Reason: service only listens on LAN IP (10.0.1.115), not routable via tunnel. **Ignore if E2E chat works.**
 
 #### Layer 2: E2E Chat Test (The Real Test)
 This is the truth. If the chat works end-to-end, the system is working, period.
@@ -478,7 +478,7 @@ Run this to declare the system healthy:
 
 ```bash
 # 1. VPS aggregator (should see all OK)
-ssh root@web.example.net "journalctl -u portfolio-health.service -n 1 --no-pager | tail -8"
+ssh root@cwetzel.com "journalctl -u portfolio-health.service -n 1 --no-pager | tail -8"
 
 # 2. E2E chat (run 3 tests, all should succeed)
 python3 scripts/selftest.py --url "wss://dev.cwetzel.com/ws/chat"

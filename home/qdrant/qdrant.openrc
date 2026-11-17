@@ -22,15 +22,15 @@ name="Qdrant"
 description="Qdrant vector database (RAG retrieval for the portfolio AI chat)"
 
 command="/usr/local/bin/qdrant"
-command_args="--config-path /home/user/qdrant-data/config.yaml"
-command_user="user:user"
+command_args="--config-path /home/chris/qdrant-data/config.yaml"
+command_user="chris:chris"
 supervisor="supervise-daemon"
 pidfile="/run/qdrant.pid"
 
 # CWD for the daemon. supervise-daemon honors this as --chdir, so any relative path
 # Qdrant touches (e.g. its snapshots temp cleanup) resolves UNDER the chris-owned data
 # dir, never against "/". This is the core fix for the 2026-06-14 outage.
-directory="/home/user/qdrant-data"
+directory="/home/chris/qdrant-data"
 
 # Correct logging mechanism (NOT a redirect inside command_args).
 output_log="/var/log/qdrant.log"
@@ -55,7 +55,7 @@ start_pre() {
     # replacing the old raw mkdir/chown). Paths match config.yaml's absolute storage_path
     # and snapshots_path. With the CWD fix above, the stale root-owned /snapshots can no
     # longer be recreated.
-    checkpath -d -o user:user /home/user/qdrant-data/storage
-    checkpath -d -o user:user /home/user/qdrant-data/snapshots
-    checkpath -f -m 0644 -o user:user /var/log/qdrant.log
+    checkpath -d -o chris:chris /home/chris/qdrant-data/storage
+    checkpath -d -o chris:chris /home/chris/qdrant-data/snapshots
+    checkpath -f -m 0644 -o chris:chris /var/log/qdrant.log
 }

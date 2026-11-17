@@ -36,7 +36,7 @@
 ### 6. NEVER index private contact information in the knowledge base
 **Consequence:** PII exposed to every anonymous visitor, privacy violation, reputational damage  
 **Enforcement:** KB review before every reindex; the golden set's `no_pii` questions gate phone-number leaks in answers  
-**Documented exception:** the contact email in `knowledge_base/RESUME.md` (`chris@cwetzel.com`) is indexed **intentionally** — it is public contact info (this site's own landing page) and the right vector for professional inquiries. Policy: public contact info may be indexed; phone numbers, SSNs, private addresses, and any third party's personal data may not. If any PII is indexed, this entry must document why.
+**Documented exception:** the contact emails in `knowledge_base/RESUME.md` (`cwe@thepslawfirm.com`, `chris@cwetzel.com`) are indexed **intentionally** — they are public contact info (firm staff directory, this site's own landing page) and the right vector for professional inquiries. Policy: public contact info may be indexed; phone numbers, SSNs, private addresses, and any third party's personal data may not. If any PII is indexed, this entry must document why.
 
 ---
 

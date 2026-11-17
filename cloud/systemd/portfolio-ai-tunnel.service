@@ -19,8 +19,8 @@ User=root
 # api-proxy unit makes the proxy's fire-and-forget /verify reach asrock.
 #
 # Per-machine config lives in /etc/default/portfolio-ai-tunnel (NOT in the repo):
-#   T5810_USER=user
-#   T5810_HOST=jump.example.net    # DNS preferred over a raw IP; survives dynamic-IP rotation
+#   T5810_USER=chris
+#   T5810_HOST=ai.cwetzel.com    # DNS preferred over a raw IP; survives Verizon dynamic-IP rotation
 #   VERIFIER_HOST=<asrock-lan-ip>  # asrock's LAN address, as resolved FROM the T5810
 # Create the file on the VPS once with all three set, then
 # `systemctl daemon-reload && systemctl restart portfolio-ai-tunnel.service`.

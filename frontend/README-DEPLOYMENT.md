@@ -59,7 +59,7 @@ npm run dev
 
 ```bash
 # From project root
-rsync -avz --delete frontend/dist/ root@web.example.net:/var/www/dev.cwetzel.com/
+rsync -avz --delete frontend/dist/ root@cwetzel.com:/var/www/dev.cwetzel.com/
 ```
 
 This:

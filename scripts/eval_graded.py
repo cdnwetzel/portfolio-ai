@@ -26,7 +26,7 @@ localhost (port 11434). Port 8007 is the verifier's own FastAPI service — it s
 Ollama over the jump host, and pick a LOCAL port that is not already serving your own Ollama —
 otherwise you will silently grade against the wrong model and call it a baseline:
 
-    ssh -f -N -J root@jump.example.net -L 11500:127.0.0.1:11434 chris@<verifier-host>
+    ssh -f -N -J root@ai.cwetzel.com -L 11500:127.0.0.1:11434 chris@<verifier-host>
 
 Usage:
     python3 scripts/eval_graded.py --url wss://dev.cwetzel.com/ws/chat

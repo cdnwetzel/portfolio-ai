@@ -1,0 +1,58 @@
+:root {
+  --bg: #101216;
+  --wall: #4a4f57;
+  --wall-dark: #2b2f35;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(circle at 50% 30%, #1a1d24, var(--bg) 70%);
+  color: #d7dade;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+.app {
+  text-align: center;
+}
+
+h1 {
+  margin: 0 0 4px;
+  font-size: 28px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+}
+
+.hint {
+  margin: 0 0 18px;
+  font-size: 14px;
+  color: #8b909a;
+}
+
+/* The wall surrounding the 400x400 playground */
+.walls {
+  display: inline-block;
+  padding: 10px;
+  border-radius: 8px;
+  background: linear-gradient(160deg, #5a6069, var(--wall) 40%, var(--wall-dark));
+  box-shadow:
+    0 12px 30px rgba(0, 0, 0, 0.55),
+    inset 0 2px 4px rgba(255, 255, 255, 0.12),
+    inset 0 -3px 6px rgba(0, 0, 0, 0.4);
+}
+
+#playground {
+  display: block;
+  width: 400px;
+  height: 400px;
+  background: linear-gradient(#0c0e11, #14171c);
+  cursor: crosshair;
+  user-select: none;
+}

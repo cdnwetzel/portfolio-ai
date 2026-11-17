@@ -9,8 +9,7 @@
 #         sudo ./02c-t5810-soak.sh 165 10
 set -uo pipefail
 PL="${1:-165}"; MINS="${2:-10}"
-OPHOME="/home/${SUDO_USER:-${USER:-user}}"   # the operator's home, also under sudo
-LOGDIR=${OPHOME}/tuning-logs; mkdir -p "$LOGDIR"
+LOGDIR=/home/chris/tuning-logs; mkdir -p "$LOGDIR"
 LOG="$LOGDIR/02c-soak-${PL}W-$(date +%Y%m%d-%H%M%S).log"
 ln -sfn "$LOG" "$LOGDIR/02c-latest.log"
 exec > >(tee -a "$LOG") 2>&1
@@ -50,4 +49,4 @@ done
 echo
 echo "$SUM $N $MAXT" | awk '{printf "RESULT: mean %.2f tok/s over %d requests, peak temp %dC\n",$1/$2,$2,$3}'
 echo "PASS if: mean held near the burst figure, clocks did NOT drift down, peak < 78C."
-echo "Still NOT persistent. Revert: sudo ${OPHOME}/tuning/02-t5810-power-stepup.sh --rollback"
+echo "Still NOT persistent. Revert: sudo /home/chris/tuning/02-t5810-power-stepup.sh --rollback"

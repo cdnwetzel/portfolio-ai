@@ -44,7 +44,7 @@ Recruiters want to understand a candidate's technical depth in **seconds**, not 
 | **First Token Latency** | < 200ms | Measure p50 + p99 in production |
 | **Throughput** | > 100 tok/sec (batched) | vLLM metrics endpoint |
 | **GPU Utilization** | 70–85% | nvidia-smi during peak load |
-| **WireGuard Latency** | < 50ms ping | ping 203.0.113.1 from cloud |
+| **WireGuard Latency** | < 50ms ping | ping 10.0.0.1 from cloud |
 
 ### Reliability
 | Metric | Target | Method |

@@ -7,7 +7,7 @@ embedder on the T5810 in a home office, plus a GPU reranker and a faithfulness v
 asrock B550.
 
 > **Ground truth for the fleet lives on the T5810**, not here:
-> `/home/user/ai/inference/FLEET-ENDPOINTS.md` (topology, port contracts) and
+> `/home/chris/ai/inference/FLEET-ENDPOINTS.md` (topology, port contracts) and
 > `MODEL-LEDGER.md` (which model holds which role, and why). This file describes how *cwdotcom*
 > uses that fleet. When the two disagree, those files win — they are edited by the person
 > changing the hardware. See also `plans/fleet-assessment-2026-08-30.md` for a verified snapshot.
@@ -412,7 +412,7 @@ QDRANT_PORT=6333
 ```bash
 # Reranker (Tier 3: moved from T5810 CPU → RTX 5060 Ti GPU, 15.8x faster)
 RERANK_DEVICE=cuda
-RERANK_BIND=192.0.2.115            # LAN IP; tunneled to VPS as port 8016
+RERANK_BIND=10.0.1.115            # LAN IP; tunneled to VPS as port 8016
 RERANK_PORT=8006
 
 # Faithfulness verifier (Tier 2: 14B-Instruct judge, RTX 5060 Ti)
@@ -463,8 +463,8 @@ measured*. The same rule killed the golden-set size in the KB, which had drifted
 
 **The knowledge base must not contain real internal IP addresses.** Public hostnames are fine.
 
-**PII policy (red-lines.md #6):** the contact email in the KB (`chris@cwetzel.com`
-in `RESUME.md`) is indexed **intentionally** — public contact info, the
+**PII policy (red-lines.md #6):** the contact emails in the KB (`cwe@thepslawfirm.com`,
+`chris@cwetzel.com` in `RESUME.md`) are indexed **intentionally** — public contact info, the
 right vector for professional inquiries. Phone numbers, SSNs, private addresses and any third
 party's personal data are excluded. If PII is ever indexed, the red-line must document why.
 
@@ -578,7 +578,7 @@ worth remembering:
   carry specifics found on neither source (plan §6). Guards: `tests/test_kb_content.py`.
   Plan, evidence and before/after protocol: `plans/kb-answer-quality-fixes-2026-11.md`.
   **Status: reindexed 2026-11-07** (authorized): 39 docs / 110 chunks, 0 context-doc chunks.
-  `./scripts/reindex_kb.sh` cannot run from the T5810 itself (it SSHes to root@jump.example.net
+  `./scripts/reindex_kb.sh` cannot run from the T5810 itself (it SSHes to root@ai.cwetzel.com
   and there is no root key), so the indexer was run directly with the same arguments. The VPS
   drop-in `api-proxy.service.d/system-info.conf` now says KB_DOC_COUNT=39; it is a hand-set
   number, so update it on every reindex that changes the doc count.

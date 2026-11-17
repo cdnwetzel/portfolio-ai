@@ -19,9 +19,9 @@ chown apiproxy:apiproxy /opt/api-proxy /var/log/api-proxy
 cp api-proxy.py /opt/api-proxy/main.py
 chown apiproxy:apiproxy /opt/api-proxy/main.py
 
-# Setup hostname resolution for jump.example.net
-if ! grep -q "jump.example.net" /etc/hosts; then
-    echo "127.0.0.1 jump.example.net" >> /etc/hosts
+# Setup hostname resolution for ai.cwetzel.com
+if ! grep -q "ai.cwetzel.com" /etc/hosts; then
+    echo "127.0.0.1 ai.cwetzel.com" >> /etc/hosts
 fi
 
 # === FastAPI Systemd Service ===
@@ -51,7 +51,7 @@ EOF
 echo "=== SSL Setup ==="
 if [ ! -f /etc/letsencrypt/live/dev.cwetzel.com/fullchain.pem ]; then
     echo "Issuing SSL cert for dev.cwetzel.com..."
-    certbot certonly --standalone -d dev.cwetzel.com --non-interactive --agree-tos -m chris@cwetzel.com --no-eff-email
+    certbot certonly --standalone -d dev.cwetzel.com --non-interactive --agree-tos -m cwe@thepslawfirm.com --no-eff-email
 else
     echo "SSL cert already exists"
 fi
@@ -159,5 +159,5 @@ netstat -tlnp 2>/dev/null | grep -E ':(80|443|8000)' || ss -tlnp 2>/dev/null | g
 echo ""
 echo "✓ Apache proxy setup complete"
 echo "  Frontend: https://dev.cwetzel.com (serve React here)"
-echo "  API: /api/* → localhost:8000 → jump.example.net (via SSH tunnel)"
+echo "  API: /api/* → localhost:8000 → ai.cwetzel.com (via SSH tunnel)"
 echo "  WebSocket: /ws/* → ws://localhost:8000 (via SSH tunnel)"

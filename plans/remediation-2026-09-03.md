@@ -138,7 +138,7 @@ VPS timer covering it. `weekly_verifier_digest.sh` has never run either.
 - [ ] `FLEET-ENDPOINTS.md` D1 and D3 — both verified correct: the reranker row says CPU and
       implies the T5810 (it is CUDA on the asrock), and the tunnel list omits `8007` and
       `8016`, the two forwards that make RAG work. **T5810-owned file, not this repo's**
-- [ ] Orphan venv `/home/user/vllm-serve-env-0.27.1` (7.7 GB, nothing references it).
+- [ ] Orphan venv `/home/chris/vllm-serve-env-0.27.1` (7.7 GB, nothing references it).
       **Do this separately from P0.1** so a surprise is attributable to one change
 
 ---

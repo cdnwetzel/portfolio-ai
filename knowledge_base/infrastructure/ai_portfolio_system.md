@@ -2,7 +2,7 @@
 
 ## At a Glance
 
-Portfolio AI (dev.cwetzel.com) is a self-hosted, full-stack Retrieval-Augmented Generation platform serving a personalized digital twin of my work. It runs on a secure, low-latency hybrid-cloud topology: **Apache** on an edge VPS terminates SSL/WSS and proxies traffic through an encrypted **SSH tunnel that the VPS opens** to a bare-metal **Gentoo Linux** home server (ordinary local port forwards, `ssh -L`) — zero cloud compute cost. Inference is served by **vLLM** running **Qwen3.8-27B-FP8** with **tensor parallelism across an NVLink-bridged dual RTX A4500** GPU array. A custom **FastAPI** backend manages a 24K-character sliding-window context history, streams tokens over **WebSocket**, and grounds every response in a **Qdrant** vector database — **bge-base-en-v1.5 (768-d) cosine retrieval, reranked by a bge-reranker-base cross-encoder** running on a *separate machine*, the asrock B550's RTX 5060 Ti — with an out-of-band faithfulness verifier on that same separate machine independently scoring each answer's grounding.
+Portfolio AI (dev.cwetzel.com) is a self-hosted, full-stack Retrieval-Augmented Generation platform serving a personalized digital twin of my work. It runs on a secure, low-latency hybrid-cloud topology: **Apache** on an edge VPS terminates SSL/WSS and proxies traffic through an encrypted **SSH tunnel that the VPS opens** to a bare-metal **Gentoo Linux** home server (ordinary local port forwards, `ssh -L`) — zero cloud compute cost. Inference is served by **vLLM** running **Qwen3.8-27B-FP8** with **tensor parallelism across a dual RTX A4500 GPU array** (PCIe; the A4500 has no NVLink — corrected 2026-11-16 after the link was measured at Gen3@x16 under load). A custom **FastAPI** backend manages a 24K-character sliding-window context history, streams tokens over **WebSocket**, and grounds every response in a **Qdrant** vector database — **bge-base-en-v1.5 (768-d) cosine retrieval, reranked by a bge-reranker-base cross-encoder** running on a *separate machine*, the asrock B550's RTX 5060 Ti — with an out-of-band faithfulness verifier on that same separate machine independently scoring each answer's grounding.
 
 ---
 
@@ -172,7 +172,7 @@ Comparable cloud GPU inference (2× A4500 equivalent) would cost $3-5/hour. At m
 
 **Why RAG over fine-tuning:** A LoRA adapter was previously trained on a Python code corpus as an experiment. It was a code-completion adapter, not biographical. For factual Q&A about my experience, RAG with structured KB documents gives more accurate, citable answers than fine-tuning on narrative text. The LoRA is not loaded in production.
 
-**Why owned hardware over cloud GPU:** At moderate usage, an A4500 NVLink pair pays for itself in months vs. cloud GPU rental. More importantly, it's a portfolio signal in itself — the infrastructure is the demonstration.
+**Why owned hardware over cloud GPU:** At moderate usage, an A4500 pair pays for itself in months vs. cloud GPU rental. More importantly, it's a portfolio signal in itself — the infrastructure is the demonstration.
 
 ---
 
@@ -184,7 +184,7 @@ Comparable cloud GPU inference (2× A4500 equivalent) would cost $3-5/hour. At m
 | Model creator | Alibaba Cloud |
 | Inference engine | vLLM 0.27.1 |
 | Serving host | Dell Precision T5810, Gentoo Linux |
-| GPU layout | 2× NVIDIA RTX A4500 20 GB, NVLink (40 GB aggregate) |
+| GPU layout | 2× NVIDIA RTX A4500 20 GB (PCIe; the A4500 has no NVLink) |
 | Tensor parallelism | 2-way across the A4500 pair |
 | Quantization | FP8 weights (~29 GB across 40 GB aggregate VRAM) |
 | Context window | 49,152 tokens served (proxy budgets 14,384 for the prompt) |
@@ -282,7 +282,7 @@ Home-server services bind to the LAN/localhost only. The public VPS reaches them
 | Qdrant | 6333 | T5810 | Dense vector (cosine) search | None — chat stops |
 | Embedding service | 8005 | T5810 | `bge-base-en-v1.5` query/document embeddings | None — chat stops |
 | bge-reranker-base | 8006 | asrock B550 (GPU) | Cross-encoder reranking of the top-15 candidates | Cosine order, at most two chunks per source doc |
-| Faithfulness verifier | 8007 | asrock B550 | Out-of-band claim-level faithfulness scoring | Chat unaffected — verdicts pause (fail-open) |
+| Faithfulness verifier | 8007 **on the asrock side** (from the VPS: 127.0.0.1:8007 via tunnel) | asrock B550 | Out-of-band claim-level faithfulness scoring | Chat unaffected — verdicts pause (fail-open) |
 | SSH tunnel | 8004/6333/8005 to T5810; 8016→asrock:8006, 8007→asrock | VPS → T5810 (→ asrock) | Secure VPS↔home link | None — services unreachable from public internet |
 
 ---

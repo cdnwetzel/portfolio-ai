@@ -431,8 +431,8 @@ and silently never executing", which is worse because it reads as done.
 
 | | |
 |---|---|
-| live DB | `/home/user/verifier/verdicts.db`, 1.66 MB, mtime today |
-| backups directory | `/home/user/verifier/backups/` |
+| live DB | `/home/chris/verifier/verdicts.db`, 1.66 MB, mtime today |
+| backups directory | `/home/chris/verifier/backups/` |
 | backups in it | **exactly one**, `verdicts-20260806T011520Z.db`, **2026-08-06** — 27 days stale |
 | **cron daemon on the asrock** | **none installed** (`cronie` and `dcron` both absent) |
 | root crontab / `/etc/cron.d` entries | none |
@@ -489,7 +489,7 @@ monitoring was blind)
 **Was:** the judge's timeout handling lived in a wrapper script under `/tmp` — critical-path
 behaviour in a directory that does not survive a reboot.
 **Verified resolved:** `/etc/init.d/verifier-service` runs
-`/home/user/miniforge3/bin/python3 /opt/verifier-service/verifier.py` directly — no wrapper,
+`/home/chris/miniforge3/bin/python3 /opt/verifier-service/verifier.py` directly — no wrapper,
 nothing in `/tmp`. The timeout is a first-class setting in the service code
 (`JUDGE_TIMEOUT`, default 120 s, `verifier.py:72`), applied to the httpx client at
 `verifier.py:155`. The unit is supervised with `respawn_max=0` and an `output_log`.
@@ -717,7 +717,7 @@ so that doesn't happen again.
 1. `/etc/default/portfolio-ai-tunnel` (VPS) had no `VERIFIER_HOST` — the tunnel unit's
    `-L 127.0.0.1:8007:${VERIFIER_HOST}:8007` expanded empty; 8007 listened but dead-ended.
 2. No systemd drop-in set `VERIFIER_URL` for api-proxy — `_fire_verify` no-ops without it.
-**Fix (Kimi, 2026-08-06):** added `VERIFIER_HOST=192.0.2.115` (env file backed up first),
+**Fix (Kimi, 2026-08-06):** added `VERIFIER_HOST=10.0.1.115` (env file backed up first),
 restarted tunnel — 8007 health OK; added `api-proxy.service.d/verifier.conf` with
 `VERIFIER_URL=http://127.0.0.1:8007`, restarted proxy. E2E proof: live chat → verdict row
 with request_id landed in verdicts.db (faithfulness 1.0, latency 22.2s).

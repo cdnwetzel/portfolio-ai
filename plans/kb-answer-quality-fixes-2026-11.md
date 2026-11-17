@@ -45,7 +45,7 @@ Rates are from the battery (bad-probe hits / 3). File:line refers to the pre-fix
 | **F8** | pxx has **690 tests** | — | `pxx_project.md:100,120,136`, June figure | **1,863** (`pytest --collect-only` on a clean clone of the public repo, v2.9.3 at 5be59d5, 2026-11-07). An earlier 1,008 came from a stale local copy (`~/ai/pxx`, v1.3.4) and was wrong |
 | — | (no answer seen) | — | the tunnel-paragraph said ports `8004/6333/8005/8006` resolve to `127.0.0.1`, and the diagram hung "rerank 8006, judge 8007" under the T5810 | Fixed: 8016 → asrock:8006 and 8007 → asrock both resolve to the asrock. Found while fixing F3 |
 | — | (no answer seen) | — | reranker-fallback text said "max **one** chunk per document" in two places | `RAG_MAX_PER_DOC=2` applies on both the reranked and fail-open paths (`api-proxy.py:456`). Now says two |
-| — | (no answer seen) | — | "Nothing on either home server is exposed to the public internet." The T5810's sshd is reachable at jump.example.net, because the tunnel needs it | Now: none of the *services* listens publicly; they're reached through the T5810's sshd (key auth), the one home-side entry point |
+| — | (no answer seen) | — | "Nothing on either home server is exposed to the public internet." The T5810's sshd is reachable at ai.cwetzel.com, because the tunnel needs it | Now: none of the *services* listens publicly; they're reached through the T5810's sshd (key auth), the one home-side entry point |
 
 ### Not fixed in this batch
 
@@ -90,7 +90,7 @@ from `/api/system-info` afterwards rather than predicting it.
 4. **Re-measure, same instruments, same order:**
    ```bash
    python3 scripts/kb_battery.py post 3
-   python3 -u scripts/eval_graded.py --judge-url http://192.0.2.115:11434/v1/chat/completions \
+   python3 -u scripts/eval_graded.py --judge-url http://10.0.1.115:11434/v1/chat/completions \
        --judge-model qwen2.5:14b-instruct-q4_k_m --out eval/results/kbfix-20261104.jsonl
    python3 scripts/repeat_sample.py -n 5
    ```
@@ -261,7 +261,7 @@ repeats any of them. Once Chris answers, the fix is one of two:
 
 Chris pointed out there are two sources for the site, the repo and what's actually running, so
 group B was re-checked live:
-- the running tunnel process on the VPS (`ssh -N -L … chris@jump.example.net`)
+- the running tunnel process on the VPS (`ssh -N -L … chris@ai.cwetzel.com`)
 - the deployed `/opt/api-proxy/main.py`, which is md5-identical to `cloud/api-proxy.py`
 - the verifier's `/health` (`qwen2.5:14b-instruct`) and the `/v1/models` lists on 8004 and 8007
 - `ss -ltn` on the T5810

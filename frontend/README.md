@@ -32,7 +32,7 @@ Opens http://localhost:5173 (proxies /api and /ws to localhost:8000)
 
 ```bash
 npm run build
-scp -r dist/* root@web.example.net:/var/www/dev.cwetzel.com/
+scp -r dist/* root@cwetzel.com:/var/www/dev.cwetzel.com/
 ```
 
 ## Features

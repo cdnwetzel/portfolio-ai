@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Inside — how this site runs</title>
+  <style>
+    :root {
+      --bg: #101216; --panel: #171a20; --line: #2a2e37;
+      --text: #d7dade; --muted: #8b909a;
+      --ok: #34d399; --degraded: #fbbf24; --unknown: #6b7280; --off: #4b5563;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: radial-gradient(circle at 50% 20%, #161a21, var(--bg) 70%);
+      color: var(--text);
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+      min-height: 100vh; padding: 2rem 1rem;
+    }
+    main { max-width: 720px; margin: 0 auto; }
+    h1 { font-size: 1.4rem; letter-spacing: 0.06em; }
+    p.sub { color: var(--muted); margin: 0.5rem 0 2rem; font-size: 0.92rem; line-height: 1.5; }
+    p.sub a { color: #7aa2f7; }
+    .grid { display: grid; grid-template-columns: 1fr; gap: 0.75rem; }
+    @media (min-width: 560px) { .grid { grid-template-columns: 1fr 1fr; } }
+    .card {
+      background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+      padding: 0.9rem 1rem;
+    }
+    .card .name { font-size: 0.85rem; font-weight: 600; }
+    .card .state { font-size: 0.75rem; margin-top: 0.3rem; display: flex; align-items: center; gap: 0.4rem; }
+    .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+    .state.ok { color: var(--ok); } .dot.ok { background: var(--ok); }
+    .state.degraded { color: var(--degraded); } .dot.degraded { background: var(--degraded); }
+    .state.unknown { color: var(--unknown); } .dot.unknown { background: var(--unknown); }
+    .state.off { color: var(--off); } .dot.off { background: transparent; border: 1px solid var(--off); }
+    .card .detail { font-size: 0.72rem; color: var(--muted); margin-top: 0.35rem; word-break: break-all; }
+    h2 { font-size: 0.95rem; margin: 2rem 0 0.75rem; color: var(--text); }
+    .bars { display: flex; height: 14px; border-radius: 7px; overflow: hidden; border: 1px solid var(--line); }
+    .bars div { height: 100%; }
+    .legend { display: flex; flex-wrap: wrap; gap: 0.9rem; margin-top: 0.6rem; font-size: 0.75rem; color: var(--muted); }
+    .legend span::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 0.35rem; }
+    .meta { margin-top: 1.5rem; font-size: 0.75rem; color: var(--muted); }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Inside this site</h1>
+    <p class="sub">
+      No cloud AI. Every answer is generated at home: this page probes the live
+      components — Apache on a VPS edge, one SSH tunnel, and the home GPU boxes behind it.
+      <a href="https://github.com/cdnwetzel/portfolio-ai">Full architecture in the repo</a>.
+    </p>
+
+    <div class="grid" id="components">
+      <div class="card"><div class="name">Loading…</div></div>
+    </div>
+
+    <h2>Faithfulness checks — last 24h</h2>
+    <p class="sub" style="margin-bottom:0.75rem">
+      After each answer, a separate judge model on a second machine re-reads the claims
+      against the cited sources. It never blocks or alters the answer.
+    </p>
+    <div id="verdicts"><div class="card"><div class="name" style="color:var(--muted)">No data yet.</div></div></div>
+
+    <div class="meta" id="meta"></div>
+  </main>
+
+  <script>
+    // State colors follow the site's fail-open ethos: a component that can't be
+    // probed is gray ("unknown"), never red. The chat keeps working through any
+    // single failure; this page reflects that honestly.
+    const STATE_LABEL = { ok: 'operational', degraded: 'degraded', unknown: 'unreachable', off: 'not configured' }
+    const BUCKETS = [
+      ['lt60',    '#f87171', '<60% grounded'],
+      ['60to80',  '#fbbf24', '60–80%'],
+      ['80to95',  '#a3e635', '80–95%'],
+      ['95plus',  '#34d399', '≥95%'],
+      ['unscored','#6b7280', 'no score'],
+    ]
+
+    async function refresh() {
+      let data
+      try {
+        const r = await fetch('/api/status')
+        if (!r.ok) throw new Error('HTTP ' + r.status)
+        data = await r.json()
+      } catch (e) {
+        document.getElementById('components').innerHTML =
+          '<div class="card"><div class="name">Status unavailable</div>' +
+          '<div class="detail">Could not reach /api/status (' + e.message + '). The chat itself is unaffected.</div></div>'
+        return
+      }
+
+      document.getElementById('components').innerHTML = data.components.map(c => `
+        <div class="card">
+          <div class="name">${c.label}</div>
+          <div class="state ${c.state}"><span class="dot ${c.state}"></span>${STATE_LABEL[c.state] || c.state}</div>
+          ${c.served_model ? `<div class="detail">serving: ${c.served_model}</div>` : ''}
+        </div>`).join('')
+
+      const v = data.verdicts_24h
+      document.getElementById('verdicts').innerHTML = (!v || v.total === 0)
+        ? '<div class="card"><div class="name" style="color:var(--muted)">No verdicts recorded in this window' +
+          (v === null ? ' (judge logging not enabled)' : '') + '.</div></div>'
+        : `<div class="bars">${BUCKETS.map(([k, color]) =>
+            v.buckets[k] ? `<div style="width:${(v.buckets[k] / v.total) * 100}%;background:${color}" title="${v.buckets[k]}"></div>` : ''
+          ).join('')}</div>
+           <div class="legend">${BUCKETS.map(([k, color, label]) =>
+             `<span style="--c:${color};color:var(--muted)"><i style="background:${color};display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:4px"></i>${label}: ${v.buckets[k]}</span>`
+           ).join('')}
+             <span>· ${v.total} checked, ${v.flagged} flagged</span></div>`
+
+      document.getElementById('meta').textContent =
+        'model: ' + data.model + ' · refreshed ' + new Date().toLocaleTimeString() +
+        ' · updates every 30s'
+    }
+
+    refresh()
+    setInterval(refresh, 30000)
+  </script>
+</body>
+</html>

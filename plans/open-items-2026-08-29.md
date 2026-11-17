@@ -100,7 +100,7 @@ fails open to cosine. That is precisely how it went missing the first time and s
 missing long enough to matter.
 **Symptom:** `rc-service rerank-service start` reports "already starting" but never
 brings the port up; `rerank.py` runs fine when launched directly. Logs currently going
-to `/home/user/rerank-service/rerank.log`.
+to `/home/chris/rerank-service/rerank.log`.
 **Likely causes:** a stale pidfile or supervise directory leaving OpenRC believing the
 service is mid-start; or `start-stop-daemon` backgrounding semantics mismatched to how
 `rerank.py` daemonises (needs `--background` / `--make-pidfile`, or the script must not

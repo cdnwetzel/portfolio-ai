@@ -14,13 +14,11 @@
 # Usage:  ./06-ttft-bench.sh              # phases 1+2, no root needed
 #         sudo ./06-ttft-bench.sh --ab    # + phase 3: A/B vs the old 130W/1200 profile
 set -uo pipefail
-export TUNING_DIR="/home/${SUDO_USER:-${USER:-user}}/tuning"
-OPHOME="/home/${SUDO_USER:-${USER:-user}}"   # the operator's home, also under sudo
-LOGDIR=${OPHOME}/tuning-logs; mkdir -p "$LOGDIR"
+LOGDIR=/home/chris/tuning-logs; mkdir -p "$LOGDIR"
 LOG="$LOGDIR/06-ttft-$(date +%Y%m%d-%H%M%S).log"
 ln -sfn "$LOG" "$LOGDIR/06-latest.log"
 exec > >(tee -a "$LOG") 2>&1
-PROBE=${OPHOME}/tuning/ttft_probe.py
+PROBE=/home/chris/tuning/ttft_probe.py
 
 
 # Block until BOTH GPUs cool below $1 C (or $2 seconds elapse). Bursty production
@@ -56,7 +54,7 @@ cool_to 48
 echo "  idle state:"; gpu
 echo "  first request after idle (cold), then immediately again (warm):"
 python3 - <<'PY'
-import sys; import os; sys.path.insert(0, os.environ["TUNING_DIR"])
+import sys; sys.path.insert(0,"/home/chris/tuning")
 from ttft_probe import make_prompt, ttft, ntokens
 p = make_prompt(2048); n = ntokens(p)
 cold = ttft(p, 8)[0]*1000

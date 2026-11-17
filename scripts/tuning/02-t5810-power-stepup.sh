@@ -25,8 +25,7 @@ set -uo pipefail
 PORT=8007
 RUNS=3
 BENCH=/opt/vllm-service/bench-vllm.sh
-OPHOME="/home/${SUDO_USER:-${USER:-user}}"   # the operator's home, also under sudo
-LOGDIR=${OPHOME}/tuning-logs; mkdir -p "$LOGDIR"
+LOGDIR=/home/chris/tuning-logs; mkdir -p "$LOGDIR"
 LOG="$LOGDIR/02-t5810-power-$(date +%Y%m%d-%H%M%S).log"
 ln -sfn "$LOG" "$LOGDIR/02-latest.log"
 

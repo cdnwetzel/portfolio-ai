@@ -14,7 +14,7 @@ Payload schema (from scripts/index_with_embeddings.py):
 
 Qdrant is LAN-only. Reach it either on a box that has it at 127.0.0.1:6333, or via an SSH
 port-forward from your workstation, e.g.:
-  ssh -f -N -L 16333:127.0.0.1:6333 root@jump.example.net
+  ssh -f -N -L 16333:127.0.0.1:6333 root@ai.cwetzel.com
   python3 scripts/export_qdrant_md.py --qdrant-url http://127.0.0.1:16333
 
 Usage:

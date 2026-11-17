@@ -293,7 +293,7 @@ The indexer runs on T5810 directly (uses `localhost:6333`). Steps:
 
 ```bash
 # 1. Sync updated KB content to T5810
-rsync -avz ~/ai/cwdotcom/knowledge_base/ \
+rsync -avz /Users/cwetzel/ai/cwdotcom/knowledge_base/ \
   chris@T5810:/tmp/knowledge_base/
 
 # 2. SSH to T5810 and run indexer
@@ -574,7 +574,7 @@ rc-service pscode-vllm restart
 
 Send a test request and measure tokens/sec from vLLM's response `usage` field:
 ```bash
-ssh root@web.example.net "curl -s -X POST http://127.0.0.1:8004/v1/chat/completions \
+ssh root@cwetzel.com "curl -s -X POST http://127.0.0.1:8004/v1/chat/completions \
   -H 'Content-Type: application/json' \
   -d '{\"model\":\"qwen2.5-coder-14b-pscode\",\"messages\":[{\"role\":\"user\",\"content\":\"Write a 200-word essay on networking.\"}],\"max_tokens\":300}' \
   | python3 -c 'import sys,json; d=json.load(sys.stdin); u=d[\"usage\"]; print(u)'"

@@ -1,0 +1,37 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  min-height: 100vh;
+  margin: 0;
+  display: grid;
+  place-items: center;
+  background: #17191d;
+  color: #f3f0e8;
+  font-family: system-ui, sans-serif;
+}
+
+.simulator {
+  text-align: center;
+}
+
+h1 {
+  margin: 0 0 16px;
+  font-size: 24px;
+}
+
+canvas {
+  display: block;
+  width: 400px;
+  height: 400px;
+  background: #20242a;
+  cursor: crosshair;
+  touch-action: none;
+}
+
+p {
+  margin: 16px 0 0;
+  color: #b8bcc4;
+  font-size: 14px;
+}

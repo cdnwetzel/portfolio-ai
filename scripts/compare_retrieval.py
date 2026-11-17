@@ -19,7 +19,7 @@ truncation can break, and it needs no judge, so it cannot be confounded by a jud
 Services bind 127.0.0.1 on the T5810, so tunnel them first:
 
     ssh -f -N -L 6333:127.0.0.1:6333 -L 8005:127.0.0.1:8005 -L 8006:127.0.0.1:8006 \
-        root@jump.example.net
+        root@ai.cwetzel.com
 
 Usage:
     python3 scripts/compare_retrieval.py --collections documents documents_c250 --top-k 5 8

@@ -110,6 +110,3 @@ exports/
 
 # Claude Code local permissions (machine-specific; contains LAN hosts)
 .claude/settings.local.json
-
-# operator-local deploy targets (see .deploy.env.example)
-.deploy.env

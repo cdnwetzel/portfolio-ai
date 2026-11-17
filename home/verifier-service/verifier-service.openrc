@@ -10,10 +10,10 @@ name="Faithfulness Verifier"
 description="Out-of-band claim-level faithfulness judge for the portfolio RAG chat (port 8007)"
 
 supervisor="supervise-daemon"
-command="/home/user/miniforge3/bin/python3"
+command="/home/chris/miniforge3/bin/python3"
 command_args="/opt/verifier-service/verifier.py"
 pidfile="/run/verifier-service.pid"
-command_user="user:user"
+command_user="chris:chris"
 : "${VERIFIER_LOG:=/var/log/verifier-service.log}"
 output_log="${VERIFIER_LOG}"
 error_log="${VERIFIER_LOG}"
@@ -43,7 +43,7 @@ respawn_max=0
 #   JUDGE_BACKEND=ollama
 #   JUDGE_MODEL=qwen2.5:7b-instruct-q4_K_M
 #   THRESHOLD=0.8
-#   DB_PATH=/home/user/verifier/verdicts.db
+#   DB_PATH=/home/chris/verifier/verdicts.db
 
 # Bind address for uvicorn. Localhost-only by default; conf.d overrides to the LAN IP on
 # the asrock box. Exported so supervise-daemon passes it into verifier.py's environment.
@@ -56,6 +56,6 @@ depend() {
 }
 
 start_pre() {
-    checkpath -d -m 0755 -o user:user /opt/verifier-service
-    checkpath -f -m 0644 -o user:user "${VERIFIER_LOG}"
+    checkpath -d -m 0755 -o chris:chris /opt/verifier-service
+    checkpath -f -m 0644 -o chris:chris "${VERIFIER_LOG}"
 }

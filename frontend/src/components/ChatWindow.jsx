@@ -149,6 +149,61 @@ const MetricsFooter = ({ metrics }) => {
   )
 }
 
+// Receipt verdict line (demo surface M1). States come from the proxy's verdict
+// push (or the /api/verdicts poll fallback) as metadata only — score and counts,
+// never content (red-lines.md #2):
+//   ok           — judge ran, no contradictions (green, with grounded % when scored)
+//   flagged      — judge found contradicted claims (amber; same banner as before receipts)
+//   unavailable  — judge was expected but failed/timed out (gray — "not checked", not an error)
+//   off          — server said no verdict would run for this answer (gray)
+// Legacy messages (pre-receipts) carry `flagged` without a verdict object; the
+// render site maps them to the flagged state below.
+const VerdictBadge = ({ verdict }) => {
+  if (!verdict) return null
+  if (verdict.state === 'ok') {
+    const pct = verdict.faithfulness != null ? Math.round(verdict.faithfulness * 100) : null
+    const claims = verdict.nClaims != null && verdict.nSupported != null
+      ? ` · ${verdict.nSupported}/${verdict.nClaims} claims supported`
+      : ''
+    return (
+      <div className="mt-2 pt-2 border-t border-emerald-700/30 flex items-start gap-1.5 text-xs text-emerald-400/90">
+        <span aria-hidden="true">✓</span>
+        <span>
+          {pct != null
+            ? `Checked by a second model — ${pct}% of claims grounded in the cited sources`
+            : 'Checked by a second model — grounded in the cited sources'}
+          {claims}
+        </span>
+      </div>
+    )
+  }
+  if (verdict.state === 'flagged') {
+    return (
+      <div className="mt-2 pt-2 border-t border-amber-600/30 flex items-start gap-1.5 text-xs text-amber-400/90">
+        <span aria-hidden="true">⚠</span>
+        <span>A claim in this answer was flagged by the faithfulness check for review.</span>
+      </div>
+    )
+  }
+  if (verdict.state === 'unavailable') {
+    return (
+      <div className="mt-2 pt-2 border-t border-gray-600/40 flex items-start gap-1.5 text-xs text-gray-500">
+        <span aria-hidden="true">—</span>
+        <span>Faithfulness check could not complete for this answer (judge unreachable).</span>
+      </div>
+    )
+  }
+  if (verdict.state === 'off') {
+    return (
+      <div className="mt-2 pt-2 border-t border-gray-600/40 flex items-start gap-1.5 text-xs text-gray-500">
+        <span aria-hidden="true">—</span>
+        <span>Faithfulness check not run for this answer.</span>
+      </div>
+    )
+  }
+  return null
+}
+
 const ChatWindow = forwardRef(({ messages, status, suggestions, error, onSuggestion, onRetry }, ref) => {
   return (
     <div className="space-y-4 p-4">
@@ -191,11 +246,10 @@ const ChatWindow = forwardRef(({ messages, status, suggestions, error, onSuggest
                 )}
                 {msg.role === 'assistant' && <SourceBlock sources={msg.sources} />}
                 {msg.role === 'assistant' && <MetricsFooter metrics={msg.metrics} />}
-                {msg.role === 'assistant' && msg.flagged && (
-                  <div className="mt-2 pt-2 border-t border-amber-600/30 flex items-start gap-1.5 text-xs text-amber-400/90">
-                    <span aria-hidden="true">⚠</span>
-                    <span>A claim in this answer was flagged by the faithfulness check for review.</span>
-                  </div>
+                {msg.role === 'assistant' && (
+                  <VerdictBadge verdict={msg.verdict || (msg.flagged
+                    ? { state: 'flagged', faithfulness: msg.faithfulness }
+                    : null)} />
                 )}
               </div>
             </div>

@@ -7,10 +7,10 @@ name="Embedding Service"
 description="bge-base-en-v1.5 (768-d) CPU embedding server on :8005"
 
 supervisor="supervise-daemon"
-command="/home/user/miniforge3/bin/python3"
+command="/home/chris/miniforge3/bin/python3"
 command_args="/opt/embed-service/embed.py"
 pidfile="/run/embed-service.pid"
-command_user="user:user"
+command_user="chris:chris"
 : "${EMBED_LOG:=/var/log/embed-service.log}"
 output_log="${EMBED_LOG}"
 error_log="${EMBED_LOG}"
@@ -41,6 +41,6 @@ depend() {
 }
 
 start_pre() {
-    checkpath -d -m 0755 -o user:user /opt/embed-service
-    checkpath -f -m 0644 -o user:user "${EMBED_LOG}"
+    checkpath -d -m 0755 -o chris:chris /opt/embed-service
+    checkpath -f -m 0644 -o chris:chris "${EMBED_LOG}"
 }

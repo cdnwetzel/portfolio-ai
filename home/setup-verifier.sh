@@ -9,22 +9,17 @@
 #   - pip install -r home/verifier-service/requirements.txt into that python
 #
 # This is a SEPARATE box from the T5810 — set VERIFIER_HOST to its SSH target.
-# Usage:  VERIFIER_HOST=user@<RYZEN_LAN_IP> ./home/setup-verifier.sh
+# Usage:  VERIFIER_HOST=chris@<RYZEN_LAN_IP> ./home/setup-verifier.sh
 #
 # VERIFIER_BIND (optional): the address uvicorn binds to on the box. Default 127.0.0.1
 # (localhost-only). Set it to the box's LAN IP so the T5810 tunnel (-L 8007:<ip>:8007)
 # can reach it while nothing else on the LAN can — recommended over the old 0.0.0.0 bind.
-#   Usage:  VERIFIER_HOST=user@<asrock-lan-ip> VERIFIER_BIND=<asrock-lan-ip> ./home/setup-verifier.sh
+#   Usage:  VERIFIER_HOST=chris@<asrock-lan-ip> VERIFIER_BIND=<asrock-lan-ip> ./home/setup-verifier.sh
 set -euo pipefail
-# Operator-local host names and the service user (.deploy.env, gitignored; see .deploy.env.example)
-ENVF="$(cd "$(dirname "$0")/.." && pwd)/.deploy.env"; [ -f "$ENVF" ] && . "$ENVF"
 
-VHOST="${VERIFIER_HOST:?set VERIFIER_HOST=user@<RYZEN_LAN_IP> (the spare box, not the T5810)}"
+VHOST="${VERIFIER_HOST:?set VERIFIER_HOST=chris@<RYZEN_LAN_IP> (the spare box, not the T5810)}"
 VBIND="${VERIFIER_BIND:-127.0.0.1}"
-SVC_USER="${SVC_USER:-user}"
-# The units name a generic `user`; install them for the real service user.
-localize() { SVC_USER="$SVC_USER" perl -pe 's#/home/user(?=/|\b)#/home/$ENV{SVC_USER}#g; s#\buser:user\b#$ENV{SVC_USER}:$ENV{SVC_USER}#g; s#(_USER:=)user\}#$1$ENV{SVC_USER}}#g' "$1"; }
-PYBIN="${PYBIN:-/home/${SVC_USER}/miniforge3/bin/python3}"
+PYBIN="${PYBIN:-/home/chris/miniforge3/bin/python3}"
 OPTDIR="/opt/verifier-service"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 SRC="${HERE}/verifier-service"
@@ -34,12 +29,12 @@ ssh "${VHOST}" "mkdir -p ${OPTDIR}"
 scp -q "${SRC}/verifier.py"      "${VHOST}:${OPTDIR}/verifier.py"
 scp -q "${SRC}/verifier_core.py" "${VHOST}:${OPTDIR}/verifier_core.py"
 scp -q "${SRC}/requirements.txt" "${VHOST}:${OPTDIR}/requirements.txt"
-localize "${SRC}/verifier-service.openrc" | ssh "${VHOST}" "cat > /tmp/verifier-service.openrc"
+scp -q "${SRC}/verifier-service.openrc" "${VHOST}:/tmp/verifier-service.openrc"
 
 echo "==> Installing deps + OpenRC unit (assumes Gentoo/OpenRC; see README for systemd)"
 ssh "${VHOST}" "
   set -e
-  chown -R ${SVC_USER}:${SVC_USER} ${OPTDIR} && chmod +x ${OPTDIR}/verifier.py
+  chown -R chris:chris ${OPTDIR} && chmod +x ${OPTDIR}/verifier.py
   ${PYBIN} -m pip install -q -r ${OPTDIR}/requirements.txt
   # Persist the bind address so uvicorn listens on the intended interface across restarts.
   touch /etc/conf.d/verifier-service

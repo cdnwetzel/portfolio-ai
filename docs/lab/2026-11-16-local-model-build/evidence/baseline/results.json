@@ -1,0 +1,30 @@
+{
+  "pageErrors": [],
+  "checks": [
+    {
+      "name": "canvas exists, 400x400 attribute size",
+      "ok": true,
+      "detail": "400x400"
+    },
+    {
+      "name": "left-button hold adds sand at cursor",
+      "ok": true,
+      "detail": "topVar 287.839 -> 564.653"
+    },
+    {
+      "name": "paint area drains after release (sand fell)",
+      "ok": true,
+      "detail": "topVar 564.653 -> 287.839 (baseline 287.839)"
+    },
+    {
+      "name": "sand piles at the bottom",
+      "ok": true,
+      "detail": "bottomVar 287.839 -> 6807.852"
+    },
+    {
+      "name": "no page errors",
+      "ok": true,
+      "detail": "clean"
+    }
+  ]
+}
