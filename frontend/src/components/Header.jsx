@@ -57,7 +57,7 @@ export default function Header({ onNewChat, canClear = false }) {
               Chris Wetzel
             </h1>
             <span className="text-xs text-gray-500 hidden sm:inline whitespace-nowrap">
-              Qwen 14B · 2× RTX A4500 · vLLM · Qdrant
+              Qwen3.8-27B · 2× RTX A4500 · vLLM · Qdrant
             </span>
           </div>
           <p className="text-xs sm:text-sm text-gray-400 mt-0.5">

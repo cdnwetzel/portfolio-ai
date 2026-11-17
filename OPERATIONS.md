@@ -140,6 +140,22 @@ experiment: [`plans/ups-sizing-2026-09-01.md`](plans/ups-sizing-2026-09-01.md).
 
 ## Monitoring Commands
 
+### Deploy vs reindex: a known race (recorded 2026-11-17)
+
+`./cloud/deploy.sh` ends with a live selftest over `/ws/chat`. If a KB reindex
+(`scripts/reindex_kb.sh`) is mid-flight, the `documents` collection is empty and
+every grounded check correctly refuses ("I don't have that documented") — the
+selftest reports `grounded: 0/3` and the deploy exits "FAILED" with the new code
+already live. This is NOT a regression: re-run the gate after the reindex finishes:
+
+```bash
+python3 scripts/selftest.py --url wss://dev.cwetzel.com/ws/chat
+```
+
+Green confirms the deploy was good all along. Operational rule: don't deploy while
+a reindex is running (the embed pass takes ~6 minutes and its progress is visible in
+the background task / `index_with_embeddings.py` output).
+
 ### Check all services running
 
 ```bash

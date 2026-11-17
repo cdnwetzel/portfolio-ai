@@ -31,6 +31,9 @@ echo "==> Deploying lab evidence -> ${CLOUD}:${WEBROOT}/lab"
 # mkdir succeeds — belt and braces, and the step becomes safely rerunnable.
 ssh "${CLOUD}" "mkdir -p ${WEBROOT}/lab"
 rsync -avz --delete "${REPO}/docs/lab/" "${CLOUD}:${WEBROOT}/lab/"
+# Serve the lab page at /lab/ too (bare directory URLs otherwise hit Apache's
+# autoindex listing). Paths in lab.html are root-relative so one file serves both.
+scp -q "${REPO}/frontend/dist/lab.html" "${CLOUD}:${WEBROOT}/lab/index.html"
 
 echo "==> Deploying backend proxy -> ${CLOUD}:${APIDIR}"
 # cloud/api-proxy.py deploys as main.py (uvicorn main:app). main.py imports

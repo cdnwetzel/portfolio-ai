@@ -6,7 +6,7 @@ const EMAIL        = 'mailto:chris@cwetzel.com'
 const REPO_URL     = 'https://github.com/cdnwetzel/portfolio-ai'
 
 const STACK = [
-  'Qwen 14B', 'vLLM', 'Qdrant', 'RAG', 'React', 'Gentoo', '2× RTX A4500', 'Verifier'
+  'Qwen3.8-27B', 'vLLM', 'Qdrant', 'RAG', 'React', 'Gentoo', '2× RTX A4500', 'Verifier'
 ]
 
 const HOW_IT_WORKS = (verifierGpu) => [
@@ -23,7 +23,7 @@ const HOW_IT_WORKS = (verifierGpu) => [
   {
     icon: '⚡',
     title: 'Local Inference',
-    desc: 'Qwen 14B runs on two RTX A4500 GPUs in my home office via tensor parallelism. No cloud GPU — owned hardware, no per-token cost.',
+    desc: 'Qwen3.8-27B runs on two RTX A4500 GPUs in my home office via tensor parallelism. No cloud GPU — owned hardware, no per-token cost.',
   },
   {
     icon: '✅',
