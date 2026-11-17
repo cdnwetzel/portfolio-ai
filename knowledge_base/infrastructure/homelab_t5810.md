@@ -19,11 +19,12 @@
   RAM and not disk capacity — those are separate, and the machine has plenty of both (see
   CPU & Memory and Storage below).
 - **Usable VRAM:** 20,470 MiB per card — the full ~20 GB is available because ECC is **disabled** (a deliberate trade-off that reclaims the ~1.25 GB/card ECC overhead — ~2.5 GB total across the pair — for vLLM's KV cache)
-- **NVLink bridge:** NV4 topology (4-link bridge), required for tensor-parallel vLLM TP=2;
-  without NVLink, CUDA sees two isolated GPUs. Its speed is **56 GB/s per direction
-  (112 GB/s aggregate)** — note the **per second**: that is a *transfer rate between the
-  two cards*, and it is not a quantity of memory. The VRAM figures are the 20 GB / 40 GB
-  above.
+- **Interconnect (corrected 2026-11-16):** there is **no NVLink bridge** — the RTX A4500
+  has no NVLink connectors. The pair links over **PCIe Gen3 x16** (measured 2026-11-16:
+  `GEN 3@16x` under load, GEN 1 at idle downshift). Tensor-parallel vLLM (TP=2) does
+  not require NVLink; the TP all-reduce rides PCIe, and VRAM is *not* pooled — the
+  earlier "NV4 bridge, 56 GB/s per direction" text that lived here was wrong on every
+  particular. The "40 GB" figure above is two independent 20 GB cards, not one pool.
 - **GPU power cap: 165 W per card** (of a 200 W rating), applied at boot by
   `/usr/local/bin/gpu-tune.sh`. The SM clock is unrestricted to its 2100 MHz maximum. This is
   a deliberate tuning choice, not a limit: measured 33.4 tok/s at 71 °C versus 34.2 at 79 °C
@@ -66,12 +67,12 @@
 The GPU home lab is **two separate machines with different hardware**:
 
 - **T5810** (primary AI server): Dell Precision, **Xeon E5-2699v4 (22C/44T)**, **two RTX A4500
-  GPUs joined by an NVLink bridge**. Runs vLLM inference serving **Qwen3.8-27B-FP8** with
+  GPUs joined over PCIe (no NVLink on the A4500 — corrected 2026-11-16)**. Runs vLLM inference serving **Qwen3.8-27B-FP8** with
   tensor parallelism across both cards.
 - **asrock B550** (verifier node): **AMD Ryzen 9 5950X (16C/32T), 64 GB**, **a single RTX 5060
   Ti (16 GB)**. Runs the out-of-band faithfulness verifier.
 
-The **A4500 NVLink pair belongs to the T5810**; the **single 5060 Ti belongs to the asrock B550**.
+The **dual-A4500 pair belongs to the T5810**; the **single 5060 Ti belongs to the asrock B550**.
 They are not the same box, and their CPUs differ (Intel Xeon vs AMD Ryzen 9). Never attribute one
 machine's GPU or CPU to the other.
 
@@ -117,7 +118,7 @@ on the **asrock B550 (Ryzen 9 + RTX 5060 Ti)** — two distinct GPU boxes, one h
 - **Model:** **Qwen3.8-27B-FP8**, served as `qwen3.8-27b`
 - **vLLM version:** 0.27.1
 - **Port:** 8007 — a *backend slot*, not the port callers use. See labrouter below.
-- **Tensor Parallel:** both A4500s, TP=2 over the NVLink bridge
+- **Tensor Parallel:** both A4500s, TP=2 over PCIe (no NVLink — corrected 2026-11-16)
 - **Context window:** **49,152 tokens** (48K; raised from 32,768 on 2026-10-03)
 - **GPU memory utilization:** 0.93 (0.95 OOMs on this box)
 - **CUDA graphs:** **ENABLED** — this is the single biggest performance decision on the box.
@@ -143,7 +144,7 @@ Measured on this hardware, not inherited defaults:
     cold question and 2x on a warm follow-up. A small draft head proposes several tokens per
     step and the full model verifies them at once.
 - Three settings produce it and must survive together: CUDA graphs on (no `--enforce-eager`),
-  `--disable-custom-all-reduce` (custom all-reduce *breaks* graph capture on this A4500 NVLink
+  `--disable-custom-all-reduce` (custom all-reduce *breaks* graph capture on this A4500
   pair), and a **capped** set of captured batch sizes (vLLM captures ~70 by default and capture
   memory scales with the count, which caused OOM at every utilization setting until it was
   capped). The cap is currently `[1,2,4,8,12,16]`: with speculative decoding each step verifies

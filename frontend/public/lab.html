@@ -38,6 +38,8 @@
       width: 100%; border: 1px solid var(--line); border-radius: 10px; display: block;
     }
     figcaption { font-size: 0.8rem; color: var(--muted); margin-top: 0.5rem; }
+    .play-links { font-size: 1rem; margin: 1.2rem 0; }
+    .play-links a { font-weight: 600; }
     .note { font-size: 0.8rem; color: var(--muted); margin-top: 2rem; border-top: 1px solid var(--line); padding-top: 1rem; }
   </style>
 </head>
@@ -73,16 +75,22 @@
     <p>
       The verifier poured sand with real mouse events and confirmed: sand appears only
       while the left button is held, it falls after release, and it piles at the bottom.
-      Below: the local model's build, mid-pour and after settling.
+    </p>
+    <p class="play-links">
+      Both builds are live — the exact artifacts the harness verified:
+      <a href="/lab/2026-11-16-local-model-build/local-model-qwen38/">try the local model's sim</a>
+      ·
+      <a href="/lab/2026-11-16-local-model-build/baseline-k31-pro/">try the K3.1 Pro baseline</a>.
+      Hold the left mouse button to pour.
     </p>
 
     <figure>
-      <img src="lab/evidence/2026-11-16-local-model-build/evidence/local/2-while-holding.png"
+      <img src="lab/2026-11-16-local-model-build/evidence/local/2-while-holding.png"
            alt="Sand being poured along the mouse path, pile forming at the bottom" />
       <figcaption>Local model's simulator while pouring — grains falling along the held-mouse path, a pile already forming.</figcaption>
     </figure>
     <figure>
-      <img src="lab/evidence/2026-11-16-local-model-build/evidence/local/3-settled.png"
+      <img src="lab/2026-11-16-local-model-build/evidence/local/3-settled.png"
            alt="Settled conical sand pile at the bottom of the playground" />
       <figcaption>After release — the playground drained and a conical pile settled at the bottom: realistic angle of repose, varied grain tones.</figcaption>
     </figure>

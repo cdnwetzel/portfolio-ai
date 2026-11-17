@@ -25,12 +25,12 @@ echo "==> Building frontend"
 echo "==> Deploying frontend -> ${CLOUD}:${WEBROOT}"
 rsync -avz --delete "${REPO}/frontend/dist/" "${CLOUD}:${WEBROOT}/"
 
-echo "==> Deploying lab evidence -> ${CLOUD}:${WEBROOT}/lab/evidence"
+echo "==> Deploying lab evidence -> ${CLOUD}:${WEBROOT}/lab"
 # mkdir first: the webroot is not root-owned, and the rsync receiver's own mkdir
 # has failed with ENOENT here (2026-11-17 deploy) even though an explicit ssh
 # mkdir succeeds — belt and braces, and the step becomes safely rerunnable.
-ssh "${CLOUD}" "mkdir -p ${WEBROOT}/lab/evidence"
-rsync -avz --delete "${REPO}/docs/lab/" "${CLOUD}:${WEBROOT}/lab/evidence/"
+ssh "${CLOUD}" "mkdir -p ${WEBROOT}/lab"
+rsync -avz --delete "${REPO}/docs/lab/" "${CLOUD}:${WEBROOT}/lab/"
 
 echo "==> Deploying backend proxy -> ${CLOUD}:${APIDIR}"
 # cloud/api-proxy.py deploys as main.py (uvicorn main:app). main.py imports

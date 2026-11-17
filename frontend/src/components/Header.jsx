@@ -100,6 +100,16 @@ export default function Header({ onNewChat, canClear = false }) {
              className="text-gray-400 hover:text-white transition" title="Email">
             <EmailIcon />
           </a>
+          <a href="/inside.html"
+             className="hidden sm:inline text-xs text-gray-500 hover:text-gray-300 transition border border-gray-700 hover:border-gray-500 rounded px-2 py-1"
+             title="Live component status — how this site runs">
+            Inside
+          </a>
+          <a href="/lab.html"
+             className="hidden sm:inline text-xs text-gray-500 hover:text-gray-300 transition border border-gray-700 hover:border-gray-500 rounded px-2 py-1"
+             title="The local model builds a sand simulator — with receipts">
+            Lab
+          </a>
           <a href={REPO_URL} target="_blank" rel="noreferrer"
              className="hidden sm:inline text-xs text-gray-500 hover:text-gray-300 transition border border-gray-700 hover:border-gray-500 rounded px-2 py-1">
             View source

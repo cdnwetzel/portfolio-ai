@@ -19,7 +19,7 @@ Designed, engineered, and maintain **gentoo-machines**, an open-source automatio
 
 The framework is **declarative**: each machine's hardware and the rationale for every non-obvious choice live in version control, so a build is reproducible rather than improvised. It is deployed, cross-compiled, and maintained across a **diverse bare-metal production fleet** running modern LTS kernels:
 
-- **Multi-GPU AI/ML compute bench** — Dell Precision T5810, dual RTX A4500 (NVLink), serving vLLM inference
+- **Multi-GPU AI/ML compute bench** — Dell Precision T5810, dual RTX A4500 (PCIe), serving vLLM inference
 - **AMD Ryzen workstation** — ASRock B550 / Ryzen 9 5950X (Zen 3), heavy parallel compile (also hosts the portfolio chat's faithfulness verifier)
 - **Hybrid-GPU laptop** — Dell XPS 15 9510 (Intel iGPU + NVIDIA, PRIME offload)
 - **Resource-constrained mini-PCs** — e.g. Beelink MINI S (Jasper Lake, no AVX/AVX2)

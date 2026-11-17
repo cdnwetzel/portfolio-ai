@@ -96,8 +96,7 @@ confirmed the autonomous loop **cannot modify pxx's own protected control plane*
   terminal codes, a governed autonomous GitHub PR behind human approval, and parallel fan-out.
 - **R-036, R-044 – R-046:** a fail-closed remote human-in-the-loop gate — a Slack approve/modify
   card releases a blocked pxx tool call over Socket Mode, with no public endpoint.
-- **R-041 – R-043:** measured on the home GPU fleet — VRAM capacity beats GPU generation, dual-GPU
-  NVLink makes fan-out real (198% at N=2), and throughput tracks *active* parameters.
+- **R-041 – R-043:** measured on the home GPU fleet — VRAM capacity beats GPU generation, dual-GPU parallelism over PCIe makes fan-out real (198% at N=2), and throughput tracks *active* parameters.
 - **R-047:** external AI reviewers measured against pxx's own calibration bar.
 - **R-049 / R-050:** two prompt changes that **failed** their pre-registered bars and were not
   shipped — recorded as non-results.
