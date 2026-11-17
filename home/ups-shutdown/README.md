@@ -89,7 +89,7 @@ only broadcasts state.
   coming.
 
 Access control is `upsd.users` on the T5810 (a slave user with `upsmon slave`) plus
-`LISTEN 192.0.2.x 3493`. Keep `upsd` bound to the LAN, never to a public interface — it is not
+`LISTEN 10.0.1.x 3493`. Keep `upsd` bound to the LAN, never to a public interface — it is not
 an internet-facing service, and neither is anything else on this box except through the tunnel.
 
 ## RESOLVED: both boxes are on the same 1500 VA UPS

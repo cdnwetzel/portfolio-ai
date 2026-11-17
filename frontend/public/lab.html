@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lab — the local model built this</title>
+  <style>
+    :root {
+      --bg: #101216; --panel: #171a20; --line: #2a2e37;
+      --text: #d7dade; --muted: #8b909a;
+      --ok: #34d399; --degraded: #fbbf24;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: radial-gradient(circle at 50% 10%, #161a21, var(--bg) 70%);
+      color: var(--text);
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+      min-height: 100vh; padding: 2rem 1rem;
+    }
+    main { max-width: 780px; margin: 0 auto; }
+    h1 { font-size: 1.5rem; letter-spacing: 0.04em; }
+    p, li { color: var(--text); font-size: 0.94rem; line-height: 1.65; }
+    p.sub { color: var(--muted); margin: 0.6rem 0 2rem; }
+    h2 { font-size: 1.05rem; margin: 2.2rem 0 0.75rem; }
+    a { color: #7aa2f7; }
+    .task {
+      background: var(--panel); border: 1px solid var(--line); border-left: 3px solid #7aa2f7;
+      border-radius: 8px; padding: 1rem 1.1rem; margin: 1rem 0;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.85rem;
+      white-space: pre-wrap; color: var(--text);
+    }
+    table { border-collapse: collapse; width: 100%; margin: 1rem 0; font-size: 0.88rem; }
+    th, td { border: 1px solid var(--line); padding: 0.5rem 0.7rem; text-align: left; }
+    th { background: var(--panel); color: var(--muted); font-weight: 600; }
+    td.pass { color: var(--ok); } td.warn { color: var(--degraded); }
+    figure { margin: 1.2rem 0; }
+    figure img {
+      width: 100%; border: 1px solid var(--line); border-radius: 10px; display: block;
+    }
+    figcaption { font-size: 0.8rem; color: var(--muted); margin-top: 0.5rem; }
+    .note { font-size: 0.8rem; color: var(--muted); margin-top: 2rem; border-top: 1px solid var(--line); padding-top: 1rem; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Lab — the local model built this</h1>
+    <p class="sub">2026-11-16 · receipts, not claims · <a href="/">← back to the chat</a></p>
+
+    <p>
+      The chat on this site runs on a home-hosted model. The obvious next question:
+      can that model <em>build</em> things, not just talk? This page is the evidence.
+      Two models were given the identical task through the identical agent harness —
+      a coding-agent session driven over a machine protocol, tools enabled,
+      no human edits — and each build was verified in a real headless browser by
+      synthesizing mouse input and analyzing the rendered pixels.
+    </p>
+
+    <h2>The task, verbatim</h2>
+    <div class="task">Your task is to create a real-life sand simulator using HTML, CSS, and JS.
+- There should be a wall around the playground (window).
+- The playground should be 400x400 pixels and sand particles 4x4 pixels.
+- The sand particles should roll down like in real life and pile up at the bottom.
+- Add new sand when the left mouse button is held down.</div>
+
+    <h2>What each model produced</h2>
+    <table>
+      <tr><th></th><th>Local — Qwen3.8-27B (this site's model)</th><th>Baseline — managed K3.1 Pro</th></tr>
+      <tr><td>Where it ran</td><td>T5810 home server, 2× RTX A4500, vLLM</td><td>managed API</td></tr>
+      <tr><td>Agentic turn time</td><td class="warn">161s</td><td class="pass">55s</td></tr>
+      <tr><td>Harness functional checks</td><td class="pass">5/5 passed</td><td class="pass">5/5 passed</td></tr>
+      <tr><td>Distinctive choices</td><td>Per-grain color variation, efficient offscreen-buffer rendering, strict no-corner-tunneling physics</td><td>In-simulation wall cells, pointer-event input handling</td></tr>
+    </table>
+    <p>
+      The verifier poured sand with real mouse events and confirmed: sand appears only
+      while the left button is held, it falls after release, and it piles at the bottom.
+      Below: the local model's build, mid-pour and after settling.
+    </p>
+
+    <figure>
+      <img src="lab/evidence/2026-11-16-local-model-build/evidence/local/2-while-holding.png"
+           alt="Sand being poured along the mouse path, pile forming at the bottom" />
+      <figcaption>Local model's simulator while pouring — grains falling along the held-mouse path, a pile already forming.</figcaption>
+    </figure>
+    <figure>
+      <img src="lab/evidence/2026-11-16-local-model-build/evidence/local/3-settled.png"
+           alt="Settled conical sand pile at the bottom of the playground" />
+      <figcaption>After release — the playground drained and a conical pile settled at the bottom: realistic angle of repose, varied grain tones.</figcaption>
+    </figure>
+
+    <h2>Read it yourself</h2>
+    <p>
+      Every artifact is committed in the repo — both models' complete source, both
+      harness scripts, and all eight verification screenshots:
+      <a href="https://github.com/cdnwetzel/portfolio-ai/tree/main/docs/lab/2026-11-16-local-model-build">
+        docs/lab/2026-11-16-local-model-build</a>.
+    </p>
+
+    <p class="note">
+      Honest fine print: the managed model was ~3× faster wall-clock, and it implemented
+      the "wall" as in-simulation physics where the local model rendered it visually —
+      both pass every functional check, and the full comparison is in the repo's plan
+      file. The point of this lab isn't "local wins"; it's that the home stack is
+      genuinely capable of agentic coding work, measured rather than asserted.
+    </p>
+  </main>
+</body>
+</html>

@@ -2,8 +2,8 @@
 # Pull a backup of the verifier's verdicts.db from the asrock to the T5810.
 #
 # WHY PULL: the asrock (Gentoo) has no cron daemon, so it can't schedule its own
-# backups; the T5810 can. Run from the service user's crontab on the T5810:
-#   17 6 * * * /home/user/ai/cwdotcom/scripts/backup_verdicts_pull.sh >> /var/log/verdicts-backup.log 2>&1
+# backups; the T5810 can. Run from chris's crontab on the T5810:
+#   17 6 * * * /home/chris/ai/cwdotcom/scripts/backup_verdicts_pull.sh >> /var/log/verdicts-backup.log 2>&1
 #
 # verdicts.db is the ONLY durable metrics store (defect ledger #4): judge verdicts,
 # faithfulness scores, latencies — the continuous-improvement loop's raw material.
@@ -12,8 +12,8 @@
 set -euo pipefail
 
 REMOTE="${VERIFIER_HOST:-asrock}"
-REMOTE_DB="${REMOTE_DB:-verifier/verdicts.db}"   # relative to the remote home
-LOCAL_DIR="${LOCAL_DIR:-$HOME/verdicts-backups}"
+REMOTE_DB="/home/chris/verifier/verdicts.db"
+LOCAL_DIR="/home/chris/verdicts-backups"
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 KEEP=30
 

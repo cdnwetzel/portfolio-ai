@@ -7,24 +7,19 @@
 # e.g. after editing KB docs, or to recover from Qdrant loss.
 #
 # Runs the embedder on the T5810 (same bge-base-en-v1.5 env as the live embed-service,
-# so index vectors match query vectors) as the service user (model cached there).
+# so index vectors match query vectors) as the `chris` user (model cached there).
 #
 # Usage:  ./scripts/reindex_kb.sh
-# Env:    T5810_HOST (required; set it in .deploy.env)
+# Env:    T5810_HOST (default root@ai.cwetzel.com)
 set -euo pipefail
-# Operator-local host names and the service user (.deploy.env, gitignored; see .deploy.env.example)
-ENVF="$(cd "$(dirname "$0")/.." && pwd)/.deploy.env"; [ -f "$ENVF" ] && . "$ENVF"
 
-T5810="${T5810_HOST:?set T5810_HOST (see .deploy.env.example)}"
-SVC_USER="${SVC_USER:-user}"
-# The units name a generic `user`; install them for the real service user.
-localize() { SVC_USER="$SVC_USER" perl -pe 's#/home/user(?=/|\b)#/home/$ENV{SVC_USER}#g; s#\buser:user\b#$ENV{SVC_USER}:$ENV{SVC_USER}#g; s#(_USER:=)user\}#$1$ENV{SVC_USER}}#g' "$1"; }
+T5810="${T5810_HOST:-root@ai.cwetzel.com}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 REPO_KB="${HERE}/../knowledge_base"
 REMOTE_KB="/tmp/knowledge_base"
 REMOTE_INDEXER="/tmp/reindex_indexer.py"
 REMOTE_SPARSE="/tmp/sparse_bm25.py"
-PYTHON="/home/${SVC_USER}/miniforge3/bin/python3"
+PYTHON="/home/chris/miniforge3/bin/python3"
 # HYBRID=1 builds a dense+BM25 collection (rag-improvements.md §2.1). The live proxy
 # must run with HYBRID_SEARCH=1 to query it — coordinate the two (deploy + reindex).
 HYBRID_FLAG=""; [ "${HYBRID:-0}" = "1" ] && HYBRID_FLAG="--hybrid"
@@ -39,7 +34,7 @@ scp -q "${HERE}/../cloud/sparse_bm25.py"  "${T5810}:${REMOTE_SPARSE}"
 
 echo "==> Rebuilding Qdrant 'documents' collection (wipe + reindex from committed source; hybrid=${HYBRID:-0})"
 ssh "${T5810}" "chmod -R a+r ${REMOTE_KB} ${REMOTE_INDEXER} ${REMOTE_SPARSE} && \
-  su - ${SVC_USER} -c '${PYTHON} ${REMOTE_INDEXER} --kb-path ${REMOTE_KB} \
+  su - chris -c '${PYTHON} ${REMOTE_INDEXER} --kb-path ${REMOTE_KB} \
     --qdrant-url http://localhost:6333 --collection documents --wipe ${HYBRID_FLAG}'"
 
 echo "==> Done. Live index now matches knowledge_base/."

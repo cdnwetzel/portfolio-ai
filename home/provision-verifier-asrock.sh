@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Provision the faithfulness verifier on the asrock B550 (Gentoo / OpenRC).
 # ── RUN THIS AS ROOT ON asrock ──  e.g.:  sudo bash provision-verifier-asrock.sh
-# (Claude staged the service code + Python deps as the service user already; this script does
+# (Claude staged the service code + Python deps as `chris` already; this script does
 #  only the parts that need root: Ollama install + the OpenRC service.)
 #
 # What it does, in order:
@@ -17,8 +17,7 @@
 set -euo pipefail
 
 MODEL="qwen2.5:7b-instruct-q4_K_M"
-SVC_USER="${SVC_USER:-${SUDO_USER:-user}}"
-STAGE="${STAGE:-/home/${SVC_USER}/verifier-staging}"
+STAGE="/home/chris/verifier-staging"
 OPTDIR="/opt/verifier-service"
 
 [ "$(id -u)" -eq 0 ] || { echo "Run as root (sudo)."; exit 1; }
@@ -90,10 +89,10 @@ for _ in $(seq 1 30); do curl -sf http://127.0.0.1:11434/api/tags >/dev/null 2>&
 echo "==> [3/4] pull judge model ${MODEL} (~4.5 GB)"
 ollama pull "${MODEL}"
 
-echo "==> [4/4] install verifier-service -> ${OPTDIR} (runs as the service user on :8007)"
+echo "==> [4/4] install verifier-service -> ${OPTDIR} (runs as chris on :8007)"
 mkdir -p "${OPTDIR}"
 cp "${STAGE}/verifier.py" "${STAGE}/verifier_core.py" "${OPTDIR}/"
-chown -R "${SVC_USER}:${SVC_USER}" "${OPTDIR}"
+chown -R chris:chris "${OPTDIR}"
 chmod +x "${OPTDIR}/verifier.py"
 cp "${STAGE}/verifier-service.openrc" /etc/init.d/verifier-service
 chmod 755 /etc/init.d/verifier-service

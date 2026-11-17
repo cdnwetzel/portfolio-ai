@@ -9,7 +9,7 @@
 VLLM_HOME=/opt/vllm-service
 VLLM_VENV=/opt/pscode/vllm-serve-env-0.27.1
 VLLM_MODEL=/data/models/Qwen3.8-27B-FP8
-VLLM_USER=user
+VLLM_USER=chris
 
 # --- serving -------------------------------------------------------------
 VLLM_SERVED_NAME=qwen3.8-27b   # labrouter routes to this id; cwdotcom's proxy

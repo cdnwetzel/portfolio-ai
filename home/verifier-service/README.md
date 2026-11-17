@@ -66,8 +66,8 @@ If the box runs systemd, install this instead of the OpenRC unit:
 Description=Faithfulness Verifier (portfolio RAG)
 After=network.target
 [Service]
-User=user
-ExecStart=/home/user/miniforge3/bin/python3 /opt/verifier-service/verifier.py
+User=chris
+ExecStart=/home/chris/miniforge3/bin/python3 /opt/verifier-service/verifier.py
 Restart=always
 RestartSec=10
 [Install]

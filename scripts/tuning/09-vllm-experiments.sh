@@ -29,8 +29,7 @@
 #   ./09-vllm-experiments.sh ngram
 #   ./09-vllm-experiments.sh revert      # restore original launcher + conf, restart
 set -uo pipefail
-OPHOME="/home/${SUDO_USER:-${USER:-user}}"   # the operator's home, also under sudo
-LOGDIR=${OPHOME}/tuning-logs; mkdir -p "$LOGDIR"
+LOGDIR=/home/chris/tuning-logs; mkdir -p "$LOGDIR"
 EXP="${1:-}"
 SIZES=""            # per-mode cudagraph capture sizes; empty = leave conf.d alone
 SPEC_K=""           # num_speculative_tokens, for the divisibility check
@@ -441,8 +440,8 @@ banner "EXPERIMENT: $EXP — $(date)"
 # --- manifest: what this row IS, printed every run so a result can never be orphaned ------
 # The harness SHA is part of the row: commit before the first run, not after.
 echo "--- manifest ---"
-printf '    harness SHA   : %s\n' "$(git -C $(cd "$(dirname "$0")/../.." && pwd) log -1 --format=%h -- scripts/tuning/09-vllm-experiments.sh 2>/dev/null || echo unknown)"
-printf '    repo dirty    : %s\n' "$(git -C $(cd "$(dirname "$0")/../.." && pwd) status --porcelain -- scripts/tuning/09-vllm-experiments.sh 2>/dev/null | grep -q . && echo YES-UNCOMMITTED || echo no)"
+printf '    harness SHA   : %s\n' "$(git -C /home/chris/ai/cwdotcom log -1 --format=%h -- scripts/tuning/09-vllm-experiments.sh 2>/dev/null || echo unknown)"
+printf '    repo dirty    : %s\n' "$(git -C /home/chris/ai/cwdotcom status --porcelain -- scripts/tuning/09-vllm-experiments.sh 2>/dev/null | grep -q . && echo YES-UNCOMMITTED || echo no)"
 printf '    vllm version  : %s\n' "$(grep -aoE 'V1 LLM engine \(v[0-9.]+\)' /var/log/qwen38/writer.log | tail -1)"
 printf '    model         : %s\n' "${VLLM_MODEL:-/data/models/Qwen3.8-27B-FP8} (fp8 e4m3 weight-only, Marlin on sm_86; compute bf16)"
 printf '    mode          : %s   SPEC_K=%s   SIZES=%s\n' "$EXP" "${SPEC_K:--}" "${SIZES:-<conf.d default>}"

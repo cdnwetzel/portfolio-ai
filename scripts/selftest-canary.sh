@@ -14,13 +14,13 @@
 # cron MAILTO, which is easy to miss). Config lives in /etc/portfolio-canary.env if present.
 #
 # Install (cron, every 30 min, on the T5810):
-#   */30 * * * * /home/user/ai/cwdotcom/scripts/selftest-canary.sh >> /var/log/portfolio-selftest.log 2>&1
+#   */30 * * * * /home/chris/ai/cwdotcom/scripts/selftest-canary.sh >> /var/log/portfolio-selftest.log 2>&1
 set -euo pipefail
 
 # Optional config file (NTFY_URL, overrides). Keep it 0600; not in the repo.
 [ -f /etc/portfolio-canary.env ] && . /etc/portfolio-canary.env
 
-REPO="${REPO:-$(cd "$(dirname "$0")/.." && pwd)}"
+REPO="${REPO:-/home/chris/ai/cwdotcom}"
 PY="${PY:-${REPO}/.venv-diag/bin/python}"
 URL="${URL:-wss://dev.cwetzel.com/ws/chat}"
 NTFY_URL="${NTFY_URL:-}"

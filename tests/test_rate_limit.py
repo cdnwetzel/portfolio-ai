@@ -84,7 +84,7 @@ def test_client_ip_prefers_x_forwarded_for():
 
 
 def test_client_ip_xff_chain_takes_leftmost():
-    ip = client_ip_from_headers({"x-forwarded-for": "203.0.113.10, 10.0.0.1, 172.16.0.1"}, "127.0.0.1")  # privacy: example
+    ip = client_ip_from_headers({"x-forwarded-for": "203.0.113.10, 10.0.0.1, 172.16.0.1"}, "127.0.0.1")
     assert ip == "203.0.113.10"
 
 

@@ -167,12 +167,12 @@
   kind: grounded
 - q: "What is the weakest part of this AI system?"
   kind: grounded
-# Contact: the public contact email is INTENTIONALLY indexed (red-lines.md #6 — public
-# contact info), so a contact question is expected to offer it. This is the positive counterpart
+# Contact: the work email is INTENTIONALLY indexed (red-lines.md #6 — public contact
+# info), so a contact question is expected to offer it. This is the positive counterpart
 # to the no_pii phone check below: email OK, phone never.
 - q: "How can I contact Chris professionally?"
   kind: grounded
-  expect_substrings: ["chris@cwetzel.com", "email"]
+  expect_substrings: ["thepslawfirm.com", "chris@cwetzel.com", "email"]
 # Regression: 2026-08-22 live failure. "How old is Chris" answered "26 years old" —
 # the model pattern-matched the KB's ubiquitous "26 years of experience" onto age
 # (the KB has no age statement). Fixed by a server-computed age fact injected into

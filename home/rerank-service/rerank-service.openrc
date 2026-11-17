@@ -3,11 +3,11 @@
 #
 # Per-machine config lives in /etc/conf.d/rerank-service:
 #   RERANK_DEVICE=cuda
-#   RERANK_BIND=192.0.2.115        # MUST be the LAN IP — the cwdotcom VPS tunnel
+#   RERANK_BIND=10.0.1.115        # MUST be the LAN IP — the cwdotcom VPS tunnel
 #                                 # forwards its :8016 to this host's :8006.
 #   RERANK_PORT=8006
-#   RERANK_PYTHON=/home/user/rerank-venv/bin/python3
-#   RERANK_HOME=/home/user/rerank-service
+#   RERANK_PYTHON=/home/chris/rerank-venv/bin/python3
+#   RERANK_HOME=/home/chris/rerank-service
 # Optional:
 #   RERANK_MIN_FREE_MIB=2400      # VRAM headroom to wait for before starting
 #   RERANK_VRAM_WAIT=300          # max seconds to wait for it
@@ -28,8 +28,8 @@
 name="Reranker Service"
 description="bge-reranker-base cross-encoder FastAPI server (RAG precision)"
 
-: "${RERANK_PYTHON:=/home/user/rerank-venv/bin/python3}"
-: "${RERANK_HOME:=/home/user/rerank-service}"
+: "${RERANK_PYTHON:=/home/chris/rerank-venv/bin/python3}"
+: "${RERANK_HOME:=/home/chris/rerank-service}"
 : "${RERANK_DEVICE:=cpu}"
 : "${RERANK_PORT:=8006}"
 : "${RERANK_MIN_FREE_MIB:=2400}"
@@ -39,7 +39,7 @@ export RERANK_DEVICE RERANK_BIND RERANK_PORT
 supervisor="supervise-daemon"
 command="${RERANK_PYTHON}"
 command_args="${RERANK_HOME}/rerank.py"
-command_user="user:user"
+command_user="chris:chris"
 directory="${RERANK_HOME}"
 pidfile="/run/rerank-service.pid"
 
@@ -63,8 +63,8 @@ start_pre() {
     [ -x "${RERANK_PYTHON}" ] || { eerror "RERANK_PYTHON not executable: ${RERANK_PYTHON}"; return 1; }
     [ -f "${RERANK_HOME}/rerank.py" ] || { eerror "rerank.py not found in ${RERANK_HOME}"; return 1; }
 
-    checkpath -d -m 0755 -o user:user "${RERANK_HOME}"
-    checkpath -f -m 0644 -o user:user "/var/log/rerank-service.log"
+    checkpath -d -m 0755 -o chris:chris "${RERANK_HOME}"
+    checkpath -f -m 0644 -o chris:chris "/var/log/rerank-service.log"
 
     # Wait for VRAM rather than crash-looping into a CUDA OOM.
     if [ "${RERANK_DEVICE}" = "cuda" ] && command -v nvidia-smi >/dev/null 2>&1; then

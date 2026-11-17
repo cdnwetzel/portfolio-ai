@@ -42,7 +42,7 @@ knowledge_base/
 ## Content Inventory
 
 ### 1. Published Posts (6 Files, 28 Total on LinkedIn)
-**Source:** ~/ai/content_creator/posts/  
+**Source:** /Users/cwetzel/ai/content_creator/posts/  
 **Status:** ✅ Copied (6 published posts captured)  
 **Missing:** Select top ~10 of remaining posts from LinkedIn content_creator drafts  
 **Metrics:** Ranked by impressions (highest first)

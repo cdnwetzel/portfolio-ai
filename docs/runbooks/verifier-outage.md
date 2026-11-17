@@ -22,11 +22,11 @@ loop is blind. **First seen:** 2026-08-01→05 (4 days silent; DEFECT_LEDGER #5)
    `ss -tlnp | grep 8007` showing LISTEN is NOT sufficient — an empty `VERIFIER_HOST` in
    `/etc/default/portfolio-ai-tunnel` makes the forward listen-but-dead-end. If the curl
    returns nothing, check the env file has `VERIFIER_HOST=<asrock-lan-ip>` (current:
-   192.0.2.115), restart `portfolio-ai-tunnel`.
+   10.0.1.115), restart `portfolio-ai-tunnel`.
 
 3. **Is the verifier up on the asrock?**
    ```bash
-   ssh asrock 'rc-service verifier-service status && curl -s http://192.0.2.115:8007/health'
+   ssh asrock 'rc-service verifier-service status && curl -s http://10.0.1.115:8007/health'
    ```
 
 4. **Is the judge evicted and the proxy timeout eating cold loads?** The 14B evicts after

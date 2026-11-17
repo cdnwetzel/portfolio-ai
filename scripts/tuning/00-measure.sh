@@ -10,14 +10,13 @@ set -uo pipefail
 
 LABEL="${1:-run}"
 TS=$(date +%Y%m%d-%H%M%S)
-OPHOME="/home/${SUDO_USER:-${USER:-user}}"   # the operator's home, also under sudo
-LOGDIR=${OPHOME}/tuning-logs
+LOGDIR=/home/chris/tuning-logs
 mkdir -p "$LOGDIR"
 LOG="$LOGDIR/measure-${LABEL}-${TS}.log"
 ln -sfn "$LOG" "$LOGDIR/measure-latest.log"
 
-ASROCK="${ASROCK:-user@192.0.2.115}"
-MINI="${MINI:-user@192.0.2.20}"
+ASROCK=chris@10.0.1.115
+MINI=cwetzel@10.0.1.20
 
 exec > >(tee -a "$LOG") 2>&1
 echo "==================================================================="
@@ -85,14 +84,14 @@ ssh -o BatchMode=yes -o ConnectTimeout=8 $ASROCK '
 hr "asrock :: reranker :8006 latency (GPU cross-encoder — IN the chat critical path)"
 ssh -o BatchMode=yes -o ConnectTimeout=8 $ASROCK '
 for i in 1 2 3 4 5; do
-  curl -s -o /dev/null -w "%{time_total} " --max-time 20 -X POST http://192.0.2.115:8006/rerank \
+  curl -s -o /dev/null -w "%{time_total} " --max-time 20 -X POST http://10.0.1.115:8006/rerank \
     -H "Content-Type: application/json" \
     -d "{\"query\":\"what gpus does the t5810 have\",\"documents\":[\"The T5810 has two RTX A4500 GPUs joined by NVLink.\",\"Qdrant stores dense vectors for retrieval.\",\"The asrock B550 runs the faithfulness verifier.\",\"vLLM serves the model with tensor parallelism.\",\"The embedding service runs bge-base on CPU.\"],\"top_k\":5}"
 done; echo " sec  (5 runs, 5 docs)"' 2>&1
 
 hr "asrock :: verifier :8007 health + judge residency"
 ssh -o BatchMode=yes -o ConnectTimeout=8 $ASROCK '
-  curl -s --max-time 8 http://192.0.2.115:8007/health | head -c 200; echo
+  curl -s --max-time 8 http://10.0.1.115:8007/health | head -c 200; echo
   echo "--- GPU tenants ---"
   nvidia-smi --query-compute-apps=pid,process_name,used_memory --format=csv' 2>&1
 
@@ -119,7 +118,7 @@ done
 echo "--- resident ---"; ollama ps 2>&1 | head -3' 2>&1
 
 hr "END-TO-END :: full chain health from the VPS (through the tunnel)"
-ssh -o BatchMode=yes -o ConnectTimeout=8 root@web.example.net '
+ssh -o BatchMode=yes -o ConnectTimeout=8 root@cwetzel.com '
 for p in 8004 8005 8016 8007; do
   printf "  :%s -> " $p
   curl -s -o /dev/null -w "%{http_code} in %{time_total}s\n" --max-time 8 http://127.0.0.1:$p/health 2>/dev/null || echo fail

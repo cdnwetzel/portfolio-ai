@@ -138,7 +138,45 @@ export function useChat() {
     let pendingSources = []
     let settled = false
     let verdictTimer = null
+    let pollTimer = null
+    let pollAttempts = 0
     const settle = () => { settled = true }
+
+    // Receipts (demo surface M1): stamp verdict metadata onto the message that owns
+    // requestId. Push over the socket is primary; the poll fallback below covers
+    // reloads/reconnects where the push was missed. Metadata only, never content.
+    const stampVerdict = (requestId, patch) => {
+      if (!requestId) return
+      setMessages(prev => prev.map(m =>
+        m.requestId === requestId ? { ...m, verdict: { ...(m.verdict || {}), ...patch } } : m))
+    }
+    const stopPolling = () => { if (pollTimer) { clearTimeout(pollTimer); pollTimer = null } }
+    const POLL_DELAYS = [4000, 12000, 24000]  // offsets from `done`, matching judge latency
+    const pollVerdict = (requestId) => {
+      if (pollAttempts >= POLL_DELAYS.length) {
+        stampVerdict(requestId, { state: 'unavailable' })
+        return
+      }
+      const at = POLL_DELAYS[pollAttempts]
+      const prev = pollAttempts === 0 ? 0 : POLL_DELAYS[pollAttempts - 1]
+      pollAttempts += 1
+      pollTimer = setTimeout(async () => {
+        try {
+          const r = await fetch(`/api/verdicts/${requestId}`)
+          if (r.ok) {
+            const rec = await r.json()
+            stampVerdict(requestId, {
+              state: rec.state, faithfulness: rec.faithfulness,
+              nContradicted: rec.n_contradicted, nClaims: rec.n_claims,
+              nSupported: rec.n_supported,
+            })
+            try { ws.close(1000, 'verdict_received') } catch { /* noop */ }
+            return
+          }
+        } catch { /* transient; the schedule retries */ }
+        pollVerdict(requestId)
+      }, at - prev)
+    }
 
     ws.onopen = () => {
       // Send raw assistant text (WITH its FOLLOWUPS block) as history. The model
@@ -218,17 +256,39 @@ export function useChat() {
           // never run the verifier, and holding the socket open for them made the
           // per-IP limiter reject the user's own next turn as "Connection lost".
           if (data.verify === false) {
+            stampVerdict(data.request_id, { state: 'off' })
             try { ws.close(1000, 'no_verdict_expected') } catch { /* noop */ }
           } else {
             verdictTimer = setTimeout(() => { try { ws.close() } catch { /* noop */ } }, VERDICT_WINDOW_MS)
+            pollAttempts = 0
+            pollVerdict(data.request_id)
           }
         } else if (data.type === 'verdict') {
-          if (data.flagged && data.request_id) {
-            setMessages(prev => prev.map(m =>
-              m.requestId === data.request_id
-                ? { ...m, flagged: true, faithfulness: data.faithfulness }
-                : m
-            ))
+          stopPolling()
+          if (data.state) {
+            // Receipts-era frame: every verdict state reaches the client.
+            if (data.state === 'ok') {
+              stampVerdict(data.request_id, {
+                state: 'ok', faithfulness: data.faithfulness,
+                nContradicted: data.n_contradicted, nClaims: data.n_claims,
+                nSupported: data.n_supported,
+              })
+            } else if (data.state === 'flagged') {
+              stampVerdict(data.request_id, {
+                state: 'flagged', faithfulness: data.faithfulness,
+                nContradicted: data.n_contradicted, nClaims: data.n_claims,
+              })
+            } else {
+              // "unavailable": judge failed or timed out — distinguishable from
+              // "off" (never configured to run) in the receipt panel.
+              stampVerdict(data.request_id, { state: 'unavailable' })
+            }
+          } else if (data.flagged && data.request_id) {
+            // Legacy frame (pre-receipts): flagged-only push, no state field.
+            stampVerdict(data.request_id, {
+              state: 'flagged', faithfulness: data.faithfulness,
+              nContradicted: data.n_contradicted,
+            })
           }
           clearTimeout(verdictTimer)
           try { ws.close() } catch { /* noop */ }
@@ -249,6 +309,7 @@ export function useChat() {
 
     ws.onclose = (ev) => {
       if (verdictTimer) { clearTimeout(verdictTimer); verdictTimer = null }
+      stopPolling()
       if (!settled) {
         settle()
         if (ev.code === 1006) setError('connection_lost')

@@ -463,7 +463,7 @@ It is derived data and exactly reproducible, so dropping it costs nothing:
 #            half-populated older extraction from silently indexing as if it were 9b45867)
 rm -rf /tmp/kbpre && mkdir -p /tmp/kbpre
 git archive 9b45867 knowledge_base | tar -x -C /tmp/kbpre
-/home/user/miniforge3/bin/python3 scripts/index_with_embeddings.py \
+/home/chris/miniforge3/bin/python3 scripts/index_with_embeddings.py \
   --kb-path /tmp/kbpre/knowledge_base --collection documents_pre --wipe
 # verify it really is the OLD corpus before trusting any comparison against it
 grep -c 'Speculative decoding' /tmp/kbpre/knowledge_base/infrastructure/ai_portfolio_system.md  # expect 0

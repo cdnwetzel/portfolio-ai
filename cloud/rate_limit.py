@@ -66,3 +66,38 @@ class ConnectionRateLimiter:
 
     def active_count(self, ip: str) -> int:
         return self._active.get(ip, 0)
+
+
+class WindowRateLimiter:
+    """Sliding-window per-IP budget of N requests per window_seconds.
+
+    Companion to ConnectionRateLimiter for the plain-HTTP read endpoints added with
+    the receipts/status features (/api/verdicts/*, /api/status). The WS chat limiter
+    bounds concurrent connections; this bounds request rates on endpoints that are
+    cheap per call but must not become scrape/refresh floods.
+
+    In-memory dict of lists, same single-process rationale as ConnectionRateLimiter.
+    The localhost bypass applies for the same reason: local probes and the LAN agent
+    must never be throttled by the public-facing budget."""
+
+    def __init__(self, max_requests: int = 30, window_seconds: int = 60):
+        self.max_requests = max_requests
+        self.window_seconds = window_seconds
+        self._hits: "dict[str, list[float]]" = {}
+
+    def try_acquire(self, ip: str, now: "float | None" = None) -> bool:
+        """Record a hit for ip and report whether the budget allowed it.
+
+        `now` is injectable (seconds, time.time() scale) so tests don't sleep."""
+        if ip in LOCALHOST_IPS:
+            return True
+        import time as _time
+        now = _time.time() if now is None else now
+        cutoff = now - self.window_seconds
+        hits = [t for t in self._hits.get(ip, []) if t >= cutoff]
+        if len(hits) >= self.max_requests:
+            self._hits[ip] = hits
+            return False
+        hits.append(now)
+        self._hits[ip] = hits
+        return True

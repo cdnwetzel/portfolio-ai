@@ -18,7 +18,7 @@
 # Contenders: real visitors (the site is public), the VPS health aggregator's E2E smoke probe
 # (SMOKE_INTERVAL_SEC=1800), and whoever is clicking "test" -- which is exactly what happened.
 # Pause the smoke probe for a bench window with:
-#   ssh root@web.example.net 'systemctl stop portfolio-health.timer'   # ... and start it after
+#   ssh root@cwetzel.com 'systemctl stop portfolio-health.timer'   # ... and start it after
 # The Running:N check below catches everything else, including the ones you do not control.
 #
 # Usage: bench_quiet.sh [runs]   -> prints per-run tok/s and a VALID/INVALID verdict

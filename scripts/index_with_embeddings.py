@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/home/chris/miniforge3/bin/python3
 """
 Knowledge base indexer with semantic embeddings.
 Generates real 768-dim vectors for each chunk using BAAI/bge-base-en-v1.5.

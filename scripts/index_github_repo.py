@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/home/chris/miniforge3/bin/python3
 """
 GitHub repo indexer for Qdrant RAG.
 Fetches high-value files from a public GitHub repo, chunks them, embeds, and indexes.

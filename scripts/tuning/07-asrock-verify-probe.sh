@@ -11,14 +11,14 @@
 #   call 2 = WARM  -> should be dramatically faster
 #   call 3 = WARM  -> confirms it stayed resident (this is what keep_alive=30m buys)
 #
-# No sudo needed. Run ON asrock as the service user so logs land in ~/tuning-logs.
+# No sudo needed. Run ON asrock as chris so logs land in ~/tuning-logs.
 set -uo pipefail
 LOGDIR="$HOME/tuning-logs"; mkdir -p "$LOGDIR"
 LOG="$LOGDIR/07-verify-probe-$(date +%Y%m%d-%H%M%S).log"
 ln -sfn "$LOG" "$LOGDIR/07-latest.log"
 exec > >(tee -a "$LOG") 2>&1
 
-V=http://192.0.2.115:8007
+V=http://10.0.1.115:8007
 OLLAMA=http://127.0.0.1:11434
 JUDGE=$(curl -s -m 10 "$V/health" | python3 -c 'import json,sys;print(json.load(sys.stdin).get("model",""))' 2>/dev/null)
 

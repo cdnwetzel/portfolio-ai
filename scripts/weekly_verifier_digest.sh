@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Weekly continuous-improvement digest (convergence doc, Task 6 alerting).
-# Runs on the asrock as the service user (no root needed) — but asrock has no cron daemon,
+# Runs on the asrock as chris (no root needed) — but asrock has no cron daemon,
 # so schedule it from the T5810: 23 7 * * 1 ssh asrock /path/to/weekly_verifier_digest.sh
 #
 # Reads verdicts.db (metadata only — red-line #2 safe: scores, counts, never content)

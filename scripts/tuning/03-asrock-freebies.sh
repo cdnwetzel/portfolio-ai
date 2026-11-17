@@ -18,8 +18,7 @@
 # Rollback: sudo ./03-asrock-freebies.sh --rollback
 set -uo pipefail
 
-OPHOME="/home/${SUDO_USER:-${USER:-user}}"   # the operator's home, also under sudo
-LOGDIR=${OPHOME}/tuning-logs; mkdir -p "$LOGDIR"
+LOGDIR=/home/chris/tuning-logs; mkdir -p "$LOGDIR"
 LOG="$LOGDIR/03-asrock-$(date +%Y%m%d-%H%M%S).log"
 ln -sfn "$LOG" "$LOGDIR/03-latest.log"
 exec > >(tee -a "$LOG") 2>&1
@@ -31,7 +30,7 @@ BAK="${CONF}.pre-tuning"
 rerank_bench() {
   echo -n "  rerank :8006 x5 -> "
   for _ in 1 2 3 4 5; do
-    curl -s -o /dev/null -w "%{time_total}\n" --max-time 20 -X POST http://192.0.2.115:8006/rerank \
+    curl -s -o /dev/null -w "%{time_total}\n" --max-time 20 -X POST http://10.0.1.115:8006/rerank \
       -H 'Content-Type: application/json' \
       -d '{"query":"what gpus does the t5810 have","documents":["The T5810 has two RTX A4500 GPUs joined by NVLink.","Qdrant stores dense vectors for retrieval.","The asrock B550 runs the faithfulness verifier.","vLLM serves the model with tensor parallelism.","The embedding service runs bge-base on CPU."],"top_k":5}'
   done | awk '{s+=$1; if($1>mx)mx=$1; if(mn==0||$1<mn)mn=$1; n++}
@@ -73,7 +72,7 @@ rc-service ollama restart
 echo "  waiting 20s for ollama to come back..."; sleep 20
 
 echo; echo "--- AFTER (judge must reload on first verify; expect one slow call) ---"; state; rerank_bench
-echo -n "  verifier health: "; curl -s --max-time 10 http://192.0.2.115:8007/health | head -c 150; echo
+echo -n "  verifier health: "; curl -s --max-time 10 http://10.0.1.115:8007/health | head -c 150; echo
 
 echo
 echo "GO/NO-GO: keep if rerank mean improved and the verifier still answers."

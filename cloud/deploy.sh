@@ -10,12 +10,10 @@
 #   - T5810 svcs:    home/setup-t5810-services.sh    (embed + rerank services)
 #
 # Usage:  ./cloud/deploy.sh
-# Env:    CLOUD_HOST (default root@web.example.net)
+# Env:    CLOUD_HOST (default root@cwetzel.com)
 set -euo pipefail
-# Operator-local host names and the service user (.deploy.env, gitignored; see .deploy.env.example)
-ENVF="$(cd "$(dirname "$0")/.." && pwd)/.deploy.env"; [ -f "$ENVF" ] && . "$ENVF"
 
-CLOUD="${CLOUD_HOST:?set CLOUD_HOST (see .deploy.env.example)}"
+CLOUD="${CLOUD_HOST:-root@cwetzel.com}"
 WEBROOT="/var/www/dev.cwetzel.com"
 APIDIR="/opt/api-proxy"
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -26,6 +24,13 @@ echo "==> Building frontend"
 
 echo "==> Deploying frontend -> ${CLOUD}:${WEBROOT}"
 rsync -avz --delete "${REPO}/frontend/dist/" "${CLOUD}:${WEBROOT}/"
+
+echo "==> Deploying lab evidence -> ${CLOUD}:${WEBROOT}/lab/evidence"
+# mkdir first: the webroot is not root-owned, and the rsync receiver's own mkdir
+# has failed with ENOENT here (2026-11-17 deploy) even though an explicit ssh
+# mkdir succeeds — belt and braces, and the step becomes safely rerunnable.
+ssh "${CLOUD}" "mkdir -p ${WEBROOT}/lab/evidence"
+rsync -avz --delete "${REPO}/docs/lab/" "${CLOUD}:${WEBROOT}/lab/evidence/"
 
 echo "==> Deploying backend proxy -> ${CLOUD}:${APIDIR}"
 # cloud/api-proxy.py deploys as main.py (uvicorn main:app). main.py imports
@@ -39,13 +44,24 @@ scp -q "${HERE}/sparse_bm25.py"      "${CLOUD}:${APIDIR}/sparse_bm25.py"
 scp -q "${HERE}/guardrails.py"       "${CLOUD}:${APIDIR}/guardrails.py"
 scp -q "${HERE}/verify_gate.py"      "${CLOUD}:${APIDIR}/verify_gate.py"
 scp -q "${HERE}/rate_limit.py"       "${CLOUD}:${APIDIR}/rate_limit.py"
+scp -q "${HERE}/receipts.py"         "${CLOUD}:${APIDIR}/receipts.py"
+scp -q "${HERE}/status.py"           "${CLOUD}:${APIDIR}/status.py"
+# Receipts (demo surface M1, plans/demo-surface-plan-2026-11-16.md): verdict log dir,
+# logrotate drop-in, and the systemd drop-in that points the proxy at the log.
+echo "==> Receipts: verdict log + rotation + env drop-in"
+ssh "${CLOUD}" "mkdir -p /var/lib/api-proxy && chown apiproxy:apiproxy /var/lib/api-proxy"
+scp -q "${HERE}/systemd/api-proxy.service.d/receipts.conf" \
+  "${CLOUD}:/etc/systemd/system/api-proxy.service.d/receipts.conf"
+scp -q "${HERE}/logrotate/api-proxy-verdicts" \
+  "${CLOUD}:/etc/logrotate.d/api-proxy-verdicts"
+
 # Stamp the deployed git SHA so /api/system-info can answer "what exactly is running"
 # (Tier 7). Written as a drop-in so it survives unit-file edits.
 DEPLOY_SHA="$(git -C "${REPO}" rev-parse --short HEAD)"
 ssh "${CLOUD}" "mkdir -p /etc/systemd/system/api-proxy.service.d && \
   printf '[Service]\nEnvironment=DEPLOY_GIT_SHA=${DEPLOY_SHA}\n' > /etc/systemd/system/api-proxy.service.d/deploy-sha.conf && \
   systemctl daemon-reload"
-ssh "${CLOUD}" "chown apiproxy:apiproxy ${APIDIR}/main.py ${APIDIR}/context_manager.py ${APIDIR}/query_expansion.py ${APIDIR}/query_router.py ${APIDIR}/sparse_bm25.py ${APIDIR}/guardrails.py ${APIDIR}/rate_limit.py && \
+ssh "${CLOUD}" "chown apiproxy:apiproxy ${APIDIR}/main.py ${APIDIR}/context_manager.py ${APIDIR}/query_expansion.py ${APIDIR}/query_router.py ${APIDIR}/sparse_bm25.py ${APIDIR}/guardrails.py ${APIDIR}/verify_gate.py ${APIDIR}/rate_limit.py ${APIDIR}/receipts.py ${APIDIR}/status.py && \
   systemctl restart api-proxy.service && sleep 2 && systemctl is-active api-proxy.service"
 
 echo "==> Health check"

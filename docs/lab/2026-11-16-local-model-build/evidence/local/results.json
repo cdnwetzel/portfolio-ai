@@ -1,0 +1,35 @@
+{
+  "pageErrors": [],
+  "checks": [
+    {
+      "name": "canvas exists, 400x400 attribute size",
+      "ok": true,
+      "detail": "400x400"
+    },
+    {
+      "name": "initial top strip ~uniform background",
+      "ok": true,
+      "detail": "var=0.000"
+    },
+    {
+      "name": "left-button hold adds sand at cursor",
+      "ok": true,
+      "detail": "topVar 0.000 -> 146.288"
+    },
+    {
+      "name": "paint area drains after release (sand fell)",
+      "ok": true,
+      "detail": "topVar 146.288 -> 0.000"
+    },
+    {
+      "name": "sand piles at the bottom",
+      "ok": true,
+      "detail": "bottomVar=6780.010 topVar=0.000"
+    },
+    {
+      "name": "no page errors",
+      "ok": true,
+      "detail": "clean"
+    }
+  ]
+}

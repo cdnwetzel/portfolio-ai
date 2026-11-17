@@ -4,7 +4,7 @@
 **Headline (cwetzel.com):** IT Manager and veteran systems engineer with twenty-six years experience managing multi-server mixed environments including Windows Server and Ubuntu Server on premises, Azure, and AWS.  
 **Experience:** 26 years in IT (since June 1999), including **about 18 years at two managed service providers (MSPs)**: Pro Computer Service (Nov 2004 – Jan 2013) and RedEye, Inc. (Mar 2014 – Aug 2023)  
 **Location:** Trenton, New Jersey  
-**Contact:** chris@cwetzel.com  
+**Contact:** cwe@thepslawfirm.com | chris@cwetzel.com  
 **LinkedIn:** https://linkedin.com/in/chris-wetzel (1,948 followers)  
 **Website:** https://cwetzel.com  
 **GitHub:** https://github.com/cdnwetzel  
@@ -400,7 +400,7 @@ Infrastructure is boring because it should be. Security is only interesting when
 
 ## Contact
 
-- **Email:** chris@cwetzel.com
+- **Email:** chris@cwetzel.com (preferred) | cwe@thepslawfirm.com (work)
 - **LinkedIn:** https://linkedin.com/in/chris-wetzel
 - **Website:** https://cwetzel.com
 - **GitHub:** https://github.com/cdnwetzel

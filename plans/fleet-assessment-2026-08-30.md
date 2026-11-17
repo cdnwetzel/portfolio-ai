@@ -4,7 +4,7 @@ Every line below was verified by logging into the boxes today. Where this contra
 `CLAUDE.md`, **this document is right and CLAUDE.md is stale** — see §6.
 
 Authoritative upstream sources found during the audit (read-only, on the T5810):
-`/home/user/ai/inference/FLEET-ENDPOINTS.md`, `MODEL-LEDGER.md`, and the build/tuning
+`/home/chris/ai/inference/FLEET-ENDPOINTS.md`, `MODEL-LEDGER.md`, and the build/tuning
 scripts in `../psaios/tools/t5810-vllm/`. Those describe the *intended* lab design; this
 document records the *actual running state* and where the two diverge.
 
@@ -14,13 +14,13 @@ document records the *actual running state* and where the two diverge.
 
 | Node | Address | Hardware | Role | Access |
 |---|---|---|---|---|
-| **T5810** | `192.0.2.125` (also `192.0.2.51` on same NIC) | 2× RTX A4500, NVLink, 40 GB VRAM, 256 GB RAM | vLLM, labrouter, embedder, Qdrant, compress | `root@` OK |
-| **asrock-b550** | `192.0.2.115` | RTX 5060 Ti 16 GB, 64 GB RAM | reranker, verifier, Ollama | `root@`/`chris@` OK |
-| **mac-mini-3** | `192.0.2.20` | Apple M4, 16 GB | Ollama + MLX (measurement rig) | **this machine** |
-| **orin1** | `192.0.2.67` | Jetson Orin Nano, 8 GB | vision (`qwen2.5vl:3b`) | admin account only |
+| **T5810** | `10.0.1.125` (also `10.0.1.51` on same NIC) | 2× RTX A4500, NVLink, 40 GB VRAM, 256 GB RAM | vLLM, labrouter, embedder, Qdrant, compress | `root@` OK |
+| **asrock-b550** | `10.0.1.115` | RTX 5060 Ti 16 GB, 64 GB RAM | reranker, verifier, Ollama | `root@`/`chris@` OK |
+| **mac-mini-3** | `10.0.1.20` | Apple M4, 16 GB | Ollama + MLX (measurement rig) | **this machine** |
+| **orin1** | `10.0.1.67` | Jetson Orin Nano, 8 GB | vision (`qwen2.5vl:3b`) | `psadmin@` only |
 | **VPS** | `cwetzel.com` | Ubuntu | Apache, api-proxy, tunnel origin | `root@` OK |
 
-The T5810 carries **two IPs on one interface** (`enp0s25`): `192.0.2.125` and `192.0.2.51`.
+The T5810 carries **two IPs on one interface** (`enp0s25`): `10.0.1.125` and `10.0.1.51`.
 vLLM's TP workers bind the `.51` address. Worth knowing before anyone "cleans up" an
 address that looks stray.
 
@@ -313,7 +313,7 @@ the 35B-A3B, the Coder-14B, and the embedding/reranker models.
 
 `/etc/init.d/vllm` (dated Jun 7) would, if anyone ran it:
 - launch from `/opt/pscode/vllm-serve-env/` — **a path that no longer exists**;
-- serve `qwen2.5-coder-32b-instruct-awq` from `/home/user/models/` — **the wrong model**;
+- serve `qwen2.5-coder-32b-instruct-awq` from `/home/chris/models/` — **the wrong model**;
 - bind **`--port 8004`** — **colliding with labrouter, the stable contract port.**
 
 So the one unit named `vllm` cannot work and would break the contract port if it did.

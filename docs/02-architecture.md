@@ -41,11 +41,11 @@
      │               │                          │
      └───────────────┼──────────────────────────┘
                      │ WireGuard Tunnel
-                     │ 203.0.113.2 → 203.0.113.1
+                     │ 10.0.0.2 → 10.0.0.1
                      │ Encrypted, <50ms latency
                      ↓
      ┌──────────────────────────────────────────┐
-     │  COMPUTE CORE: T5810 / 203.0.113.95      │
+     │  COMPUTE CORE: T5810 / 98.110.86.95      │
      │  (2x Xeon, 2x A4500, 64GB+ RAM)          │
      │  ← WHERE ALL THE POWER IS ←              │
      │                                           │
@@ -387,8 +387,8 @@ Latency feels fast even if total time is 5 seconds.
 ### WireGuard Tunnel
 
 ```
-Cloud IP:           203.0.113.2/24
-Home IP:            203.0.113.1/24
+Cloud IP:           10.0.0.2/24
+Home IP:            10.0.0.1/24
 UDP Port:           51820
 Key exchange:       Pre-shared keys (generated)
 Throughput:         300 Mbps available
@@ -526,9 +526,9 @@ services:
   api:
     build: .
     environment:
-      - VLLM_HOST=203.0.113.1  # WireGuard IP of home server
+      - VLLM_HOST=10.0.0.1  # WireGuard IP of home server
       - VLLM_PORT=8001
-      - QDRANT_HOST=203.0.113.1
+      - QDRANT_HOST=10.0.0.1
       - QDRANT_PORT=6333
       - REDIS_URL=redis://redis:6379
       - LOG_LEVEL=INFO
@@ -593,8 +593,8 @@ Check every 5 minutes. Alert if:
 - Verify embeddings generated correctly
 
 **High latency from cloud?**
-- Check WireGuard latency: `ping 203.0.113.1`
-- Check cloud VPS network: `mtr 203.0.113.1`
+- Check WireGuard latency: `ping 10.0.0.1`
+- Check cloud VPS network: `mtr 10.0.0.1`
 - Check home internet (300 Mbps available?)
 
 ---

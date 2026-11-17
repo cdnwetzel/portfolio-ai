@@ -7,8 +7,7 @@
 # Read-only w.r.t. config: sets only the power limit, clocks stay unlocked.
 # Rollback: sudo ./02-t5810-power-stepup.sh --rollback   (restores 130W/1200MHz)
 set -uo pipefail
-OPHOME="/home/${SUDO_USER:-${USER:-user}}"   # the operator's home, also under sudo
-LOGDIR=${OPHOME}/tuning-logs; mkdir -p "$LOGDIR"
+LOGDIR=/home/chris/tuning-logs; mkdir -p "$LOGDIR"
 LOG="$LOGDIR/02b-knee-$(date +%Y%m%d-%H%M%S).log"
 ln -sfn "$LOG" "$LOGDIR/02b-latest.log"
 exec > >(tee -a "$LOG") 2>&1
@@ -46,5 +45,5 @@ echo
 echo "=================================================================="
 echo "Pick the lowest wattage within ~1 tok/s of the 200W number."
 echo "Still NOT persistent — reboot restores 130W/1200MHz via mine-tune.sh."
-echo "Revert now: sudo ${OPHOME}/tuning/02-t5810-power-stepup.sh --rollback"
+echo "Revert now: sudo /home/chris/tuning/02-t5810-power-stepup.sh --rollback"
 echo "=================================================================="

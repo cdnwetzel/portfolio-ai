@@ -12,9 +12,9 @@ mkdir -p /var/www/dev.cwetzel.com
 mkdir -p /opt/api-proxy
 mkdir -p /var/log/api-proxy
 
-# Setup DNS for jump.example.net (resolve to SSH tunnel endpoint)
-if ! grep -q "jump.example.net" /etc/hosts; then
-    echo "127.0.0.1 jump.example.net" >> /etc/hosts
+# Setup DNS for ai.cwetzel.com (resolve to SSH tunnel endpoint)
+if ! grep -q "ai.cwetzel.com" /etc/hosts; then
+    echo "127.0.0.1 ai.cwetzel.com" >> /etc/hosts
 fi
 
 # Create service user
@@ -69,7 +69,7 @@ systemctl restart api-proxy.service
 echo "=== SSL Setup ==="
 if [ ! -f /etc/letsencrypt/live/dev.cwetzel.com/fullchain.pem ]; then
     echo "Setting up SSL for dev.cwetzel.com..."
-    certbot certonly --nginx -d dev.cwetzel.com --non-interactive --agree-tos -m chris@cwetzel.com --no-eff-email
+    certbot certonly --nginx -d dev.cwetzel.com --non-interactive --agree-tos -m cwe@thepslawfirm.com --no-eff-email
 else
     echo "SSL cert already exists"
 fi

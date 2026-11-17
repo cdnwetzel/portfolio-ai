@@ -12,7 +12,7 @@
 # it would have taken 8004 from labrouter and broken every chat request while
 # appearing to be a networking problem.
 #
-# Architecture (see /home/user/ai/inference/FLEET-ENDPOINTS.md on the T5810):
+# Architecture (see /home/chris/ai/inference/FLEET-ENDPOINTS.md on the T5810):
 #   :8004  labrouter        <- STABLE CONTRACT PORT, the VPS tunnel forwards this
 #   :8007  vLLM backend     <- this unit (qwen3.8-27b)
 #   :8008  vLLM backend     <- Qwen3.6-35B-A3B-FP8 (not running)
@@ -54,7 +54,7 @@ name="vLLM qwen3.8-27b"
 description="vLLM backend slot serving Qwen3.8-27B-FP8 on :8007 (behind labrouter)"
 
 : "${VLLM_HOME:=/opt/vllm-service}"
-: "${VLLM_USER:=user}"
+: "${VLLM_USER:=chris}"
 : "${VLLM_PORT:=8007}"
 : "${VLLM_LOG:=/var/log/qwen38/writer.log}"
 : "${VLLM_MIN_FREE_MIB:=19000}"   # ~full card; a 27B FP8 at TP=2 needs both A4500s

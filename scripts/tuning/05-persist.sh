@@ -17,8 +17,7 @@
 #         sudo ./05-persist.sh --verify    # assert LIVE state matches intent
 #         sudo ./05-persist.sh --rollback  # restore the mining profile + KSM
 set -uo pipefail
-OPHOME="/home/${SUDO_USER:-${USER:-user}}"   # the operator's home, also under sudo
-LOGDIR=${OPHOME}/tuning-logs; mkdir -p "$LOGDIR"
+LOGDIR=/home/chris/tuning-logs; mkdir -p "$LOGDIR"
 LOG="$LOGDIR/05-persist-$(date +%Y%m%d-%H%M%S).log"
 ln -sfn "$LOG" "$LOGDIR/05-latest.log"
 exec > >(tee -a "$LOG") 2>&1

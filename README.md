@@ -36,7 +36,7 @@ asrock B550 (Gentoo Linux) — RTX 5060 Ti 16 GB
 - Context management — 4K char per-prompt cap, 24K char sliding window history
 - Out-of-band faithfulness check — a separate 14B-Instruct judge on a second machine grades whether each answer's claims are grounded in the retrieved context; fails open, so chat is unaffected if it's down
 - Regression-gated — a graded eval over a golden question set (`scripts/eval_graded.py`) runs before deploy, and a deterministic guardrail refuses prompt-extraction attempts before they reach the LLM
-- Zero cloud GPU cost — owned A4500 NVLink pair handles inference
+- Zero cloud GPU cost — owned dual-A4500 T5810 handles inference
 
 ---
 
@@ -52,7 +52,7 @@ asrock B550 (Gentoo Linux) — RTX 5060 Ti 16 GB
 | Embeddings | BAAI/bge-base-en-v1.5 (768-d, CPU) |
 | Reranker | BAAI/bge-reranker-base (cross-encoder, GPU on the asrock's RTX 5060 Ti) |
 | Faithfulness verifier | Qwen2.5-14B-Instruct via Ollama (RTX 5060 Ti, separate host) |
-| Inference hardware | Dell Precision T5810, 2× NVIDIA RTX A4500 (NVLink) |
+| Inference hardware | Dell Precision T5810, 2× NVIDIA RTX A4500 (PCIe) |
 | OS | Gentoo Linux (custom kernel, OpenRC) |
 | Networking | SSH tunnel (VPS → home) |
 
